@@ -19,30 +19,43 @@ import SettingsModal, { ApiSettings, HolidayRange } from './components/SettingsM
 import IntegrationGuide from './components/IntegrationGuide';
 import StatsCard from './components/StatsCard';
 import SavedFilters from './components/SavedFilters';
-const ProcessAnalyst = lazy(() => import('./components/ProcessAnalyst'));
-const EfficiencyDashboard = lazy(() => import('./components/EfficiencyDashboard'));
-const MtoDashboard = lazy(() => import('./components/MtoDashboard'));
+
+// Retry wrapper for lazy imports — auto-reloads on stale chunk failures after deploy
+function lazyRetry<T extends React.ComponentType<any>>(importFn: () => Promise<{ default: T }>) {
+  return lazy(() => importFn().catch((err) => {
+    const lastReload = sessionStorage.getItem('chunk_reload');
+    if (!lastReload || Date.now() - Number(lastReload) > 10000) {
+      sessionStorage.setItem('chunk_reload', String(Date.now()));
+      window.location.reload();
+    }
+    throw err;
+  }));
+}
+
+const ProcessAnalyst = lazyRetry(() => import('./components/ProcessAnalyst'));
+const EfficiencyDashboard = lazyRetry(() => import('./components/EfficiencyDashboard'));
+const MtoDashboard = lazyRetry(() => import('./components/MtoDashboard'));
 import ScanConsoleModal, { ScanLog } from './components/ScanConsoleModal';
-const DecoDashboard = lazy(() => import('./components/DecoDashboard'));
+const DecoDashboard = lazyRetry(() => import('./components/DecoDashboard'));
 import MultiSelectFilter from './components/MultiSelectFilter';
-const StockManager = lazy(() => import('./components/StockManager'));
-const KanbanBoard = lazy(() => import('./components/KanbanBoard'));
-const AutoMatchPanel = lazy(() => import('./components/AutoMatchPanel'));
-const DuplicateDetector = lazy(() => import('./components/DuplicateDetector'));
-const ForecastPanel = lazy(() => import('./components/ForecastPanel'));
-const StockAlerts = lazy(() => import('./components/StockAlerts'));
-const SupplierReorder = lazy(() => import('./components/SupplierReorder'));
-const AlertManager = lazy(() => import('./components/AlertManager'));
-const OrderNotes = lazy(() => import('./components/OrderNotes'));
-const BatchPrintSheets = lazy(() => import('./components/BatchPrintSheets'));
-const PriorityQueue = lazy(() => import('./components/PriorityQueue'));
-const ProductionCalendar = lazy(() => import('./components/ProductionCalendar'));
-const ReturnsTracker = lazy(() => import('./components/ReturnsTracker'));
-const ProfitabilityReport = lazy(() => import('./components/ProfitabilityReport'));
-const ClubLeaderboard = lazy(() => import('./components/ClubLeaderboard'));
-const LateOrderReport = lazy(() => import('./components/LateOrderReport'));
-const ArtworkApprovalTracker = lazy(() => import('./components/ArtworkApprovalTracker'));
-const ShippingManager = lazy(() => import('./components/ShippingManager'));
+const StockManager = lazyRetry(() => import('./components/StockManager'));
+const KanbanBoard = lazyRetry(() => import('./components/KanbanBoard'));
+const AutoMatchPanel = lazyRetry(() => import('./components/AutoMatchPanel'));
+const DuplicateDetector = lazyRetry(() => import('./components/DuplicateDetector'));
+const ForecastPanel = lazyRetry(() => import('./components/ForecastPanel'));
+const StockAlerts = lazyRetry(() => import('./components/StockAlerts'));
+const SupplierReorder = lazyRetry(() => import('./components/SupplierReorder'));
+const AlertManager = lazyRetry(() => import('./components/AlertManager'));
+const OrderNotes = lazyRetry(() => import('./components/OrderNotes'));
+const BatchPrintSheets = lazyRetry(() => import('./components/BatchPrintSheets'));
+const PriorityQueue = lazyRetry(() => import('./components/PriorityQueue'));
+const ProductionCalendar = lazyRetry(() => import('./components/ProductionCalendar'));
+const ReturnsTracker = lazyRetry(() => import('./components/ReturnsTracker'));
+const ProfitabilityReport = lazyRetry(() => import('./components/ProfitabilityReport'));
+const ClubLeaderboard = lazyRetry(() => import('./components/ClubLeaderboard'));
+const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
+const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
+const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import OrderWidget from './components/OrderWidget';

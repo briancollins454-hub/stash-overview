@@ -20,9 +20,22 @@ class ErrorBoundary extends Component<Props, State> {
 
     componentDidCatch(error: Error, info: ErrorInfo) {
         console.error('[ErrorBoundary]', error, info.componentStack);
+        // Auto-reload on chunk load failures (stale deploy)
+        if (error.message?.includes('dynamically imported module') || error.message?.includes('Failed to fetch')) {
+            const lastReload = sessionStorage.getItem('chunk_reload');
+            if (!lastReload || Date.now() - Number(lastReload) > 10000) {
+                sessionStorage.setItem('chunk_reload', String(Date.now()));
+                window.location.reload();
+            }
+        }
     }
 
     handleReset = () => {
+        // If chunk error, force full reload instead of just re-rendering
+        if (this.state.error?.message?.includes('dynamically imported module')) {
+            window.location.reload();
+            return;
+        }
         this.setState({ hasError: false, error: null });
     };
 
