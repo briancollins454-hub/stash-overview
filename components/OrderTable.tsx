@@ -191,8 +191,8 @@ function printOrderSheet(order: UnifiedOrder): void {
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 10px 10px 6px 10px; overflow: hidden; font-size: 11px; line-height: 1.35; box-sizing: border-box; display: inline-block; }',
-    '.sticker p { margin: 0; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 10px 10px 6px 10px; overflow: hidden; font-size: 11px; line-height: 1.35; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; }',
+    '.sticker p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
