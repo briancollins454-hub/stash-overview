@@ -171,7 +171,8 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
-        if (onProgress) onProgress(`Shopify: Page ${pageCount + 1}...`);
+        const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
+        if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (${pct}%) — Page ${pageCount + 1}...`);
         const variables = { cursor: endCursor, query: `${filterField}:>=${dateFilter} status:any` };
         const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
         if (res.status === 401) throw new Error("Shopify Token Invalid.");
@@ -185,6 +186,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
         endCursor = data.pageInfo?.endCursor || null;
         pageCount++;
     }
+    if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (100%) — Complete`);
 
     return allRawOrders.map((o: any) => {
         const edges = o.lineItems?.edges || [];

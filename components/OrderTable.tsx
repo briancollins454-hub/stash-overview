@@ -197,6 +197,9 @@ function printOrderSheet(order: UnifiedOrder): void {
   const shippingMethod = order.shopify.shippingMethod || '-';
   const shippingCost = order.shopify.shippingCost ? '\u00A3' + parseFloat(order.shopify.shippingCost).toFixed(2) : '\u00A30.00';
 
+  // Order note
+  const orderNote = order.shopify.timelineComments && order.shopify.timelineComments[0] ? order.shopify.timelineComments[0] : '';
+
   // Two-column header: logo+barcode+details LEFT, shipping address RIGHT
   const addr = order.shopify.shippingAddress;
   const addrLines = addr
@@ -217,9 +220,12 @@ function printOrderSheet(order: UnifiedOrder): void {
       '</table>' +
     '</td>' +
     '<td style="width:40%;vertical-align:top;">' +
-      '<p style="font-weight:bold;margin-bottom:6px;">Invoice for</p>' +
+      '<p style="font-weight:bold;font-size:14px;margin-bottom:4px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
       addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
       phoneLine +
+      (orderNote ? '<p style="margin-top:8px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:11px;">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:4px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      (order.decoJobId ? '<p style="margin-top:4px;">Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
     '</td>' +
     '</tr></table>';
 
@@ -276,9 +282,7 @@ function printOrderSheet(order: UnifiedOrder): void {
       '<tr class="total"><td>Total</td><td style="text-align:right">\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
     '</table>';
 
-  // Order note
-  const orderNote = order.shopify.timelineComments && order.shopify.timelineComments[0];
-  const noteHtml = orderNote ? '<div style="margin-top:12px;"><strong>Note:</strong> ' + orderNote + '</div>' : '';
+  const noteHtml = orderNote ? '<div class="section-title">Order Note</div><p>' + orderNote + '</p>' : '';
 
   // Deco production detail
   let decoHtml = '';
