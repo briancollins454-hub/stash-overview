@@ -142,21 +142,21 @@ function guessProductionMethod(name: string, sku: string): string {
 function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const props = (i.properties || []).filter(p => p.value);
   const propsHtml = props.length > 0
-    ? props.map(p => '<br><small style="color:#555">' + p.name + ': ' + p.value + '</small>').join('')
+    ? props.map(p => '<br><small style="color:#555;font-size:8px;">' + p.name + ': ' + p.value + '</small>').join('')
     : '';
-  const skuHtml = i.sku ? '<br><small style="color:#888">SKU: ' + i.sku + '</small>' : '';
+  const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + i.sku + '</small>' : '';
   const imgHtml = i.imageUrl
-    ? '<img src="' + i.imageUrl + '" style="width:40px;height:40px;object-fit:cover;" />'
+    ? '<img src="' + i.imageUrl + '" style="width:32px;height:32px;object-fit:cover;" />'
     : '';
   const unitPrice = i.price ? parseFloat(i.price) : 0;
   const lineTotal = unitPrice * (i.quantity || 0);
   return '<tr>' +
-    '<td style="width:45px;text-align:center;">' + imgHtml + '</td>' +
+    '<td style="width:36px;text-align:center;">' + imgHtml + '</td>' +
     '<td>' + i.name + propsHtml + skuHtml + '</td>' +
     '<td style="text-align:center;">' + i.quantity + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
-    '<td style="width:70px;"></td>' +
+    '<td style="width:60px;"></td>' +
     '</tr>';
 }
 
@@ -171,27 +171,27 @@ function printOrderSheet(order: UnifiedOrder): void {
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
-    '@page { margin: 2cm 2cm 10mm 10mm; size: A4; }',
-    'body { font-family: Arial, sans-serif; padding: 0; color: #111; font-size: 11px; }',
-    '.rush { background: #dc2626; color: white; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 4px 12px; margin-bottom: 6px; }',
-    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }',
-    '.items-table th, .items-table td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }',
-    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; font-weight: bold; }',
-    '.section-title { font-size: 11px; font-weight: bold; margin: 8px 0 3px 0; padding-bottom: 2px; border-bottom: 2px solid #111; text-transform: uppercase; }',
-    '.payment-table { margin-left: auto; width: 50%; margin-top: 6px; border-collapse: collapse; }',
-    '.payment-table td { padding: 2px 6px; font-size: 11px; }',
-    '.payment-table .total td { font-weight: bold; font-size: 12px; border-top: 2px solid #111; }',
-    '.countdown { font-size: 13px; font-weight: 900; text-align: center; padding: 4px; border: 2px solid; margin: 6px 0; }',
+    '@page { margin: 10mm; size: A4; }',
+    'body { font-family: Arial, sans-serif; padding: 0; color: #111; font-size: 10px; }',
+    '.rush { background: #dc2626; color: white; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 3px 10px; margin-bottom: 4px; }',
+    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; font-size: 9px; }',
+    '.items-table th, .items-table td { border: 1px solid #999; padding: 2px 4px; text-align: left; vertical-align: top; }',
+    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 8px; letter-spacing: 0.5px; font-weight: bold; }',
+    '.section-title { font-size: 10px; font-weight: bold; margin: 6px 0 2px 0; padding-bottom: 2px; border-bottom: 1.5px solid #111; text-transform: uppercase; }',
+    '.payment-table { margin-left: auto; width: 50%; margin-top: 4px; border-collapse: collapse; }',
+    '.payment-table td { padding: 1px 6px; font-size: 10px; }',
+    '.payment-table .total td { font-weight: bold; font-size: 11px; border-top: 2px solid #111; }',
+    '.countdown { font-size: 11px; font-weight: 900; text-align: center; padding: 3px; border: 2px solid; margin: 4px 0; }',
     '.overdue { color: #dc2626; font-weight: 900; }',
     '.ok { color: #16a34a; font-weight: bold; }',
-    '.check { width: 12px; height: 12px; border: 2px solid #999; display: inline-block; border-radius: 2px; vertical-align: middle; }',
-    '.qc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 4px; }',
-    '.qc-item { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }',
-    '.notes-section { border: 1px dashed #999; padding: 6px; min-height: 30px; font-size: 9px; color: #666; margin-top: 6px; }',
-    '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
-    '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
+    '.check { width: 11px; height: 11px; border: 2px solid #999; display: inline-block; border-radius: 2px; vertical-align: middle; }',
+    '.qc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 3px; }',
+    '.qc-item { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: bold; text-transform: uppercase; }',
+    '.notes-section { border: 1px dashed #999; padding: 4px; min-height: 20px; font-size: 8px; color: #666; margin-top: 4px; }',
+    '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
+    '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; display: inline-block; }',
     '.sticker p { margin: 0; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
@@ -221,7 +221,7 @@ function printOrderSheet(order: UnifiedOrder): void {
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
     '</td>' +
-    '<td style="vertical-align:top;text-align:right;">' +
+    '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
       '<div class="sticker">' +
       '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
       addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
@@ -252,7 +252,7 @@ function printOrderSheet(order: UnifiedOrder): void {
   }
 
   // Items table header
-  const itemTableHead = '<thead><tr><th style="width:45px">Image</th><th>Item</th><th style="width:50px;text-align:center">Qty</th><th style="width:55px;text-align:right">Price</th><th style="width:55px;text-align:right">Total</th><th style="width:70px;text-align:center">Packed By</th></tr></thead>';
+  const itemTableHead = '<thead><tr><th style="width:36px">Image</th><th>Item</th><th style="width:50px;text-align:center">Qty</th><th style="width:55px;text-align:right">Price</th><th style="width:55px;text-align:right">Total</th><th style="width:60px;text-align:center">Packed By</th></tr></thead>';
 
   // Unfulfilled items section
   let unfulfilledSection = '';
