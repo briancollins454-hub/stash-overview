@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stash Shop Sync — Feature Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+  
+  :root {
+    --brand: #3e3e7a;
+    --brand-light: #5c5ca0;
+    --accent: #6366f1;
+    --accent-light: #e0e7ff;
+    --emerald: #059669;
+    --amber: #d97706;
+    --rose: #e11d48;
+    --slate: #475569;
+    --bg: #ffffff;
+    --bg-alt: #f8fafc;
+    --border: #e2e8f0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1e293b;
+    line-height: 1.6;
+    background: var(--bg);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    margin: 0.6in 0.7in;
+    size: A4;
+  }
+
+  /* Cover Page */
+  .cover {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #1e1e4a 0%, #3e3e7a 40%, #5c5ca0 100%);
+    color: white;
+    text-align: center;
+    padding: 60px 40px;
+    page-break-after: always;
+  }
+  .cover .logo-mark {
+    width: 80px; height: 80px;
+    border: 4px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px; font-weight: 900;
+    margin-bottom: 32px;
+    background: rgba(255,255,255,0.1);
+    backdrop-filter: blur(10px);
+  }
+  .cover h1 {
+    font-size: 48px;
+    font-weight: 900;
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+  }
+  .cover .subtitle {
+    font-size: 20px;
+    font-weight: 300;
+    opacity: 0.8;
+    margin-bottom: 40px;
+  }
+  .cover .version-badge {
+    display: inline-block;
+    padding: 8px 24px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 60px;
+  }
+  .cover .meta {
+    font-size: 12px;
+    opacity: 0.5;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Table of Contents */
+  .toc {
+    padding: 60px 50px;
+    page-break-after: always;
+  }
+  .toc h2 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--brand);
+    margin-bottom: 8px;
+  }
+  .toc .toc-line {
+    width: 60px; height: 4px;
+    background: var(--accent);
+    border-radius: 2px;
+    margin-bottom: 32px;
+  }
+  .toc-section {
+    margin-bottom: 24px;
+  }
+  .toc-section h3 {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+  .toc-item .title { font-weight: 500; }
+  .toc-item .dots {
+    flex: 1;
+    border-bottom: 1px dotted #cbd5e1;
+    margin: 0 8px;
+    min-width: 20px;
+  }
+
+  /* Content Pages */
+  .content {
+    padding: 40px 50px;
+  }
+
+  .section-header {
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-light) 100%);
+    color: white;
+    padding: 32px 50px;
+    margin: 0 -50px 40px -50px;
+    page-break-before: always;
+  }
+  .section-header:first-child { page-break-before: auto; }
+  .section-header .section-number {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    opacity: 0.6;
+    margin-bottom: 4px;
+  }
+  .section-header h2 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+  .section-header p {
+    font-size: 14px;
+    font-weight: 300;
+    opacity: 0.8;
+    margin-top: 6px;
+  }
+
+  /* Feature Card */
+  .feature {
+    margin-bottom: 36px;
+    page-break-inside: avoid;
+  }
+  .feature-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .feature-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .feature-icon.purple { background: #ede9fe; }
+  .feature-icon.blue { background: #dbeafe; }
+  .feature-icon.green { background: #d1fae5; }
+  .feature-icon.amber { background: #fef3c7; }
+  .feature-icon.rose { background: #ffe4e6; }
+  .feature-icon.teal { background: #ccfbf1; }
+  .feature-icon.indigo { background: #e0e7ff; }
+  .feature-icon.slate { background: #e2e8f0; }
+  .feature-icon.pink { background: #fce7f3; }
+  .feature-icon.orange { background: #ffedd5; }
+  
+  .feature h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .feature-tab {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--accent-light);
+    color: var(--accent);
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .feature p, .feature .desc {
+    font-size: 13px;
+    color: var(--slate);
+    margin-bottom: 12px;
+    line-height: 1.7;
+  }
+
+  .steps {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+  .steps-title {
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .step {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  .step:last-child { margin-bottom: 0; }
+  .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-size: 10px;
+    font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-num.bullet {
+    background: #94a3b8;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .step-text { flex: 1; }
+  .step-text code {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    background: #e2e8f0;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #334155;
+  }
+
+  .tip {
+    display: flex;
+    gap: 8px;
+    background: #fefce8;
+    border: 1px solid #fde047;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #92400e;
+    margin-top: 8px;
+  }
+  .tip-icon { font-size: 14px; flex-shrink: 0; }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 32px 0;
+  }
+
+  /* Reference table */
+  .ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .ref-table th {
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    background: #f1f5f9;
+    border-bottom: 2px solid #cbd5e1;
+    font-weight: 800;
+    color: #475569;
+  }
+  .ref-table td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    vertical-align: top;
+  }
+
+  /* Footer */
+  .page-footer {
+    text-align: center;
+    font-size: 10px;
+    color: #94a3b8;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding-top: 40px;
+    margin-top: 60px;
+    border-top: 1px solid var(--border);
+  }
+
+  kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    box-shadow: 0 1px 0 #cbd5e1;
+    color: #334155;
+  }
+
+  @media print {
+    .cover { min-height: 100vh; }
+    .no-break { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== COVER PAGE ==================== -->
+<div class="cover">
+  <div class="logo-mark">S</div>
+  <h1>Stash Shop Sync</h1>
+  <div class="subtitle">Shopify × DecoNetwork Production Bridge</div>
+  <div class="version-badge">Complete Feature Guide</div>
+  <div style="max-width:500px; font-size:14px; opacity:0.7; line-height:1.8; margin-bottom:60px;">
+    A detailed walkthrough of every feature in your production management dashboard — with exact button names, field labels, and step-by-step workflows taken directly from the codebase.
+  </div>
+  <div class="meta">March 2026 &bull; Version 3.0</div>
+</div>
+
+<!-- ==================== TABLE OF CONTENTS ==================== -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <div class="toc-line"></div>
+
+  <div class="toc-section">
+    <h3>Section 1 — Dashboard &amp; Core Navigation</h3>
+    <div class="toc-item"><span class="title">Dashboard — Order Table &amp; Filtering</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Kanban Board</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Dark Mode</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Saved Filters &amp; Views</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Print Order Sheet</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Internal Order Notes</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">CSV Export</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <h3>Section 2 — Intelligence</h3>
+    <div class="toc-item"><span class="title">Auto-Match Engine</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Duplicate Detection</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Production Forecasting</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <h3>Section 3 — Production Tab</h3>
+    <div class="toc-item"><span class="title">Priority Queue</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Production Calendar</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Batch Print Sheets</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <h3>Section 4 — Reports Tab</h3>
+    <div class="toc-item"><span class="title">Profitability Report</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Club / Team Leaderboard</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Late Order Report</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <h3>Section 5 — Operations Tab</h3>
+    <div class="toc-item"><span class="title">Returns &amp; Remake Tracker</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Artwork Approval Tracking</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">Shipping Label Management</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <h3>Section 6 — Settings &amp; Configuration</h3>
+    <div class="toc-item"><span class="title">API Settings, Auto-Refresh, and Holidays</span><span class="dots"></span></div>
+  </div>
+</div>
+
+
+<!-- ==================== SECTION 1: DASHBOARD ==================== -->
+<div class="content">
+
+  <div class="section-header">
+    <div class="section-number">Section 01</div>
+    <h2>Dashboard &amp; Core Navigation</h2>
+    <p>The unified order table, filters, print sheets, notes, and exports</p>
+  </div>
+
+  <!-- Dashboard Overview -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon purple">📊</div>
+      <div>
+        <h3>Dashboard — Order Table &amp; Filtering <span class="feature-tab">Dashboard</span></h3>
+      </div>
+    </div>
+    <p class="desc">The Dashboard shows a unified table of every Shopify order merged with its matched DecoNetwork job. Each row shows order number, customer name, club/team tag, Shopify fulfillment status, DecoNetwork job ID, production workflow ticks (Ordered → Received → Produced → Shipped), item count, and total in £. Click any row to expand it and see full line-item detail with the sidebar.</p>
+    <div class="steps">
+      <div class="steps-title">Filtering &amp; Searching</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Type in the <strong>Search</strong> bar at the top — it searches by order number, customer name, SKU, and email. Input is debounced (300ms delay) so just type naturally.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>Filter Tags</strong> dropdown to only show orders tagged with specific clubs/teams (e.g. "AFC Southgate", "Barnet FC"). Tags come from Shopify order tags.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click the coloured <strong>stat badges</strong> in the summary bar — these are quick filters: <em>NOT ON DECO</em> (unlinked), <em>IN PRODUCTION</em>, <em>READY TO SHIP</em> (100% complete), etc. Click the active badge again to clear the filter.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Use the <strong>Date Range</strong> picker to narrow by order creation date.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Click any <strong>column header</strong> (e.g. Date, Order #, Dispatch, Items Ready) to sort. A small arrow icon shows current sort direction. Click again to toggle asc/desc.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Expanding an Order Row</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click any order row — it expands to show all line items in a detail table: product name, SKU, size, quantity, unit price, personalisation properties, and per-item production status.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">The <strong>right sidebar</strong> shows: customer email, Shopify order link (opens in new tab), DecoNetwork job ID with link, completion %, SLA target date, days remaining, and action buttons.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">The <strong>workflow ticks</strong> in each row show 4 stages (Ordered ✓, Received ✓, Produced ✓, Shipped ✓). Green tick = done, orange = in progress, grey = not started.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> URL routing is built in — every tab updates the URL (e.g. <code>?tab=dashboard</code>). Bookmark any tab or use browser back/forward to navigate.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Kanban Board -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon blue">📋</div>
+      <div>
+        <h3>Kanban Board <span class="feature-tab">Kanban</span></h3>
+      </div>
+    </div>
+    <p class="desc">Visual board showing all <strong>unfulfilled</strong> orders in status columns. Only orders where fulfillment status is not "fulfilled" appear. Each card shows order number, customer name, club tag, total items, and a completion percentage bar.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click <strong>KANBAN</strong> in the top navigation bar.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Orders are automatically sorted into columns: <strong>Not Started</strong> (0% complete), <strong>In Production</strong> (1–99%), <strong>Ready to Ship</strong> (100%). Columns update in real-time as production progresses.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Each card is colour-coded: red border = rush/urgent tag, standard = normal priority.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click any card to jump to that order on the Dashboard (it auto-switches tab and expands the row).</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Dark Mode -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon slate">🌙</div>
+      <div>
+        <h3>Dark Mode</h3>
+      </div>
+    </div>
+    <p class="desc">Toggles between light and dark themes. Preference persists in localStorage across sessions. Uses Tailwind v4 dark variant applied via the <code>.dark</code> class on the root element.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click the <strong>Moon icon (☾)</strong> in the top-right area of the nav bar (next to the gear icon).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">The entire UI switches to dark mode. The icon changes to a <strong>Sun icon (☀)</strong>.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click the Sun to switch back. Your choice persists even after closing the browser.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Saved Filters -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon indigo">💾</div>
+      <div>
+        <h3>Saved Filters &amp; Views <span class="feature-tab">Dashboard</span></h3>
+      </div>
+    </div>
+    <p class="desc">Save your current combination of filters (tags, date range, quick-filter badges) as a named view. Stored in localStorage. Useful for quick access to views like "Rush Orders Only" or "Club X This Week".</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the Dashboard, set up your wanted filters — e.g. select a tag, set a date range, click a quick-filter badge.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Click the <strong>"Save View"</strong> button. Enter a name (e.g. "Barnet FC Orders") and confirm.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Saved views appear as buttons at the top of the filter area. Click one to instantly restore all its filters.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click the <strong>×</strong> on a saved view button to delete it.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Print Order Sheet -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon amber">🖨️</div>
+      <div>
+        <h3>Print Order Sheet <span class="feature-tab">Dashboard</span></h3>
+      </div>
+    </div>
+    <p class="desc">Generates a detailed, print-optimised production sheet for any single order. Opens in a new browser window and triggers the print dialog automatically. The sheet includes product images (thumbnails pulled from Shopify), personalisation properties, production method detection, pick/pack checkboxes, QC checklist, internal notes, and rush order highlighting.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the Dashboard, click an order row to <strong>expand</strong> it.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">In the right-hand sidebar, click the <strong>"Print Order Sheet"</strong> button (has a 🖨 Printer icon).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">A new browser window opens with the formatted sheet. The print dialog appears automatically.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Print it physically, or use <strong>"Save as PDF"</strong> in the print dialog to save a copy.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">What's on the Sheet</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Rush Banner:</strong> If the order has a <code>rush</code>, <code>urgent</code>, <code>priority</code>, or <code>express</code> tag, a bold red "🚨 RUSH ORDER" banner appears at the top.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>SLA Countdown:</strong> Large box showing days remaining. Red with "OVERDUE" text and red border if past SLA, green with "X DAYS REMAINING" and green border if on track.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Order Details Grid (3 columns):</strong> Fulfillment status, production status, DecoNetwork job ID, total (£), item count, customer email, estimated production method, produced/total count, and completion %.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Stock Items Table:</strong> Products not flagged as MTO. Columns: IMG (40×40px thumbnail from Shopify), Item Name (with personalisation properties shown as grey badges underneath — e.g. "Name: SMITH", "Number: 7"), Qty, SKU, Method (auto-detected — see below), Status, and a Pick ☐ checkbox column for the production floor to tick off.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>MTO Items Table:</strong> Same layout but only for made-to-order items (items with "mto" in the name). Shown separately so the team knows which items require production before dispatch.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>QC Checklist:</strong> 6 checkboxes in a 3×2 grid for the floor to tick: <em>Print Aligned</em>, <em>Correct Size</em>, <em>Colour Match</em>, <em>Packaging</em>, <em>Labels Attached</em>, <em>Final Sign-off</em>.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Internal Notes:</strong> If any internal notes have been saved for this order (via the Notes feature), they appear on a yellow background with author email and timestamp per note.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Production Notes:</strong> A blank dashed-border area for handwritten notes on the printed sheet.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Auto-Detected Production Methods</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">The system scans each item's product name and SKU for keywords and assigns a method:
+        <br><strong>"embroid"</strong> → Embroidery &nbsp;|&nbsp; <strong>"screen" / "silk"</strong> → Screen Print &nbsp;|&nbsp; <strong>"dtf"</strong> → DTF
+        <br><strong>"dtg" / "direct to garment"</strong> → DTG &nbsp;|&nbsp; <strong>"vinyl" / "heat press" / "transfer"</strong> → Heat Press
+        <br><strong>"sublim"</strong> → Sublimation &nbsp;|&nbsp; <strong>"print" / "personalise" / "custom"</strong> → Print (General)
+        <br>If no keywords match, it shows "—"
+      </div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> The sheet header shows "STASH SHOP" branding plus the exact date/time it was printed. The sheet is formatted for A4 and includes page-break-friendly CSS so multi-page orders print cleanly.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Internal Order Notes -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon indigo">📝</div>
+      <div>
+        <h3>Internal Order Notes <span class="feature-tab">Dashboard</span></h3>
+      </div>
+    </div>
+    <p class="desc">Add private team notes to any order. Notes are stored in localStorage and synced to Supabase (if configured). They appear on printed order sheets automatically. Shows the author's email and a timestamp. Notes are never sent to customers.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Expand an order row on the Dashboard.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Click the <strong>notes icon</strong> (📋 clipboard) in the sidebar — a notes panel appears.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Type your note in the text field and click <strong>Add</strong>. It saves immediately.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Each note shows: text, author email, and date. Click <strong>×</strong> to delete a note.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Note counts appear as badges on order rows so you can see at a glance which orders have notes attached.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- CSV Export -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon green">📥</div>
+      <div>
+        <h3>CSV Export <span class="feature-tab">Dashboard</span></h3>
+      </div>
+    </div>
+    <p class="desc">Exports the currently filtered order list as a .csv file. Applies whatever filters and search terms are active — so if you've filtered to one club, only those orders export.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Set up your desired filters on the Dashboard (tags, dates, search, etc.).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Click the <strong>Download button (⬇)</strong> in the toolbar area.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">A CSV file downloads with columns for Order #, Customer, Email, Club, Total, Status, Items, DecoNetwork Job, and more. Open in Excel, Google Sheets, or Numbers.</div></div>
+    </div>
+  </div>
+
+  <!-- ==================== SECTION 2: INTELLIGENCE ==================== -->
+
+  <div class="section-header">
+    <div class="section-number">Section 02</div>
+    <h2>Intelligence</h2>
+    <p>Auto-matching, duplicate detection, and production forecasting — all on the INTEL tab</p>
+  </div>
+
+  <!-- Auto-Match -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon purple">🤖</div>
+      <div>
+        <h3>Auto-Match Engine <span class="feature-tab">Intel</span></h3>
+      </div>
+    </div>
+    <p class="desc">Fuzzy-matches Shopify line items to DecoNetwork job items using product name, SKU, size, and colour similarity. Shows a confidence percentage per match. Learns from your confirmed matches via a product mappings dictionary stored in localStorage — the more you confirm, the better it gets.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click <strong>INTEL</strong> in the top nav. Auto-Match runs automatically on page load.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Each unmatched order shows suggested matches with a <strong>confidence %</strong> (e.g. 87% match).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>"Apply"</strong> on a suggested match to confirm it. This links the Shopify item to the DecoNetwork job item and saves the product mapping for future auto-matching.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click <strong>"Dismiss"</strong> to reject a bad suggestion. The engine will try different matches next time.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Click any <strong>order number</strong> link to jump to that order on the Dashboard.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> The matching engine checks product mappings first (instant), then falls back to fuzzy name/SKU comparison. Confirmed matches become instant in future syncs.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Duplicate Detection -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon rose">🔍</div>
+      <div>
+        <h3>Duplicate Detection <span class="feature-tab">Intel</span></h3>
+      </div>
+    </div>
+    <p class="desc">Scans for potential duplicate orders by comparing customer names, order totals, and creation dates within a close timeframe. Flags suspicious pairs to prevent double-processing.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Navigate to <strong>INTEL</strong> — the duplicate scanner runs automatically alongside Auto-Match.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Flagged pairs show <strong>why</strong> they were flagged — e.g. "Same customer, £45.00 vs £45.00, 1 day apart".</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click an order number to inspect it on the Dashboard.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click <strong>"Dismiss"</strong> to mark as not-duplicate. Dismissed pairs won't be flagged again.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Forecasting -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon green">📈</div>
+      <div>
+        <h3>Production Forecasting <span class="feature-tab">Intel</span></h3>
+      </div>
+    </div>
+    <p class="desc">Analyses historical order patterns to forecast upcoming weekly workload. Groups unfulfilled orders by their SLA target / due date to predict how many orders and units need producing each week.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Navigate to <strong>INTEL</strong> — the forecast panel loads automatically.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">View the weekly breakdown showing predicted order volumes and unit counts.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Use this to plan staffing and material ordering for upcoming peak weeks.</div></div>
+    </div>
+  </div>
+
+  <!-- ==================== SECTION 3: PRODUCTION ==================== -->
+
+  <div class="section-header">
+    <div class="section-number">Section 03</div>
+    <h2>Production Tab</h2>
+    <p>Priority management, calendar planning, and batch printing — all under the PRODUCTION tab</p>
+  </div>
+
+  <!-- Priority Queue -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon rose">🔥</div>
+      <div>
+        <h3>Priority Queue <span class="feature-tab">Production</span></h3>
+      </div>
+    </div>
+    <p class="desc">A dedicated priority view combining two sources: <strong>(1)</strong> orders you manually flag as urgent/high priority, and <strong>(2)</strong> orders auto-detected from Shopify tags (<code>rush</code>, <code>urgent</code>, <code>priority</code>, <code>express</code>). Only unfulfilled orders appear. Sorted by priority level (urgent first), then by due date.</p>
+    <div class="steps">
+      <div class="steps-title">Viewing the Queue</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click <strong>PRODUCTION</strong> in the top nav. The Priority Queue appears at the top of the page with a red 🔥 icon and a badge showing count.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Each row shows: priority badge (<span style="color:#dc2626; font-weight:900;">🔥 URGENT</span> red or <span style="color:#d97706; font-weight:900;">⚠ HIGH</span> amber), order number (clickable), customer name, club tag (indigo badge), completion %, due date (with clock icon), and optional note in italics.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Rows have a <strong>coloured left border</strong> — red for urgent, amber for high.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Auto-detected tag-based orders show a small grey <strong>"TAG"</strong> label so you know they came from Shopify tags, not manual flagging.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Click any <strong>order number</strong> to jump to that order on the Dashboard.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-text">If the queue is empty, a green Zap icon shows with "No priority orders" and a hint to flag orders or add Shopify tags.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Manually Flagging an Order</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click the red <strong>"Flag Order"</strong> button (top right of the Priority Queue panel). A form slides open with a light red background.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Fill in four fields:</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:100px;font-weight:700">Order #</td><td>Type the order number (e.g. <code>1234</code> — without #). Must match an existing order in the data.</td></tr>
+          <tr><td style="font-weight:700">Level</td><td>Dropdown: <strong>🔥 Urgent</strong> or <strong>⚠️ High</strong></td></tr>
+          <tr><td style="font-weight:700">Due Date</td><td>Date picker — set an explicit deadline for this order (optional)</td></tr>
+          <tr><td style="font-weight:700">Note</td><td>Free text — e.g. "Customer CEO called", "Match day Saturday" (optional)</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>"Add"</strong>. The order enters the queue immediately, sorted by priority then due date.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">To <strong>remove</strong> a manually flagged order, click the <strong>× button</strong> on its row. (Tag-based orders can't be removed here — remove the tag in Shopify instead.)</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Click the × next to the form to cancel without adding.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> Priority flags persist in localStorage and record who flagged (<code>setBy</code> = your email) and when (<code>setAt</code> = timestamp). They survive page refreshes and browser restarts.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Production Calendar -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon blue">📅</div>
+      <div>
+        <h3>Production Calendar <span class="feature-tab">Production</span></h3>
+      </div>
+    </div>
+    <p class="desc">A visual calendar plotting unfulfilled orders by their due date (uses <code>productionDueDate</code> or <code>slaTargetDate</code>). Each day shows an order count badge colour-coded by workload density. Supports month and week views with a heat-map colour scale.</p>
+    <div class="steps">
+      <div class="steps-title">Navigation Controls</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the <strong>PRODUCTION</strong> tab, scroll below the Priority Queue to find the Production Calendar (purple 📅 icon).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>◄ ►</strong> arrow buttons to navigate between months (or weeks in week view). The current period shows as "March 2026" or "Week of 30 Mar".</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>"Week View"</strong> button to switch to a 7-day view (Monday–Sunday). The button text changes to <strong>"Month View"</strong> to switch back. In week view, individual order numbers are listed directly on each day cell.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click <strong>"Today"</strong> (indigo text, centre) to snap back to the current date.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Interacting with Days</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click any day cell to <strong>select it</strong> — a detail panel appears below the calendar. Click the same day again to deselect.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">The detail panel shows the date (e.g. "Monday, 31 March"), total orders, total units, then a scrollable list of orders with: order number, customer name, club, items, and completion %. Click an order to navigate to Dashboard.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Today's date always has an <strong>indigo ring border</strong> so it's easy to spot. Selected day gets a light indigo background.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Heat Map Colour Scale</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Cell background: <strong>White</strong> = 0 orders &nbsp;|&nbsp; <strong>Lightest indigo</strong> = 1–3 &nbsp;|&nbsp; <strong>Light</strong> = 4–8 &nbsp;|&nbsp; <strong>Medium</strong> = 9–15 &nbsp;|&nbsp; <strong>Dark indigo</strong> = 16+</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Count badge colours: <strong>Indigo</strong> = 1–5 orders &nbsp;|&nbsp; <strong>Amber</strong> = 6–10 &nbsp;|&nbsp; <strong>Red</strong> = 11+</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">A legend bar is shown below the calendar grid: Less □□□□□ More</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> Greyed-out dates outside the current month are still clickable. Use the heat map to spot bottleneck days and redistribute workload before they happen.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Batch Print Sheets -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon amber">📄</div>
+      <div>
+        <h3>Batch Print Sheets <span class="feature-tab">Production</span></h3>
+      </div>
+    </div>
+    <p class="desc">Groups all <strong>unfulfilled line items</strong> (with remaining quantity > 0) across all orders by production method, club, or due date — then prints grouped production sheets for the floor. <code>quantity - fulfilledQuantity</code> is calculated so already-shipped items don't appear. Rush orders are sorted to the top and marked with ⚡ on the printed output.</p>
+    <div class="steps">
+      <div class="steps-title">Grouping &amp; Filtering</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the <strong>PRODUCTION</strong> tab, scroll below the Calendar. The header shows the indigo 🖨 Printer icon plus "N lines, N units" count of remaining work.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>"By Method" dropdown</strong> (top-right) to choose grouping mode:
+        <br>• <strong>By Method</strong> — Embroidery, DTF, Screen Print, DTG, Heat Press, Sublimation, Print (General), Stock / No Decoration
+        <br>• <strong>By Club</strong> — groups by club/team tag (or "No Club")
+        <br>• <strong>By Due Date</strong> — groups by SLA target date (or "No Date")
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Below the dropdown is a <strong>method filter bar</strong> with checkbox-toggle buttons for each detected method. Each button has a ☑/☐ icon. Click to toggle methods on/off — only checked methods appear in the list. The filter bar shows a 🔽 Filter icon on the left.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Viewing &amp; Expanding Groups</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Each group shows as a collapsible row: <strong>▶ EMBROIDERY — 12 lines</strong> with unit count on the right. Click to expand/collapse.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use <strong>"Expand All"</strong> and <strong>"Collapse"</strong> buttons (top-right) to toggle all groups at once.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Inside each expanded group, a table shows: <strong>Order</strong> (number), <strong>Customer</strong>, <strong>Item</strong> (product name), <strong>SKU</strong>, <strong>Size</strong> (auto-extracted from item properties if key contains "size"), <strong>Qty</strong> (remaining), <strong>Job ID</strong> (DecoNetwork), and <strong>Due</strong> (date). Rush items show with a ⚡ icon.</div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Printing</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click the indigo <strong>"🖨 Print"</strong> button (top-right). A new browser window opens.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">The printed output has one section per group, each with:
+        <br>• Group heading showing method/club/date, line count, and unit total
+        <br>• Table with columns: Order, Customer, Item, SKU, Size, Qty, Job ID, Due, Done ✓
+        <br>• Rush items highlighted with yellow background and ⚡ suffix
+        <br>• Per-group unit total at the bottom
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Footer shows "Generated [datetime] — Stash Shop Sync". Print dialog opens automatically.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> The "Done ✓" column is an empty cell on the printed sheet — meant for the floor team to tick by hand. Size is auto-extracted from personalisation properties where the property name contains "size".</div>
+  </div>
+
+  <!-- ==================== SECTION 4: REPORTS ==================== -->
+
+  <div class="section-header">
+    <div class="section-number">Section 04</div>
+    <h2>Reports Tab</h2>
+    <p>Revenue analysis, club rankings, and at-risk order tracking — all under the REPORTS tab</p>
+  </div>
+
+  <!-- Profitability -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon green">💰</div>
+      <div>
+        <h3>Profitability Report <span class="feature-tab">Reports</span></h3>
+      </div>
+    </div>
+    <p class="desc">Revenue breakdown per order with summary stats. Revenue comes from Shopify order total (£). Cost/margin columns are included but currently show "—" because DecoNetwork doesn't expose job cost data via its API — the columns are pre-built and ready for when cost data becomes available.</p>
+    <div class="steps">
+      <div class="steps-title">Summary Cards</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click <strong>REPORTS</strong> in the top nav. The Profitability Report appears first with 4 summary cards at the top:</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:130px;font-weight:700">Total Revenue</td><td>Sum of all order totals, shown in £ with 2 decimal places</td></tr>
+          <tr><td style="font-weight:700">Orders</td><td>Total order count</td></tr>
+          <tr><td style="font-weight:700">Avg Order Value</td><td>Total revenue ÷ order count</td></tr>
+          <tr><td style="font-weight:700">Cost Data Available</td><td>Shows "0/N" with an amber ⚠ warning: "DecoNetwork doesn't expose cost data via API"</td></tr>
+        </table>
+      </div></div>
+    </div>
+    <div class="steps">
+      <div class="steps-title">Order Table</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Below the summary cards, a scrollable table shows every order with columns: <strong>Order</strong> #, <strong>Customer</strong>, <strong>Club</strong> (indigo text), <strong>Items</strong> (total quantity), <strong>Revenue</strong> (£), <strong>Cost</strong> ("—"), <strong>Margin</strong> ("—" with ↑↓ trend icons when data available), <strong>%</strong> (margin percentage).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>Sort By</strong> dropdown to change ordering: <strong>Sort by Margin</strong>, <strong>Sort by Revenue</strong> (highest first), or <strong>Sort by Order #</strong> (newest first).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Rows are clickable — click to navigate to that order on the Dashboard.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Only 25 rows shown by default. Click <strong>"Show All (N)"</strong> at the bottom to see every order, or <strong>"Show Less"</strong> to collapse.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Club Leaderboard -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon purple">🏆</div>
+      <div>
+        <h3>Club / Team Leaderboard <span class="feature-tab">Reports</span></h3>
+      </div>
+    </div>
+    <p class="desc">Ranks all clubs/teams by performance. Groups orders by club tag and shows per-club stats. Top 3 get medal icons: 🥇 (gold), 🥈 (silver), 🥉 (bronze). Remaining clubs show their rank number. Click to expand and see individual orders.</p>
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the <strong>REPORTS</strong> tab, scroll below Profitability. The header shows a 🏆 Trophy icon and "(N clubs)" count.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>Sort By</strong> dropdown to rank by:
+        <br>• <strong>By Revenue</strong> — highest total spend at top
+        <br>• <strong>By Order Count</strong> — most orders first
+        <br>• <strong>By Item Count</strong> — most units first
+        <br>• <strong>By Turnaround (fastest)</strong> — lowest average fulfillment days first (clubs with no fulfilled orders sort to bottom, show "—")
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Each club row shows 5 stat columns on the right:
+        <br>• <strong>Revenue</strong> — total £ for this club
+        <br>• <strong>AOV</strong> — average order value (revenue ÷ orders)
+        <br>• <strong>Items</strong> — total units ordered
+        <br>• <strong>Turnaround</strong> — avg days to fulfillment (from <code>fulfillmentDuration</code>), or "—" if no orders are fulfilled yet
+        <br>• <strong>Fulfilled</strong> — percentage of orders fulfilled
+      </div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click a club row to <strong>expand</strong> — a nested table shows that club's orders (up to 20, newest first) with: Order #, Customer, Date, Revenue (£), and Status badge (green "fulfilled" or amber "unfulfilled"). Each row is clickable to navigate to Dashboard.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">If a club has more than 20 orders, a "+N more orders" note appears at the bottom of the expanded table.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> "No Club" appears for orders without a club/team Shopify tag. Turnaround average only includes orders that have actually been fulfilled — open orders don't affect it.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Late Order Report -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon rose">⏰</div>
+      <div>
+        <h3>Late Order Report <span class="feature-tab">Reports</span></h3>
+      </div>
+    </div>
+    <p class="desc">Automatically identifies at-risk orders based on three criteria. Only unfulfilled orders are checked. Each flagged order gets a severity level: 🔴 Critical or 🟡 Warning. When an order matches multiple criteria, the worst severity wins (deduplicated per order).</p>
+
+    <table class="ref-table" style="margin-bottom:16px;">
+      <thead>
+        <tr>
+          <th>Issue Type</th>
+          <th>What Triggers It</th>
+          <th>🟡 Warning</th>
+          <th>🔴 Critical</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="font-weight:700">Unlinked</td>
+          <td>No DecoNetwork job ID and order is 3+ days old</td>
+          <td>3–6 days old</td>
+          <td>7+ days old</td>
+        </tr>
+        <tr>
+          <td style="font-weight:700">Past SLA</td>
+          <td>Today's date is after the order's SLA target date</td>
+          <td>1–4 days overdue</td>
+          <td>5+ days overdue</td>
+        </tr>
+        <tr>
+          <td style="font-weight:700">Stuck in Prod</td>
+          <td>Has a DecoNetwork job, less than 100% complete, and 10+ days in production</td>
+          <td>10–14 days</td>
+          <td>15+ days</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="steps">
+      <div class="steps-title">How to Use</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On the <strong>REPORTS</strong> tab, scroll to Late Order Report. The ⚠ header shows a red badge with total count of flagged orders.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Summary badges below header: <strong>🔴 N Critical</strong> (red) and <strong>🟡 N Warning</strong> (amber).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Use the <strong>filter dropdown</strong> to narrow by issue type. Each option shows its count:
+        <br>• <strong>All Issues (N)</strong> | <strong>Unlinked 3+ Days (N)</strong> | <strong>Past SLA (N)</strong> | <strong>Stuck Production (N)</strong></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Table columns: Severity icon (🔴/🟡), Order #, Customer, Club, Issue (description text like "Unlinked for 5 days" or "3 day(s) past SLA target"), Days count (in red), Completion % bar (visual progress), Job ID. Critical rows have a light red background tint.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Click <strong>"Export CSV"</strong> button to download the filtered list as <code>late-orders-YYYY-MM-DD.csv</code> with columns: Order, Customer, Club, Days Late, Reason, Severity, Completion %.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-text">Click any row to navigate to that order. 25 rows shown by default — click <strong>"Show All"</strong> to see everything.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> If there are zero late orders, a green "🎉 No late orders — everything on track!" message appears with a clock icon. Address 🔴 critical issues first — they indicate orders that are actively late or stuck.</div>
+  </div>
+
+  <!-- ==================== SECTION 5: OPERATIONS ==================== -->
+
+  <div class="section-header">
+    <div class="section-number">Section 05</div>
+    <h2>Operations Tab</h2>
+    <p>Returns lifecycle, artwork approval pipeline, and shipping label management — all under the OPS tab</p>
+  </div>
+
+  <!-- Returns Tracker -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon orange">🔄</div>
+      <div>
+        <h3>Returns &amp; Remake Tracker <span class="feature-tab">Ops</span></h3>
+      </div>
+    </div>
+    <p class="desc">Full return/remake lifecycle tracking with reason codes, 5-step status workflow, and remake job linking. Persists in localStorage. Summary stats track defect patterns across returns.</p>
+
+    <div class="steps">
+      <div class="steps-title">Logging a Return</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click <strong>OPS</strong> in the top nav. The Returns &amp; Remakes panel is first (🔄 icon). The header shows an orange badge: "<strong>N open</strong>" (returns not yet resolved).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Click the orange <strong>"Log Return"</strong> button (has a ➕ icon).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">A form slides open on a light orange background with a 4-column grid:</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:80px;font-weight:700">Order #</td><td>Type the order number. The system <strong>auto-looks up</strong> the order — if found, the customer name appears in green below the field. If not found, <span style="color:#dc2626">"Order not found"</span> shows in red.</td></tr>
+          <tr><td style="font-weight:700">Item</td><td>If the order was found, this becomes a <strong>dropdown</strong> populated with all line items from that order (by product name). Select the returned item. If no match, stays as a free-text field.</td></tr>
+          <tr><td style="font-weight:700">Size</td><td>Free text — enter the size of the returned item</td></tr>
+          <tr><td style="font-weight:700">Qty</td><td>Number input — defaults to 1</td></tr>
+          <tr><td style="font-weight:700">Reason</td><td>Dropdown with 6 options:<br>
+            <strong>Wrong Size</strong> &nbsp;|&nbsp; <strong>Print Defect</strong> &nbsp;|&nbsp; <strong>Wrong Item Sent</strong> &nbsp;|&nbsp; <strong>Damaged in Transit</strong> &nbsp;|&nbsp; <strong>Customer Changed Mind</strong> &nbsp;|&nbsp; <strong>Other</strong>
+          </td></tr>
+          <tr><td style="font-weight:700">Detail</td><td>Free text — additional notes (optional), spans 2 columns</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click <strong>"Save"</strong>. The return is created with status <strong>"Received"</strong> and appears in the list. The "Save" button is disabled until both an order match and an item are selected.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Managing Returns</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Each return row shows: order # (clickable), customer name, <strong>status badge</strong> (coloured — red/amber/blue/purple/green), <strong>reason badge</strong> (coloured text), item name, size, quantity, detail note in italics, and "Logged [date] by [email]" at bottom.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Use the <strong>status dropdown on each row</strong> to progress through the 5-step workflow:</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:120px;font-weight:700;color:#dc2626">Received</td><td>Item received back — initial state</td></tr>
+          <tr><td style="font-weight:700;color:#d97706">Inspected</td><td>Item has been inspected/assessed</td></tr>
+          <tr><td style="font-weight:700;color:#2563eb">Remake Ordered</td><td>Replacement has been ordered through DecoNetwork</td></tr>
+          <tr><td style="font-weight:700;color:#7c3aed">Remake Shipped</td><td>Replacement has been shipped to customer</td></tr>
+          <tr><td style="font-weight:700;color:#059669">Resolved</td><td>Return is complete — status dropdown disappears</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click the <strong>✏️ pencil icon</strong> on any row to enter a <strong>Remake Job ID</strong> — a small inline form appears with a text input and ✓ confirm button. The linked job ID then shows in blue: "Remake Job: #12345".</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Filter returns using the <strong>top dropdown</strong>: All (N), Received (N), Inspected (N), Remake Ordered (N), Remake Shipped (N), Resolved (N).</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Delete a return with the <strong>🗑 trash icon</strong>.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Summary Stats Bar</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Below the header: <strong>Total: N</strong> (all-time returns) &nbsp;|&nbsp; <span style="color:#dc2626;font-weight:700">Defects: N</span> (reason = Print Defect) &nbsp;|&nbsp; <span style="color:#d97706;font-weight:700">Wrong Size: N</span>. Track these to spot recurring quality issues.</div></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Artwork Approval -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon pink">🎨</div>
+      <div>
+        <h3>Artwork Approval Tracking <span class="feature-tab">Ops</span></h3>
+      </div>
+    </div>
+    <p class="desc">Tracks artwork approval per-item through a 5-status workflow. Monitors waiting time, counts revision rounds, and highlights items stuck in approval for 5+ days. Header shows "N blocking" count for items not yet approved. Uses a 🎨 Palette icon.</p>
+
+    <div class="steps">
+      <div class="steps-title">Adding an Approval</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">On <strong>OPS</strong>, scroll to Artwork Approvals. Click the pink <strong>"Add Approval"</strong> button (➕ icon).</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Fill in the form (pink-tinted background):</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:100px;font-weight:700">Order #</td><td>Auto-looks up the order. Green customer name = found, red = not found.</td></tr>
+          <tr><td style="font-weight:700">Item / Design</td><td>If order found: dropdown of all line items <strong>plus a "Full Order Design"</strong> option for approvals that cover the entire order. Otherwise free text.</td></tr>
+          <tr><td style="font-weight:700">Notes</td><td>Free text — e.g. "Logo placement TBC", "Need vector file" (optional)</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>"Save"</strong>. Created with status <strong>"⏳ Awaiting Send"</strong>.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Status Workflow</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Use the <strong>status dropdown on each row</strong> to update. Each status change triggers automatic tracking:</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:140px;font-weight:700">⏳ Awaiting Send</td><td>Initial state — design not yet sent to customer. Grey badge.</td></tr>
+          <tr><td style="font-weight:700">📧 Sent to Customer</td><td>Automatically records <code>sentAt</code> timestamp. Blue badge. Waiting timer starts from this point.</td></tr>
+          <tr><td style="font-weight:700">✅ Approved</td><td>Records <code>respondedAt</code> timestamp. Green badge.</td></tr>
+          <tr><td style="font-weight:700">🔄 Revision Needed</td><td>Auto-increments <code>revisionCount</code> by 1. Shows "Rev N" in amber. Amber badge.</td></tr>
+          <tr><td style="font-weight:700">✅ Final Approved</td><td>Records <code>respondedAt</code>. Dark green badge. Use after revisions are complete.</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Each row shows timestamp trail: "Created [date] • Sent [date] • Responded [date]".</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Waiting Time Alerts</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Items waiting <strong>3+ days</strong> (since sent or created) show a red <strong>"Waiting Nd"</strong> label.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Items waiting <strong>5+ days</strong> get an <strong>amber background</strong> highlight on the entire row — chase these proactively to avoid production delays.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Summary bar below header shows counts: ⏳ Pending: N &nbsp;|&nbsp; 📧 Sent: N &nbsp;|&nbsp; 🔄 Revisions: N</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> The revision counter persists — if a customer goes through 3 rounds of changes, it shows "Rev 3" in amber. Use this to identify problem orders or designs that need overhauling. Filter by "Revision Needed" to see all items currently in revision.</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Shipping Labels -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon teal">📦</div>
+      <div>
+        <h3>Shipping Label Management <span class="feature-tab">Ops</span></h3>
+      </div>
+    </div>
+    <p class="desc">Create and track shipping labels for UK carriers. Links tracking numbers to orders and generates clickable tracking URLs automatically. Includes a "Ready to Ship" detector and a 3-step workflow (Created → Printed → Dispatched) with Shopify fulfillment integration.</p>
+
+    <div class="steps">
+      <div class="steps-title">"Ready to Ship" Suggestions</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">When orders reach 100% completion or are stock-dispatch-ready, they appear in a green-tinted <strong>"Ready to Ship"</strong> bar. The header also shows a green badge: "<strong>N ready to ship</strong>".</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Each suggestion is a clickable button: <strong>"#1234 — Customer Name"</strong>. Click one and it auto-fills the order number in the create form and opens it.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Up to 8 suggestions shown. If more, "<strong>+N more</strong>" appears.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Creating a Label</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Click the teal <strong>"Create Label"</strong> button (➕ icon), or click a suggestion.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Form fields (teal-tinted background, 5-column grid):</div></div>
+      <div class="step"><div class="step-num"></div><div class="step-text">
+        <table class="ref-table" style="font-size:11px;">
+          <tr><td style="width:100px;font-weight:700">Order #</td><td>Auto-lookup. Green customer name = found.</td></tr>
+          <tr><td style="font-weight:700">Carrier</td><td>Dropdown: <strong>Royal Mail</strong>, <strong>DPD</strong>, <strong>DHL</strong>, <strong>Evri (Hermes)</strong>, <strong>Yodel</strong>, <strong>Other</strong></td></tr>
+          <tr><td style="font-weight:700">Tracking #</td><td>Enter the tracking number from your carrier. <strong>Required</strong> — Save is disabled without it.</td></tr>
+          <tr><td style="font-weight:700">Weight (kg)</td><td>Number input with 0.1 step. Optional.</td></tr>
+        </table>
+      </div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>"Save"</strong>. Label created with status <strong>"Created"</strong>. A tracking URL is auto-generated based on the carrier selected.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Label Workflow &amp; Actions</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Each label row has a <strong>coloured left border</strong>: blue = Created, amber = Printed, green = Dispatched.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Row details: order # (clickable), recipient name, status badge, carrier name, tracking number (monospace font), action buttons.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Workflow actions appear as buttons depending on current status:
+        <br>• <strong>Created</strong> → click <strong>"🖨 Printed"</strong> button (amber) → records <code>printedAt</code> timestamp
+        <br>• <strong>Printed</strong> → click <strong>"🚛 Fulfill &amp; Dispatch"</strong> button (green) → marks as dispatched <em>and</em> pushes tracking number + carrier to Shopify to fulfill the order
+        <br>• If Shopify fulfillment isn't configured, the button shows <strong>"✓ Dispatched"</strong> instead (just marks as dispatched without Shopify API call)
+      </div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Additional row actions:
+        <br>• <strong>📋 Copy icon</strong> — copies tracking number to clipboard
+        <br>• <strong>🔗 External link icon</strong> — opens carrier tracking page in new tab
+        <br>• <strong>🗑 Trash icon</strong> — deletes the label
+      </div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text">Timestamps shown per label: "Created [date]" and "Dispatched [date]" when applicable.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-text">Filter by status: dropdown with All (N), Created (N), Printed (N), Dispatched (N).</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Tracking URLs by Carrier</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">
+        <strong>Royal Mail</strong> → royalmail.com/track-your-item<br>
+        <strong>DPD</strong> → tracking.dpd.de (English)<br>
+        <strong>DHL</strong> → dhl.com/gb-en tracking<br>
+        <strong>Evri (Hermes)</strong> → evri.com/track/parcel<br>
+        <strong>Yodel</strong> → yodel.co.uk/tracking
+      </div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> The "Fulfill &amp; Dispatch" button is the key action — it sends the tracking number to Shopify so the customer gets an automated shipping notification email from Shopify. Make sure the tracking number is correct before clicking.</div>
+  </div>
+
+  <!-- ==================== SECTION 6: SETTINGS ==================== -->
+
+  <div class="section-header">
+    <div class="section-number">Section 06</div>
+    <h2>Settings &amp; Configuration</h2>
+    <p>API credentials, auto-refresh, holidays, and cloud sync</p>
+  </div>
+
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon slate">⚙️</div>
+      <div>
+        <h3>Settings Panel</h3>
+      </div>
+    </div>
+    <p class="desc">Access by clicking the <strong>Gear icon (⚙)</strong> in the top nav bar. The settings panel slides open with all configuration options. All changes save to localStorage immediately.</p>
+    <div class="steps">
+      <div class="steps-title">Configuration Sections</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Shopify API:</strong> Enter your Shopify store domain (e.g. <code>yourstore.myshopify.com</code>) and Admin API access token. Used for all GraphQL queries to fetch orders, line items, images, and custom attributes.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text"><strong>DecoNetwork API:</strong> Enter your DecoNetwork subdomain URL, API key, and credentials. Used for fetching job data, item statuses, and matching.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Auto-Refresh Interval:</strong> Set the sync interval in minutes (default: 5). Orders re-fetch from both APIs at this interval. Also re-syncs when the browser tab regains focus after 2+ minutes away.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text"><strong>SLA Target Days:</strong> Number of business days for SLA calculations, used to compute each order's <code>slaTargetDate</code>.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Holiday Ranges:</strong> Add date ranges for business closures (e.g. Christmas week). SLA calculations skip these non-working days.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Supabase Cloud Sync:</strong> Enter Supabase project URL and anon key to sync notes, returns, artwork approvals, and shipping labels across devices.</div></div>
+      <div class="step"><div class="step-num">7</div><div class="step-text"><strong>Google Gemini API Key:</strong> Required for the ANALYST tab's AI process analysis feature.</div></div>
+    </div>
+  </div>
+
+  <!-- NAVIGATION REFERENCE -->
+  <div class="section-header">
+    <div class="section-number">Quick Reference</div>
+    <h2>Navigation Map</h2>
+    <p>Where to find every feature at a glance</p>
+  </div>
+
+  <table class="ref-table" style="margin-bottom:40px;">
+    <thead>
+      <tr>
+        <th style="width:130px;">Nav Location</th>
+        <th>Contains</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-weight:800;">DASHBOARD</td>
+        <td>Unified order table, search (debounced), tag filters, date range, quick-filter badges, column sort (asc/desc), saved views, expanded order detail with sidebar, print order sheet (with QC checklist, images, production methods), internal notes, CSV export</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">KANBAN</td>
+        <td>Visual workflow board — unfulfilled orders in Not Started (0%) / In Production (1–99%) / Ready to Ship (100%) columns</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">INTEL</td>
+        <td>Auto-Match Engine (fuzzy matching with learning), Duplicate Detection (auto-scan with dismiss), Production Forecasting (weekly workload)</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">PRODUCTION</td>
+        <td>Priority Queue (manual flags + Shopify tag auto-detect) → Production Calendar (month/week view with heat map) → Batch Print Sheets (group by method/club/date, method filter bar, print all)</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">REPORTS</td>
+        <td>Profitability Report (revenue per order, 4 summary cards, sort by margin/revenue/order) → Club Leaderboard (medals, 4 sort modes, expandable) → Late Order Report (3 issue types, severity levels, CSV export)</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">OPS</td>
+        <td>Returns &amp; Remakes (6 reason codes, 5-step workflow, remake job linking) → Artwork Approvals (5-status pipeline, revision tracking, waiting alerts) → Shipping Labels (6 UK carriers, tracking URLs, Ready to Ship suggestions, Shopify fulfillment push)</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">STOCK</td>
+        <td>Physical stock levels, return stock, reference products</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">EFFICIENCY</td>
+        <td>Lead time analysis, fulfillment rate metrics</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">MTO</td>
+        <td>Made-to-Order pipeline, MTO item tracking</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">DECO</td>
+        <td>DecoNetwork job browser, job search, manual item mapping</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">ANALYST</td>
+        <td>AI-powered process analysis via Google Gemini</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">🔔 Bell icon</td>
+        <td>Alert rules, stock alerts, reorder points</td>
+      </tr>
+      <tr>
+        <td style="font-weight:800;">⚙ Gear icon</td>
+        <td>API credentials, auto-refresh interval, SLA days, holidays, Supabase config, Gemini key</td>
+      </tr>
+      <tr style="background:#f9fafb;">
+        <td style="font-weight:800;">☾ / ☀ icon</td>
+        <td>Dark mode toggle (persists in localStorage)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-footer">
+    Stash Shop Sync &bull; Complete Feature Guide &bull; Version 3.0 &bull; March 2026<br>
+    React 19 &bull; TypeScript (strict) &bull; Vite 6 &bull; Tailwind CSS v4 &bull; Express 5
+  </div>
+
+</div>
+</body>
+</html>

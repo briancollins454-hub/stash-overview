@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - uid: string (required) - The user's unique ID
+    //   - email: string (required, email format) - The user's email address
+    //   - displayName: string (optional) - The user's display name
+    //   - photoURL: string (optional, uri format) - The user's photo URL
+    //   - lastLogin: number (optional) - The last login timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAuthorizedDomain() {
+      return isAuthenticated() && (
+        request.auth.token.email.endsWith('@marxcorporate.com') || 
+        request.auth.token.email.endsWith('@stashshop.co.uk')
+      );
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string &&
+             data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAuthorizedDomain();
+      allow create: if isOwner(userId) && isAuthorizedDomain() && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isAuthorizedDomain() && isValidUser(request.resource.data);
+      allow delete: if false; // Users cannot delete their profiles
+    }
+
+    // Default deny for all other collections
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

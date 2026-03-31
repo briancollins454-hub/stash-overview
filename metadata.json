@@ -1,0 +1,5 @@
+{
+  "name": "Remix: Stash Shop Sync: DecoNetwork x Shopify Bridge v25",
+  "description": "A production management dashboard bridging Shopify sales data with DecoNetwork production status. Features AI-driven insights to identify late orders, reconciliation gaps, and shipping readiness.",
+  "requestFramePermissions": []
+}
