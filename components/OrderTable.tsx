@@ -146,17 +146,17 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
     : '';
   const skuHtml = i.sku ? '<br><small style="color:#888">SKU: ' + i.sku + '</small>' : '';
   const imgHtml = i.imageUrl
-    ? '<img src="' + i.imageUrl + '" style="width:60px;height:60px;object-fit:cover;" />'
+    ? '<img src="' + i.imageUrl + '" style="width:40px;height:40px;object-fit:cover;" />'
     : '';
   const unitPrice = i.price ? parseFloat(i.price) : 0;
   const lineTotal = unitPrice * (i.quantity || 0);
   return '<tr>' +
-    '<td style="width:70px;text-align:center;">' + imgHtml + '</td>' +
+    '<td style="width:45px;text-align:center;">' + imgHtml + '</td>' +
     '<td>' + i.name + propsHtml + skuHtml + '</td>' +
     '<td style="text-align:center;">' + i.quantity + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
-    '<td style="width:100px;"></td>' +
+    '<td style="width:70px;"></td>' +
     '</tr>';
 }
 
@@ -171,26 +171,28 @@ function printOrderSheet(order: UnifiedOrder): void {
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
-    'body { font-family: Arial, sans-serif; padding: 20px; color: #111; font-size: 13px; }',
-    '.rush { background: #dc2626; color: white; font-size: 14px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 6px 16px; margin-bottom: 12px; }',
-    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }',
-    '.items-table th, .items-table td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: top; }',
-    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; font-weight: bold; }',
-    '.section-title { font-size: 14px; font-weight: bold; margin: 16px 0 6px 0; padding-bottom: 4px; border-bottom: 2px solid #111; text-transform: uppercase; }',
-    '.payment-table { margin-left: auto; width: 50%; margin-top: 12px; border-collapse: collapse; }',
-    '.payment-table td { padding: 4px 8px; font-size: 13px; }',
-    '.payment-table .total td { font-weight: bold; font-size: 14px; border-top: 2px solid #111; }',
-    '.countdown { font-size: 16px; font-weight: 900; text-align: center; padding: 6px; border: 2px solid; margin: 12px 0; }',
+    '@page { margin: 8mm; size: A4; }',
+    'body { font-family: Arial, sans-serif; padding: 8px; color: #111; font-size: 11px; }',
+    '.rush { background: #dc2626; color: white; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 4px 12px; margin-bottom: 6px; }',
+    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }',
+    '.items-table th, .items-table td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }',
+    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; font-weight: bold; }',
+    '.section-title { font-size: 11px; font-weight: bold; margin: 8px 0 3px 0; padding-bottom: 2px; border-bottom: 2px solid #111; text-transform: uppercase; }',
+    '.payment-table { margin-left: auto; width: 50%; margin-top: 6px; border-collapse: collapse; }',
+    '.payment-table td { padding: 2px 6px; font-size: 11px; }',
+    '.payment-table .total td { font-weight: bold; font-size: 12px; border-top: 2px solid #111; }',
+    '.countdown { font-size: 13px; font-weight: 900; text-align: center; padding: 4px; border: 2px solid; margin: 6px 0; }',
     '.overdue { color: #dc2626; font-weight: 900; }',
     '.ok { color: #16a34a; font-weight: bold; }',
-    '.check { width: 14px; height: 14px; border: 2px solid #999; display: inline-block; border-radius: 2px; vertical-align: middle; }',
-    '.qc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }',
-    '.qc-item { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }',
-    '.notes-section { border: 1px dashed #999; padding: 10px; min-height: 50px; font-size: 10px; color: #666; margin-top: 8px; }',
-    '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 8px; font-size: 10px; margin-top: 8px; }',
-    '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 3px 0; }',
+    '.check { width: 12px; height: 12px; border: 2px solid #999; display: inline-block; border-radius: 2px; vertical-align: middle; }',
+    '.qc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 4px; }',
+    '.qc-item { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }',
+    '.notes-section { border: 1px dashed #999; padding: 6px; min-height: 30px; font-size: 9px; color: #666; margin-top: 6px; }',
+    '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
+    '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '@media print { body { padding: 10px; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
+    '.sticker { border: 3px solid #000; padding: 10px; }',
+    '@media print { body { padding: 8px; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
   const orderDate = new Date(order.shopify.date).toLocaleDateString('en-GB');
@@ -208,32 +210,34 @@ function printOrderSheet(order: UnifiedOrder): void {
   const phoneLine = addr && addr.phone ? '<p>' + addr.phone + '</p>' : '';
 
   const headerHtml =
-    '<table style="width:100%;margin-bottom:8px;border-collapse:collapse;"><tr>' +
-    '<td style="width:60%;vertical-align:top;padding-right:30px;">' +
-      '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:260px;margin-bottom:8px;" />' +
-      '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:52px;line-height:1;margin:4px 0 12px 0;">#' + order.shopify.orderNumber + '</p>' +
-      '<table style="font-size:12px;border-collapse:collapse;">' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Date</td><td>' + orderDate + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Shipping Method</td><td>' + shippingMethod + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
+    '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
+    '<td style="width:58%;vertical-align:top;padding-right:16px;">' +
+      '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:200px;margin-bottom:4px;" />' +
+      '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:40px;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
+      '<table style="font-size:10px;border-collapse:collapse;">' +
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Date</td><td>' + orderDate + '</td></tr>' +
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Method</td><td>' + shippingMethod + '</td></tr>' +
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
+        '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
     '</td>' +
-    '<td style="width:40%;vertical-align:top;">' +
-      '<p style="font-weight:bold;font-size:14px;margin-bottom:4px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
-      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
+    '<td style="width:42%;vertical-align:top;">' +
+      '<div class="sticker">' +
+      '<p style="font-weight:bold;font-size:13px;margin-bottom:3px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
+      addrLines.map(function(l) { return '<p style="font-size:11px;">' + l + '</p>'; }).join('') +
       phoneLine +
-      (orderNote ? '<p style="margin-top:8px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:11px;">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:4px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p style="margin-top:4px;">Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+      (orderNote ? '<p style="margin-top:6px;font-weight:bold;font-size:10px;">Order Note (repeated)</p><p style="font-size:9px;">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:3px;font-size:10px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      (order.decoJobId ? '<p style="margin-top:2px;font-size:10px;">Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+      '</div>' +
     '</td>' +
     '</tr></table>';
 
   // Order heading with separator
   const orderHeadingHtml =
-    '<table style="width:100%;border-top:3px solid #000;border-collapse:collapse;margin-bottom:4px;"><tr>' +
-    '<td><h2 style="margin:8px 0;">Order #' + order.shopify.orderNumber + '</h2></td>' +
-    '<td style="text-align:right;"><h3 style="margin:8px 0;">' + order.shopify.customerName + '</h3></td>' +
+    '<table style="width:100%;border-top:2px solid #000;border-collapse:collapse;margin-bottom:2px;"><tr>' +
+    '<td><h2 style="margin:4px 0;font-size:13px;">Order #' + order.shopify.orderNumber + '</h2></td>' +
+    '<td style="text-align:right;"><h3 style="margin:4px 0;font-size:12px;">' + order.shopify.customerName + '</h3></td>' +
     '</tr></table>';
 
   // SLA Countdown
@@ -248,7 +252,7 @@ function printOrderSheet(order: UnifiedOrder): void {
   }
 
   // Items table header
-  const itemTableHead = '<thead><tr><th style="width:70px">Image</th><th>Item</th><th style="width:60px;text-align:center">Quantity</th><th style="width:70px;text-align:right">Price</th><th style="width:70px;text-align:right">Total</th><th style="width:100px;text-align:center">Packed By</th></tr></thead>';
+  const itemTableHead = '<thead><tr><th style="width:45px">Image</th><th>Item</th><th style="width:50px;text-align:center">Qty</th><th style="width:55px;text-align:right">Price</th><th style="width:55px;text-align:right">Total</th><th style="width:70px;text-align:center">Packed By</th></tr></thead>';
 
   // Unfulfilled items section
   let unfulfilledSection = '';
@@ -290,7 +294,7 @@ function printOrderSheet(order: UnifiedOrder): void {
     const estDate = order.productionDueDate ? new Date(order.productionDueDate).toLocaleDateString('en-GB') : '-';
     decoHtml =
       '<div class="section-title">Production Details</div>' +
-      '<table style="font-size:12px;margin-bottom:12px;border-collapse:collapse;">' +
+      '<table style="font-size:10px;margin-bottom:6px;border-collapse:collapse;">' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Deco Job</td><td>' + order.decoJobId + '</td></tr>' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Est. Production</td><td>' + estDate + '</td></tr>' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' +
