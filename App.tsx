@@ -1742,6 +1742,8 @@ const App: React.FC = () => {
                     <EanCoverageReport
                       orders={unifiedOrders}
                       settings={apiSettings}
+                      physicalStock={physicalStock}
+                      referenceProducts={referenceProducts}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
                   </ErrorBoundary>
