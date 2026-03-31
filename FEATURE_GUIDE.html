@@ -355,7 +355,7 @@
   <div style="max-width:500px; font-size:14px; opacity:0.7; line-height:1.8; margin-bottom:60px;">
     A detailed walkthrough of every feature in your production management dashboard — with exact button names, field labels, and step-by-step workflows taken directly from the codebase.
   </div>
-  <div class="meta">March 2026 &bull; Version 3.0</div>
+  <div class="meta">March 2026 &bull; Version 3.1</div>
 </div>
 
 <!-- ==================== TABLE OF CONTENTS ==================== -->
@@ -400,6 +400,7 @@
     <div class="toc-item"><span class="title">Returns &amp; Remake Tracker</span><span class="dots"></span></div>
     <div class="toc-item"><span class="title">Artwork Approval Tracking</span><span class="dots"></span></div>
     <div class="toc-item"><span class="title">Shipping Label Management</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="title">ShipStation Integration</span><span class="dots"></span></div>
   </div>
 
   <div class="toc-section">
@@ -1074,6 +1075,61 @@
     <div class="tip"><span class="tip-icon">💡</span> The "Fulfill &amp; Dispatch" button is the key action — it sends the tracking number to Shopify so the customer gets an automated shipping notification email from Shopify. Make sure the tracking number is correct before clicking.</div>
   </div>
 
+  <div class="divider"></div>
+
+  <!-- ShipStation Integration -->
+  <div class="feature">
+    <div class="feature-header">
+      <div class="feature-icon blue">📦</div>
+      <div>
+        <h3>ShipStation Integration <span class="feature-tab">Dashboard + Settings</span></h3>
+      </div>
+    </div>
+    <p class="desc">Pulls live tracking data from ShipStation and merges it into every order on the Dashboard. Shows carrier name, tracking number (clickable link to carrier tracking page), ship date, and shipping cost — all automatically matched by Shopify order number. Data syncs alongside Shopify and DecoNetwork during every refresh cycle.</p>
+
+    <div class="steps">
+      <div class="steps-title">Setup</div>
+      <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Settings (⚙)</strong> → <strong>Connections</strong> tab.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">Scroll to the <strong>ShipStation</strong> section (📦 truck icon).</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">Enter your <strong>API Key</strong> and <strong>API Secret</strong> from ShipStation → Account → API Settings.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-text">Click <strong>Save</strong>. ShipStation data will pull in on the next sync.</div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">What You See on the Dashboard</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Carrier Badge (Order Row):</strong> A small blue badge appears below the Shopify fulfillment status showing the carrier name (e.g. "Royal Mail", "DPD", "DHL") with a 📦 package icon. Only visible for orders with ShipStation shipment data.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text"><strong>Tracking Card (Expanded Sidebar):</strong> When you expand an order, a blue card titled "ShipStation" appears in the sidebar showing:
+        <br>• <strong>Carrier</strong> — mapped from carrier codes (e.g. <code>royal_mail</code> → Royal Mail, <code>dpd</code> → DPD, <code>hermes_uk</code> → Evri)
+        <br>• <strong>Ship Date</strong> — the date ShipStation recorded the shipment
+        <br>• <strong>Shipping Cost</strong> — in £ (only shown if greater than £0.00)
+        <br>• <strong>Tracking Number</strong> — clickable link that opens the carrier's tracking page in a new tab
+      </div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">Supported Carriers &amp; Tracking URLs</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">
+        <strong>Royal Mail</strong> → royalmail.com/track-your-item<br>
+        <strong>DPD</strong> → tracking.dpd.de (English locale)<br>
+        <strong>DHL</strong> → dhl.com/gb-en tracking<br>
+        <strong>Evri (Hermes)</strong> → evri.com/track/parcel<br>
+        <strong>Yodel</strong> → yodel.co.uk/tracking<br>
+        <strong>FedEx</strong> → fedex.com/fedextrack<br>
+        <strong>UPS</strong> → ups.com/track
+      </div></div>
+    </div>
+
+    <div class="steps">
+      <div class="steps-title">How It Works Under the Hood</div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">ShipStation data fetches <strong>in parallel</strong> with Shopify and DecoNetwork during every sync cycle — no extra waiting time.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">The system calls the ShipStation <strong>Shipments API</strong> (paginated, up to 5,000 shipments) using the sync lookback window (default 90 days).</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Requests go through a <strong>Vercel serverless proxy</strong> (<code>/api/shipstation</code>) that adds Basic Auth headers — your API credentials never leave the backend.</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">When multiple shipments exist for the same order number, the <strong>most recent</strong> one is used (deduplication by order number, sorted by ship date).</div></div>
+      <div class="step"><div class="step-num bullet">•</div><div class="step-text">Matching is done by <strong>Shopify order number</strong> — so your ShipStation order numbers must match your Shopify order numbers for automatic linking.</div></div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span> If ShipStation credentials aren't configured, the integration is silently skipped — no errors, no extra loading time. You can add them at any time and tracking data will appear on the next sync.</div>
+  </div>
+
   <!-- ==================== SECTION 6: SETTINGS ==================== -->
 
   <div class="section-header">
@@ -1097,8 +1153,9 @@
       <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Auto-Refresh Interval:</strong> Set the sync interval in minutes (default: 5). Orders re-fetch from both APIs at this interval. Also re-syncs when the browser tab regains focus after 2+ minutes away.</div></div>
       <div class="step"><div class="step-num">4</div><div class="step-text"><strong>SLA Target Days:</strong> Number of business days for SLA calculations, used to compute each order's <code>slaTargetDate</code>.</div></div>
       <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Holiday Ranges:</strong> Add date ranges for business closures (e.g. Christmas week). SLA calculations skip these non-working days.</div></div>
-      <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Supabase Cloud Sync:</strong> Enter Supabase project URL and anon key to sync notes, returns, artwork approvals, and shipping labels across devices.</div></div>
-      <div class="step"><div class="step-num">7</div><div class="step-text"><strong>Google Gemini API Key:</strong> Required for the ANALYST tab's AI process analysis feature.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-text"><strong>ShipStation API:</strong> Enter your ShipStation API Key and API Secret (from ShipStation → Account → API Settings). Enables automatic tracking data pull — carrier, tracking number, ship date, and cost appear on each order.</div></div>
+      <div class="step"><div class="step-num">7</div><div class="step-text"><strong>Supabase Cloud Sync:</strong> Enter Supabase project URL and anon key to sync notes, returns, artwork approvals, and shipping labels across devices.</div></div>
+      <div class="step"><div class="step-num">8</div><div class="step-text"><strong>Google Gemini API Key:</strong> Required for the ANALYST tab's AI process analysis feature.</div></div>
     </div>
   </div>
 
@@ -1139,7 +1196,7 @@
       </tr>
       <tr style="background:#f9fafb;">
         <td style="font-weight:800;">OPS</td>
-        <td>Returns &amp; Remakes (6 reason codes, 5-step workflow, remake job linking) → Artwork Approvals (5-status pipeline, revision tracking, waiting alerts) → Shipping Labels (6 UK carriers, tracking URLs, Ready to Ship suggestions, Shopify fulfillment push)</td>
+        <td>Returns &amp; Remakes (6 reason codes, 5-step workflow, remake job linking) → Artwork Approvals (5-status pipeline, revision tracking, waiting alerts) → Shipping Labels (6 UK carriers, tracking URLs, Ready to Ship suggestions, Shopify fulfillment push) → ShipStation Integration (automatic tracking pull, carrier badge on rows, tracking card in sidebar)</td>
       </tr>
       <tr>
         <td style="font-weight:800;">STOCK</td>
@@ -1167,7 +1224,7 @@
       </tr>
       <tr>
         <td style="font-weight:800;">⚙ Gear icon</td>
-        <td>API credentials, auto-refresh interval, SLA days, holidays, Supabase config, Gemini key</td>
+        <td>API credentials (Shopify, DecoNetwork, ShipStation), auto-refresh interval, SLA days, holidays, Supabase config, Gemini key</td>
       </tr>
       <tr style="background:#f9fafb;">
         <td style="font-weight:800;">☾ / ☀ icon</td>
@@ -1177,8 +1234,8 @@
   </table>
 
   <div class="page-footer">
-    Stash Shop Sync &bull; Complete Feature Guide &bull; Version 3.0 &bull; March 2026<br>
-    React 19 &bull; TypeScript (strict) &bull; Vite 6 &bull; Tailwind CSS v4 &bull; Express 5
+    Stash Shop Sync &bull; Complete Feature Guide &bull; Version 3.1 &bull; March 2026<br>
+    React 19 &bull; TypeScript (strict) &bull; Vite 6 &bull; Tailwind CSS v4 &bull; Vercel Serverless
   </div>
 
 </div>
