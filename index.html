@@ -102,7 +102,21 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
+          navigator.serviceWorker.register('/sw.js').then((reg) => {
+            // Check for updates every 60 seconds
+            setInterval(() => reg.update(), 60000);
+            // When a new SW is found and activated, reload to get fresh code
+            reg.addEventListener('updatefound', () => {
+              const newSW = reg.installing;
+              if (newSW) {
+                newSW.addEventListener('statechange', () => {
+                  if (newSW.state === 'activated' && navigator.serviceWorker.controller) {
+                    window.location.reload();
+                  }
+                });
+              }
+            });
+          }).catch(() => {});
         });
       }
     </script>

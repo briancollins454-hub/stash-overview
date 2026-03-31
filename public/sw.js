@@ -1,20 +1,11 @@
-const CACHE_NAME = 'stash-sync-v1';
-const STATIC_ASSETS = [
-  '/',
-  '/manifest.json',
-  '/icon-192.svg',
-  '/icon-512.svg',
-];
+const CACHE_NAME = 'stash-sync-v2';
 
-// Install: cache static shell
+// Install: skip waiting immediately so new SW activates right away
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: clean old caches and take over all clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -24,40 +15,28 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for static assets
+// Fetch: network-first for everything — guarantees fresh code on every deploy
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Never cache API calls — always go to network
+  // Never cache API calls
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
-  // For navigation requests (HTML), try network first, fall back to cache
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match('/'))
-    );
-    return;
-  }
-
-  // For static assets: cache-first
+  // Network-first: try network, cache the result, fall back to cache if offline
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         }
         return response;
+      })
+      .catch(() => caches.match(request))
+  );
       });
     })
   );

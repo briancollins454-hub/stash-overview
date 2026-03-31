@@ -122,7 +122,7 @@ const App: React.FC = () => {
   const { notify } = useNotifications();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [activeQuickFilter, setActiveQuickFilter] = useState<'missing_po' | 'ready' | 'order_complete' | 'stock_ready' | 'partially_ready' | 'late' | 'mapping_gap' | 'overdue5' | 'overdue10' | 'production_after_dispatch' | null>(null);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<'missing_po' | 'ready' | 'order_complete' | 'stock_ready' | 'partially_ready' | 'late' | 'mapping_gap' | 'overdue5' | 'overdue10' | 'production_after_dispatch' | 'due_soon' | null>(null);
   const [partialThreshold, setPartialThreshold] = useState<number>(1);
 
   const [rawShopifyOrders, setRawShopifyOrders] = useState<ShopifyOrder[]>([]);
@@ -1024,6 +1024,7 @@ const App: React.FC = () => {
           else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
           else if (activeQuickFilter === 'overdue10') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 10);
           else if (activeQuickFilter === 'production_after_dispatch') filtered = filtered.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000);
+          else if (activeQuickFilter === 'due_soon') filtered = filtered.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5);
       }
       if (startDate && endDate) {
           const s = new Date(startDate); const e = new Date(endDate); e.setHours(23, 59, 59, 999);
@@ -1429,7 +1430,9 @@ const App: React.FC = () => {
                             <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'production_after_dispatch' ? null : 'production_after_dispatch'); }} className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:text-red-700 cursor-pointer transition-colors ${activeQuickFilter === 'production_after_dispatch' ? 'text-red-700 font-black' : 'text-gray-400'}`}>
                                 <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'production_after_dispatch' ? 'fill-red-500 text-red-500' : ''}`} /> PRODUCTION AFTER DISPATCH ({stats.productionAfterDispatch})
                             </div>
-                            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-400"><Square className="w-3.5 h-3.5" /> DUE SOON ({stats.dueSoon})</div>
+                            <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'due_soon' ? null : 'due_soon'); }} className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:text-amber-700 cursor-pointer transition-colors ${activeQuickFilter === 'due_soon' ? 'text-amber-700 font-black' : 'text-gray-400'}`}>
+                                <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'due_soon' ? 'fill-amber-500 text-amber-500' : ''}`} /> DUE SOON ({stats.dueSoon})
+                            </div>
                         </div>
                     </StatsCard>
                     <StatsCard title="FULFILLED (7D)" value={stats.fulfilled7d} icon={<CheckCircle2 />} colorClass="bg-emerald-500" onClick={() => { setShowFulfilled(true); setActiveQuickFilter(null); }} isActive={showFulfilled}>
