@@ -370,7 +370,7 @@ const App: React.FC = () => {
             }
 
             if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey && sOrders.length > 0) {
-                saveCloudOrders(apiSettings, sOrders).catch(console.error);
+                saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
         } else {
             const { MOCK_SHOPIFY_ORDERS, MOCK_DECO_JOBS } = await import('./constants');
@@ -572,7 +572,22 @@ const App: React.FC = () => {
                     setReferenceProducts(cloudData.referenceProducts || []);
                     setMissingCloudTables(cloudData.missingTables || []);
                     if (cloudData.orders && cloudData.orders.length > 0) {
-                        initialOrders = cloudData.orders;
+                        // Merge cloud orders with local cache, preferring whichever has more complete data
+                        const orderMap = new Map<string, ShopifyOrder>();
+                        initialOrders.forEach(o => orderMap.set(o.id, o));
+                        cloudData.orders.forEach(o => {
+                            const existing = orderMap.get(o.id);
+                            if (!existing) {
+                                orderMap.set(o.id, o);
+                            } else if (!existing.shippingAddress && o.shippingAddress) {
+                                orderMap.set(o.id, o);
+                            } else if (existing.shippingAddress && !o.shippingAddress) {
+                                // keep existing — it has address data
+                            } else if (new Date(o.updatedAt) > new Date(existing.updatedAt)) {
+                                orderMap.set(o.id, o);
+                            }
+                        });
+                        initialOrders = Array.from(orderMap.values());
                         setRawShopifyOrders(initialOrders);
                     }
                 }
