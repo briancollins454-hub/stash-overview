@@ -191,7 +191,8 @@ function printOrderSheet(order: UnifiedOrder): void {
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { border: 3px solid #000; padding: 10px; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
+    '.sticker p { margin: 0; }',
     '@media print { body { padding: 8px; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
@@ -207,11 +208,10 @@ function printOrderSheet(order: UnifiedOrder): void {
   const addrLines = addr
     ? [addr.name, addr.address1, addr.address2, [addr.city, addr.zip].filter(Boolean).join(' '), addr.country].filter(Boolean)
     : [];
-  const phoneLine = addr && addr.phone ? '<p>' + addr.phone + '</p>' : '';
 
   const headerHtml =
     '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
-    '<td style="width:58%;vertical-align:top;padding-right:16px;">' +
+    '<td style="vertical-align:top;padding-right:16px;">' +
       '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:200px;margin-bottom:4px;" />' +
       '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:40px;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
       '<table style="font-size:10px;border-collapse:collapse;">' +
@@ -221,14 +221,14 @@ function printOrderSheet(order: UnifiedOrder): void {
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
     '</td>' +
-    '<td style="width:42%;vertical-align:top;">' +
+    '<td style="vertical-align:top;text-align:right;">' +
       '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:13px;margin-bottom:3px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
-      addrLines.map(function(l) { return '<p style="font-size:11px;">' + l + '</p>'; }).join('') +
-      phoneLine +
-      (orderNote ? '<p style="margin-top:6px;font-weight:bold;font-size:10px;">Order Note (repeated)</p><p style="font-size:9px;">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:3px;font-size:10px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p style="margin-top:2px;font-size:10px;">Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+      '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
+      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
+      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
+      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:8px;">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
       '</div>' +
     '</td>' +
     '</tr></table>';
