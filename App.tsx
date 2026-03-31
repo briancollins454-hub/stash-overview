@@ -266,7 +266,7 @@ const App: React.FC = () => {
             // Parallel fetch for speed
             setSyncStatusMsg('Syncing APIs...');
             const [shopifyResult, decoResult, ssResult] = await Promise.allSettled([
-                fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync),
+                fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync, currentBaseOrders.length),
                 fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync),
                 apiSettings.shipStationApiKey && apiSettings.shipStationApiSecret
                     ? fetchShipStationShipments(apiSettings)
@@ -293,6 +293,9 @@ const App: React.FC = () => {
 
             const orderMap = new Map<string, ShopifyOrder>();
             if (!isDeepSync) {
+                currentBaseOrders.forEach(o => orderMap.set(o.id, o));
+            } else {
+                // Deep sync: keep cached orders as base, fresh data overwrites
                 currentBaseOrders.forEach(o => orderMap.set(o.id, o));
             }
             sOrders.forEach(o => orderMap.set(o.id, o)); 
@@ -1433,7 +1436,7 @@ const App: React.FC = () => {
                             <button onClick={() => loadData(false)} title="Quick Sync: Last 120 days Shopify / 600 Deco Jobs" disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest border-r border-gray-100 text-gray-600 hover:bg-gray-50">
                                 <RefreshCw className={`w-3.5 h-3.5 ${loading && !isDeepSyncRunning ? 'animate-spin' : ''}`} /> Sync
                             </button>
-                            <button onClick={() => { if(window.confirm("This will ignore current archive data and attempt to pull a full 365 days from Shopify. Proceed?")) loadData(true); }} disabled={loading} className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest ${isDeepSyncRunning ? 'bg-amber-100 text-amber-800' : 'text-indigo-500 hover:bg-indigo-50'}`}>
+                            <button onClick={() => { if(window.confirm("Deep scan will fetch updates across the full 365-day window. Your cached data will be preserved and updated. Proceed?")) loadData(true); }} disabled={loading} className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest ${isDeepSyncRunning ? 'bg-amber-100 text-amber-800' : 'text-indigo-500 hover:bg-indigo-50'}`}>
                                 {isDeepSyncRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowDownToLine className="w-3.5 h-3.5" />} Deep Scan
                             </button>
                         </div>

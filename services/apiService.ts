@@ -193,7 +193,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
         const mappedItems = edges.map((edge: any) => {
             const i = edge?.node; 
             if (!i || i.quantity <= 0) return null;
-            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
+            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', variantId: i.variant?.id || '', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
         }).filter(Boolean);
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
         if (fStatus === 'partially_fulfilled') fStatus = 'partial';
@@ -204,7 +204,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     });
 };
 
-export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: string, onProgress?: (msg: string) => void, isDeepSync: boolean = false): Promise<ShopifyOrder[]> => {
+export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: string, onProgress?: (msg: string) => void, isDeepSync: boolean = false, cachedOrderCount: number = 0): Promise<ShopifyOrder[]> => {
     if (!settings.useLiveData) return MOCK_SHOPIFY_ORDERS.map(o => ({ ...o, items: o.items.map((it, idx) => ({ ...it, id: `${o.id}-i-${idx}` })) }));
     try {
         if (sinceDate) return await robustShopifyGraphQL(settings, sinceDate, true, onProgress);
@@ -212,6 +212,12 @@ export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: stri
         // If no cache, use a smaller lookback for "Recent" sync to speed up initial load
         const lookback = isDeepSync ? (settings.syncLookbackDays || 365) : 120;
         const minDate = new Date(); minDate.setDate(minDate.getDate() - lookback); minDate.setHours(0,0,0,0);
+
+        // Smart deep sync: if we have cached data, use updated_at filter to only fetch changes
+        if (isDeepSync && cachedOrderCount > 50) {
+            return await robustShopifyGraphQL(settings, minDate.toISOString(), true, onProgress);
+        }
+
         return await robustShopifyGraphQL(settings, minDate.toISOString(), false, onProgress);
     } catch (e: any) {
         throw e;

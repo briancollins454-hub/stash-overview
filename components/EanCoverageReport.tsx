@@ -37,6 +37,33 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, settings,
   const report = useMemo(() => {
     const skuMap = new Map<string, ItemEanInfo>();
 
+    // PASS 1: Build a global Deco EAN index from ALL sources
+    // This means if ANY order's deco job has an EAN for a vendorSku/productCode, we know it
+    const decoEanIndex = new Map<string, string>(); // key (sku/vendorSku lowercase) → ean
+    for (const order of orders) {
+      // From order-level deco job
+      if (order.deco?.items) {
+        for (const d of order.deco.items) {
+          if (d.ean && d.ean !== '-' && d.ean !== '') {
+            if (d.vendorSku) decoEanIndex.set(d.vendorSku.toLowerCase(), d.ean);
+            if (d.productCode) decoEanIndex.set(d.productCode.toLowerCase(), d.ean);
+          }
+        }
+      }
+      // From per-item cached deco data (itemDecoData)
+      for (const item of order.shopify.items) {
+        if (item.itemDecoData?.items) {
+          for (const d of item.itemDecoData.items) {
+            if (d.ean && d.ean !== '-' && d.ean !== '') {
+              if (d.vendorSku) decoEanIndex.set(d.vendorSku.toLowerCase(), d.ean);
+              if (d.productCode) decoEanIndex.set(d.productCode.toLowerCase(), d.ean);
+            }
+          }
+        }
+      }
+    }
+
+    // PASS 2: Build SKU report with cross-referenced EANs
     for (const order of orders) {
       for (const item of order.shopify.items) {
         if (!item.sku) continue;
@@ -44,16 +71,36 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, settings,
         const shopifyEan = (item.ean && item.ean !== '-') ? item.ean : '';
         const variantId = item.variantId || '';
 
-        // Find matched deco item EAN
+        // Find Deco EAN from multiple sources
         let decoEan = '';
-        if (item.linkedDecoItemId && order.deco) {
-          const decoItem = order.deco.items.find(d => {
-            const dId = d.vendorSku || d.productCode || d.name;
-            return item.linkedDecoItemId?.includes(dId);
-          });
-          if (decoItem?.ean && decoItem.ean !== '-' && decoItem.ean !== '') {
-            decoEan = decoItem.ean;
+
+        // Source 1: Linked deco item on this order's deco job
+        if (item.linkedDecoItemId && order.deco?.items) {
+          const linkedParts = item.linkedDecoItemId.split('@@@');
+          const linkedId = linkedParts[0];
+          if (linkedId && linkedId !== '__NO_MAP__') {
+            const decoItem = order.deco.items.find(d =>
+              d.vendorSku === linkedId || d.productCode === linkedId || d.name === linkedId
+            );
+            if (decoItem?.ean && decoItem.ean !== '-' && decoItem.ean !== '') {
+              decoEan = decoItem.ean;
+            }
           }
+        }
+
+        // Source 2: Per-item cached deco data
+        if (!decoEan && item.itemDecoData?.items) {
+          for (const d of item.itemDecoData.items) {
+            if (d.ean && d.ean !== '-' && d.ean !== '') {
+              decoEan = d.ean;
+              break;
+            }
+          }
+        }
+
+        // Source 3: Global Deco EAN index (cross-order lookup by SKU)
+        if (!decoEan) {
+          decoEan = decoEanIndex.get(key) || '';
         }
 
         const existing = skuMap.get(key);
