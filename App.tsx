@@ -11,7 +11,7 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
+import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchCloudSettings, saveCloudSettings } from './services/syncService';
 import { getItem as getLocalItem, setItem as setLocalItem } from './services/localStore';
 import { UnifiedOrder, DecoJob, DecoItem, ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from './types';
 import OrderTable from './components/OrderTable';
@@ -541,6 +541,16 @@ const App: React.FC = () => {
             if (cachedJobs) setRawDecoJobs(cachedJobs);
 
             if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
+                // If Shopify domain is empty, try loading settings from cloud first
+                if (!apiSettings.shopifyDomain) {
+                    setSyncStatusMsg('Loading Cloud Settings...');
+                    const cloudSettings = await fetchCloudSettings(apiSettings.supabaseUrl, apiSettings.supabaseAnonKey);
+                    if (cloudSettings && cloudSettings.shopifyDomain) {
+                        const merged = { ...apiSettings, ...cloudSettings, supabaseUrl: apiSettings.supabaseUrl, supabaseAnonKey: apiSettings.supabaseAnonKey };
+                        setApiSettings(merged);
+                        localStorage.setItem('stash_api_settings', JSON.stringify(merged));
+                    }
+                }
                 setSyncStatusMsg('Loading Cloud State...');
                 const cloudData = await fetchCloudData(apiSettings);
                 if (cloudData) {
@@ -570,6 +580,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
       localStorage.setItem('stash_api_settings', JSON.stringify(apiSettings));
+      if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey && apiSettings.shopifyDomain) {
+          saveCloudSettings(apiSettings).catch(console.error);
+      }
   }, [apiSettings]);
 
   const updatePhysicalStock = (updater: (prev: PhysicalStockItem[]) => PhysicalStockItem[]) => {

@@ -370,3 +370,66 @@ export const saveProductMapping = async (settings: ApiSettings, shopify_pattern:
         }
     }
 };
+
+/**
+ * Fetch API settings from Supabase cloud (stash_settings table).
+ * Returns the saved settings or null if not found / table missing.
+ */
+export const fetchCloudSettings = async (supabaseUrl: string, supabaseAnonKey: string): Promise<Partial<ApiSettings> | null> => {
+    const anonKey = supabaseAnonKey.trim();
+    let url = supabaseUrl.trim();
+    if (!url || !anonKey) return null;
+    if (!url.startsWith('http')) url = `https://${url}`;
+    url = url.replace(/\/$/, '');
+
+    const headers: Record<string, string> = {
+        'apikey': anonKey,
+        'Authorization': `Bearer ${anonKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+    };
+
+    try {
+        const res = await fetchWithProxy(`${url}/rest/v1/stash_settings?select=settings_data&id=eq.main&limit=1`, {
+            method: 'GET',
+            headers
+        });
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0 && data[0].settings_data) {
+            return data[0].settings_data as Partial<ApiSettings>;
+        }
+        return null;
+    } catch (e: any) {
+        console.warn('Cloud settings fetch failed:', e.message || e);
+        return null;
+    }
+};
+
+/**
+ * Save API settings to Supabase cloud (stash_settings table).
+ * Upserts a single row with id='main'.
+ */
+export const saveCloudSettings = async (settings: ApiSettings): Promise<void> => {
+    const baseUrl = getBaseUrl(settings);
+    if (!baseUrl || !settings.supabaseAnonKey) return;
+
+    const headers = getHeaders(settings, 'resolution=merge-duplicates');
+
+    try {
+        await fetchWithProxy(`${baseUrl}/rest/v1/stash_settings`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                id: 'main',
+                settings_data: settings,
+                updated_at: new Date().toISOString()
+            })
+        });
+    } catch (e: any) {
+        if (e.status === 404 || e.message.includes('404')) {
+            console.warn('Cloud Settings Save: Table "stash_settings" not found. Create it in Supabase.');
+        } else {
+            console.error('Cloud Settings Save Failed:', e.message || e);
+        }
+    }
+};
