@@ -11,7 +11,9 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchCloudSettings, saveCloudSettings } from './services/syncService';
+import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
+import { db } from './firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem } from './services/localStore';
 import { UnifiedOrder, DecoJob, DecoItem, ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from './types';
 import OrderTable from './components/OrderTable';
@@ -540,17 +542,25 @@ const App: React.FC = () => {
             }
             if (cachedJobs) setRawDecoJobs(cachedJobs);
 
-            if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-                // If Shopify domain is empty, try loading settings from cloud first
-                if (!apiSettings.shopifyDomain) {
-                    setSyncStatusMsg('Loading Cloud Settings...');
-                    const cloudSettings = await fetchCloudSettings(apiSettings.supabaseUrl, apiSettings.supabaseAnonKey);
-                    if (cloudSettings && cloudSettings.shopifyDomain) {
-                        const merged = { ...apiSettings, ...cloudSettings, supabaseUrl: apiSettings.supabaseUrl, supabaseAnonKey: apiSettings.supabaseAnonKey };
-                        setApiSettings(merged);
-                        localStorage.setItem('stash_api_settings', JSON.stringify(merged));
+            // Load settings from Firestore (tied to user account)
+            if (user?.uid) {
+                try {
+                    setSyncStatusMsg('Loading your settings...');
+                    const settingsDoc = await getDoc(doc(db, 'user_settings', user.uid));
+                    if (settingsDoc.exists()) {
+                        const cloudSettings = settingsDoc.data().settings as Partial<ApiSettings>;
+                        if (cloudSettings && cloudSettings.shopifyDomain) {
+                            const merged = { ...apiSettings, ...cloudSettings };
+                            setApiSettings(merged);
+                            localStorage.setItem('stash_api_settings', JSON.stringify(merged));
+                        }
                     }
+                } catch (e) {
+                    console.warn('Failed to load cloud settings:', e);
                 }
+            }
+
+            if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
                 setSyncStatusMsg('Loading Cloud State...');
                 const cloudData = await fetchCloudData(apiSettings);
                 if (cloudData) {
@@ -580,10 +590,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
       localStorage.setItem('stash_api_settings', JSON.stringify(apiSettings));
-      if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey && apiSettings.shopifyDomain) {
-          saveCloudSettings(apiSettings).catch(console.error);
+      // Save settings to Firestore so they load on any device
+      if (user?.uid && apiSettings.shopifyDomain) {
+          setDoc(doc(db, 'user_settings', user.uid), {
+              settings: apiSettings,
+              updatedAt: new Date().toISOString(),
+              email: user.email
+          }, { merge: true }).catch(console.error);
       }
-  }, [apiSettings]);
+  }, [apiSettings, user]);
 
   const updatePhysicalStock = (updater: (prev: PhysicalStockItem[]) => PhysicalStockItem[]) => {
       setPhysicalStock(prev => {
