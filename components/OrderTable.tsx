@@ -145,15 +145,18 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
     ? props.map(p => '<br><small style="color:#555;font-size:8px;">' + p.name + ': ' + p.value + '</small>').join('')
     : '';
   const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + i.sku + '</small>' : '';
+  const eanHtml = i.ean && i.ean !== '-' ? '<br><small style="color:#888;font-size:8px;">EAN: ' + i.ean + '</small>' : '';
   const imgHtml = i.imageUrl
     ? '<img src="' + i.imageUrl + '" style="width:32px;height:32px;object-fit:cover;" />'
     : '';
   const unitPrice = i.price ? parseFloat(i.price) : 0;
   const lineTotal = unitPrice * (i.quantity || 0);
+  const qty = i.quantity || 0;
+  const qtyHtml = qty > 1 ? '<strong style="font-size:12px;">' + qty + '</strong>' : '' + qty;
   return '<tr>' +
     '<td style="width:36px;text-align:center;">' + imgHtml + '</td>' +
-    '<td>' + i.name + propsHtml + skuHtml + '</td>' +
-    '<td style="text-align:center;">' + i.quantity + '</td>' +
+    '<td>' + i.name + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td style="text-align:center;">' + qtyHtml + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
     '<td style="width:60px;"></td>' +
