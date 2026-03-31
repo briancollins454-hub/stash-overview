@@ -5,3 +5,5 @@ dist
 *.log
 .DS_Store
 migrated_prompt_history/
+analysis_output.txt
+analyze.py

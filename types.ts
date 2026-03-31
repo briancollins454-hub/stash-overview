@@ -45,6 +45,16 @@ export interface ShopifyOrder {
   paymentStatus: 'paid' | 'pending' | 'refunded';
   // Fix: Added 'restocked' to the fulfillmentStatus union to match line-item possibilities and fix App.tsx logic
   fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial' | 'restocked';
+  shippingAddress?: {
+    name: string;
+    address1: string;
+    address2?: string;
+    city: string;
+    province?: string;
+    zip: string;
+    country: string;
+    phone?: string;
+  };
   timelineComments: string[]; // Looking for 6-digit codes
   items: {
     id: string; // UNIQUE ID (GID) - CRITICAL for mapping

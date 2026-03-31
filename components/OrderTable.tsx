@@ -277,6 +277,15 @@ function printOrderSheet(order: UnifiedOrder): void {
       '<div><span class="label">Customer Email:</span> <span class="value">' + (order.shopify.email || '-') + '</span></div>' +
       decoDetail +
     '</div></div>' +
+    (() => {
+      const addr = order.shopify.shippingAddress;
+      if (!addr) return '';
+      const lines = [addr.name, addr.address1, addr.address2, [addr.city, addr.province].filter(Boolean).join(', '), addr.zip, addr.country].filter(Boolean);
+      return '<div class="section"><h2>Shipping Address</h2>' +
+        '<div style="font-size:12px;font-weight:bold;line-height:1.6">' + lines.join('<br>') + '</div>' +
+        (addr.phone ? '<div style="font-size:11px;color:#666;margin-top:4px">Tel: ' + addr.phone + '</div>' : '') +
+        '</div>';
+    })() +
     stockSection +
     mtoSection +
     '<div class="two-col"><div class="section"><h2>QC Checklist</h2><div class="qc-grid">' +
