@@ -171,8 +171,8 @@ function printOrderSheet(order: UnifiedOrder): void {
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
-    '@page { margin: 0; size: A4; }',
-    'body { font-family: Arial, sans-serif; padding: 10mm; color: #111; font-size: 11px; position: relative; }',
+    '@page { margin: 2cm 2cm 10mm 10mm; size: A4; }',
+    'body { font-family: Arial, sans-serif; padding: 0; color: #111; font-size: 11px; }',
     '.rush { background: #dc2626; color: white; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 4px 12px; margin-bottom: 6px; }',
     '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }',
     '.items-table th, .items-table td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }',
@@ -191,7 +191,7 @@ function printOrderSheet(order: UnifiedOrder): void {
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { position: fixed; top: 2cm; right: 2cm; width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
     '.sticker p { margin: 0; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
@@ -210,15 +210,7 @@ function printOrderSheet(order: UnifiedOrder): void {
     : [];
 
   const headerHtml =
-    '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
-      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
-      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
-      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:8px;">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
-    '</div>' +
-    '<table style="width:60%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
+    '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
     '<td style="vertical-align:top;">' +
       '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:200px;margin-bottom:4px;" />' +
       '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:40px;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
@@ -228,6 +220,16 @@ function printOrderSheet(order: UnifiedOrder): void {
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
+    '</td>' +
+    '<td style="vertical-align:top;text-align:right;">' +
+      '<div class="sticker">' +
+      '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
+      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
+      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
+      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:8px;">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+      '</div>' +
     '</td>' +
     '</tr></table>';
 
