@@ -1383,10 +1383,10 @@ const App: React.FC = () => {
                             <ChevronDown className="w-3 h-3 text-gray-400" />
                         </div>
                         <div className="flex items-center px-3 gap-2">
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase" />
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
                             <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
                             <span className="text-gray-300 font-light">—</span>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase" />
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
                             <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
                             {(startDate || endDate) && <button onClick={() => {setStartDate(''); setEndDate('')}} className="ml-2 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-red-500"><X className="w-3 h-3"/></button>}
                         </div>
@@ -1404,7 +1404,7 @@ const App: React.FC = () => {
                         <Store className="w-3.5 h-3.5" /> 
                         {groupingMode === 'club' ? 'Group by Vendor' : 'Group by Club'}
                     </button>
-                    <div className="flex-1 min-w-[300px] relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" /><input type="text" placeholder="Search Orders, Job IDs, Customers..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold uppercase tracking-widest focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none" /></div>
+                    <div className="flex-1 min-w-[300px] relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" /><input type="text" placeholder="Search Orders, Job IDs, Customers..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold uppercase tracking-widest text-gray-900 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none" /></div>
                     <div className="flex items-center gap-2">
                         {loading && !isDeepSyncRunning && <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100 text-[10px] font-bold text-indigo-600 uppercase tracking-widest shadow-sm"><span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>{syncStatusMsg || 'SYNCING...'}</div>}
                         {isDeepSyncRunning && <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] font-bold text-amber-700 uppercase tracking-widest shadow-sm"><Loader2 className="w-3.5 h-3.5 animate-spin" />{syncStatusMsg || 'DEEP SCANNING...'}</div>}
