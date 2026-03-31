@@ -1738,6 +1738,7 @@ const App: React.FC = () => {
                   <ErrorBoundary fallbackTitle="EAN Coverage Error">
                     <EanCoverageReport
                       orders={unifiedOrders}
+                      settings={apiSettings}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
                   </ErrorBoundary>

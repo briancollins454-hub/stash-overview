@@ -1,9 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { UnifiedOrder } from '../types';
-import { BarChart3, AlertTriangle, CheckCircle2, Search, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { ApiSettings } from './SettingsModal';
+import { updateShopifyVariantBarcode } from '../services/apiService';
+import { saveReferenceProducts } from '../services/syncService';
+import { BarChart3, AlertTriangle, CheckCircle2, Search, ChevronDown, ChevronUp, ArrowRightLeft, Upload, Loader2, ArrowRight } from 'lucide-react';
 
 interface EanCoverageReportProps {
   orders: UnifiedOrder[];
+  settings: ApiSettings;
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
@@ -17,12 +21,18 @@ interface ItemEanInfo {
   bothMatch: boolean;
   orderNumbers: string[];
   totalQty: number;
+  variantIds: string[]; // All Shopify variant GIDs for this SKU
+  vendor: string;
+  canPushToShopify: boolean; // Has Deco EAN + Shopify variant ID but no Shopify EAN
 }
 
-const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigateToOrder }) => {
+const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, settings, onNavigateToOrder }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterMode, setFilterMode] = useState<'all' | 'missing_shopify' | 'missing_deco' | 'missing_both' | 'mismatch' | 'matched'>('missing_shopify');
+  const [filterMode, setFilterMode] = useState<'all' | 'missing_shopify' | 'missing_deco' | 'missing_both' | 'mismatch' | 'matched' | 'pushable'>('missing_shopify');
   const [isExpanded, setIsExpanded] = useState(true);
+  const [syncing, setSyncing] = useState<Record<string, 'pending' | 'success' | 'error'>>({});
+  const [batchSyncing, setBatchSyncing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, errors: 0 });
 
   const report = useMemo(() => {
     const skuMap = new Map<string, ItemEanInfo>();
@@ -32,6 +42,7 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
         if (!item.sku) continue;
         const key = item.sku.toLowerCase();
         const shopifyEan = (item.ean && item.ean !== '-') ? item.ean : '';
+        const variantId = item.variantId || '';
 
         // Find matched deco item EAN
         let decoEan = '';
@@ -49,9 +60,11 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
         if (existing) {
           if (!existing.shopifyEan && shopifyEan) existing.shopifyEan = shopifyEan;
           if (!existing.decoEan && decoEan) existing.decoEan = decoEan;
+          if (variantId && !existing.variantIds.includes(variantId)) existing.variantIds.push(variantId);
           existing.hasShopifyEan = !!existing.shopifyEan;
           existing.hasDecoEan = !!existing.decoEan;
           existing.bothMatch = existing.hasShopifyEan && existing.hasDecoEan && existing.shopifyEan === existing.decoEan;
+          existing.canPushToShopify = !existing.hasShopifyEan && existing.hasDecoEan && existing.variantIds.length > 0;
           if (!existing.orderNumbers.includes(order.shopify.orderNumber)) {
             existing.orderNumbers.push(order.shopify.orderNumber);
           }
@@ -59,6 +72,7 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
         } else {
           const hasS = !!shopifyEan;
           const hasD = !!decoEan;
+          const vIds = variantId ? [variantId] : [];
           skuMap.set(key, {
             sku: item.sku,
             name: item.name,
@@ -69,6 +83,9 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
             bothMatch: hasS && hasD && shopifyEan === decoEan,
             orderNumbers: [order.shopify.orderNumber],
             totalQty: item.quantity,
+            variantIds: vIds,
+            vendor: item.vendor || '',
+            canPushToShopify: !hasS && hasD && vIds.length > 0,
           });
         }
       }
@@ -81,8 +98,9 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
     const matched = items.filter(i => i.bothMatch).length;
     const mismatched = items.filter(i => i.hasShopifyEan && i.hasDecoEan && !i.bothMatch).length;
     const missingBoth = items.filter(i => !i.hasShopifyEan && !i.hasDecoEan).length;
+    const pushable = items.filter(i => i.canPushToShopify).length;
 
-    return { items, total, withShopify, withDeco, matched, mismatched, missingBoth };
+    return { items, total, withShopify, withDeco, matched, mismatched, missingBoth, pushable };
   }, [orders]);
 
   const filtered = useMemo(() => {
@@ -92,6 +110,7 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
     else if (filterMode === 'missing_both') items = items.filter(i => !i.hasShopifyEan && !i.hasDecoEan);
     else if (filterMode === 'mismatch') items = items.filter(i => i.hasShopifyEan && i.hasDecoEan && !i.bothMatch);
     else if (filterMode === 'matched') items = items.filter(i => i.bothMatch);
+    else if (filterMode === 'pushable') items = items.filter(i => i.canPushToShopify);
 
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
@@ -104,6 +123,91 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
   const shopifyPct = report.total > 0 ? Math.round((report.withShopify / report.total) * 100) : 0;
   const decoPct = report.total > 0 ? Math.round((report.withDeco / report.total) * 100) : 0;
   const matchPct = report.total > 0 ? Math.round((report.matched / report.total) * 100) : 0;
+
+  // Push a single Deco EAN → Shopify variant barcode
+  const pushSingleToShopify = useCallback(async (item: ItemEanInfo) => {
+    if (!item.canPushToShopify || !item.decoEan || item.variantIds.length === 0) return;
+    const key = item.sku.toLowerCase();
+    setSyncing(prev => ({ ...prev, [key]: 'pending' }));
+    try {
+      // Update all variants with this SKU (handles multi-size same SKU edge case)
+      for (const vid of item.variantIds) {
+        const result = await updateShopifyVariantBarcode(settings, vid, item.decoEan);
+        if (!result.success) throw new Error(result.error);
+      }
+      setSyncing(prev => ({ ...prev, [key]: 'success' }));
+    } catch {
+      setSyncing(prev => ({ ...prev, [key]: 'error' }));
+    }
+  }, [settings]);
+
+  // Batch push all pushable items
+  const batchPushToShopify = useCallback(async () => {
+    const pushable = report.items.filter(i => i.canPushToShopify);
+    if (pushable.length === 0) return;
+    if (!confirm(`Push ${pushable.length} Deco EAN(s) to Shopify variant barcodes?\n\nThis will update product data in Shopify.`)) return;
+
+    setBatchSyncing(true);
+    setBatchProgress({ done: 0, total: pushable.length, errors: 0 });
+    let errors = 0;
+
+    for (let idx = 0; idx < pushable.length; idx++) {
+      const item = pushable[idx];
+      const key = item.sku.toLowerCase();
+      setSyncing(prev => ({ ...prev, [key]: 'pending' }));
+      try {
+        for (const vid of item.variantIds) {
+          const result = await updateShopifyVariantBarcode(settings, vid, item.decoEan);
+          if (!result.success) throw new Error(result.error);
+        }
+        setSyncing(prev => ({ ...prev, [key]: 'success' }));
+      } catch {
+        setSyncing(prev => ({ ...prev, [key]: 'error' }));
+        errors++;
+      }
+      setBatchProgress({ done: idx + 1, total: pushable.length, errors });
+    }
+
+    // Also save matched EANs to reference products table
+    try {
+      const refs = report.items
+        .filter(i => i.hasShopifyEan || i.hasDecoEan)
+        .map(i => ({
+          ean: i.shopifyEan || i.decoEan,
+          vendor: i.vendor,
+          productCode: i.sku,
+          description: i.name,
+          colour: '',
+          size: '',
+        }))
+        .filter(r => r.ean && r.ean !== '-');
+      if (refs.length > 0) await saveReferenceProducts(settings, refs);
+    } catch { /* non-critical */ }
+
+    setBatchSyncing(false);
+  }, [report.items, settings]);
+
+  // Save all known EANs to master reference table
+  const saveToReferenceTable = useCallback(async () => {
+    const refs = report.items
+      .filter(i => i.hasShopifyEan || i.hasDecoEan)
+      .map(i => ({
+        ean: i.shopifyEan || i.decoEan,
+        vendor: i.vendor,
+        productCode: i.sku,
+        description: i.name,
+        colour: '',
+        size: '',
+      }))
+      .filter(r => r.ean && r.ean !== '-');
+    if (refs.length === 0) return;
+    try {
+      await saveReferenceProducts(settings, refs);
+      alert(`Saved ${refs.length} EAN references to master table.`);
+    } catch (e: any) {
+      alert(`Error saving references: ${e.message}`);
+    }
+  }, [report.items, settings]);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -156,9 +260,10 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
               {([
                 ['all', 'All'],
-                ['missing_shopify', 'Missing Shopify'],
-                ['missing_deco', 'Missing Deco'],
-                ['missing_both', 'Missing Both'],
+                ['pushable', `Pushable (${report.pushable})`],
+                ['missing_shopify', 'No Shopify'],
+                ['missing_deco', 'No Deco'],
+                ['missing_both', 'No Either'],
                 ['mismatch', 'Mismatch'],
                 ['matched', 'Matched'],
               ] as [string, string][]).map(([key, label]) => (
@@ -175,6 +280,38 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{filtered.length} results</span>
           </div>
 
+          {/* Sync Actions Bar */}
+          {report.pushable > 0 && (
+            <div className="flex items-center gap-4 p-3 rounded-lg border border-indigo-200 bg-indigo-50">
+              <ArrowRightLeft className="w-5 h-5 text-indigo-600 shrink-0" />
+              <div className="flex-1">
+                <span className="text-xs font-bold text-indigo-900 uppercase tracking-widest">
+                  {report.pushable} SKU{report.pushable !== 1 ? 's' : ''} can be auto-filled
+                </span>
+                <span className="text-[10px] text-indigo-600 ml-2">Deco has EAN → push to Shopify barcode</span>
+              </div>
+              {batchSyncing ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                  <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest">
+                    {batchProgress.done}/{batchProgress.total}{batchProgress.errors > 0 ? ` (${batchProgress.errors} failed)` : ''}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={batchPushToShopify}
+                    className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-indigo-700 transition-colors flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" /> Push All to Shopify
+                  </button>
+                  <button onClick={saveToReferenceTable}
+                    className="px-3 py-1.5 bg-white text-indigo-700 border border-indigo-300 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-indigo-100 transition-colors">
+                    Save to Reference Table
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Table */}
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
             <table className="w-full text-xs border-collapse">
@@ -185,6 +322,7 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
                   <th className="px-3 py-2 text-center font-bold text-gray-500 uppercase tracking-widest">Shopify EAN</th>
                   <th className="px-3 py-2 text-center font-bold text-gray-500 uppercase tracking-widest">Deco EAN</th>
                   <th className="px-3 py-2 text-center font-bold text-gray-500 uppercase tracking-widest">Status</th>
+                  <th className="px-3 py-2 text-center font-bold text-gray-500 uppercase tracking-widest">Action</th>
                   <th className="px-3 py-2 text-center font-bold text-gray-500 uppercase tracking-widest">Orders</th>
                 </tr>
               </thead>
@@ -212,6 +350,23 @@ const EanCoverageReport: React.FC<EanCoverageReportProps> = ({ orders, onNavigat
                         <span className="inline-flex items-center gap-1 text-amber-600 font-bold"><AlertTriangle className="w-3.5 h-3.5" /> MISMATCH</span>
                       ) : (
                         <span className="text-gray-400 font-bold">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {syncing[item.sku.toLowerCase()] === 'success' ? (
+                        <span className="text-emerald-600 font-bold text-[10px] uppercase tracking-widest">Done</span>
+                      ) : syncing[item.sku.toLowerCase()] === 'pending' ? (
+                        <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin mx-auto" />
+                      ) : syncing[item.sku.toLowerCase()] === 'error' ? (
+                        <span className="text-red-500 font-bold text-[10px] uppercase tracking-widest">Failed</span>
+                      ) : item.canPushToShopify ? (
+                        <button onClick={() => pushSingleToShopify(item)}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 rounded border border-indigo-200 hover:bg-indigo-100 text-[9px] font-bold uppercase tracking-widest transition-colors"
+                          title={`Push Deco EAN ${item.decoEan} → Shopify`}>
+                          <ArrowRight className="w-3 h-3" /> Push
+                        </button>
+                      ) : (
+                        <span className="text-gray-300">—</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-center">

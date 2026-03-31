@@ -67,6 +67,7 @@ export interface ShopifyOrder {
     fulfilledQuantity?: number; // Added to track line-item level partial shipments
     sku: string;
     ean?: string; // Barcode
+    variantId?: string; // Shopify ProductVariant GID (for barcode updates)
     productType?: string; // e.g. Apparel, Service, Accessory
     vendor?: string; // Item Vendor (e.g. Nike, Stash Shop)
     itemStatus?: 'fulfilled' | 'unfulfilled' | 'restocked'; // Shopify Status

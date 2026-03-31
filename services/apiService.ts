@@ -168,7 +168,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     let pageCount = 0;
     
     const filterField = isDelta ? 'updated_at' : 'created_at';
-    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
         const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
@@ -305,7 +305,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
     const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
     const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
     
-    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } }`;
+    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } }`;
     
     try {
         const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, variables: { id: orderId } }) });
@@ -317,7 +317,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
         const mappedItems = edges.map((edge: any) => {
             const i = edge?.node; 
             if (!i || i.quantity <= 0) return null;
-            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
+            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', variantId: i.variant?.id || '', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
         }).filter(Boolean);
 
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
@@ -344,4 +344,28 @@ export const fetchOrderTimeline = async (settings: ApiSettings, orderId: string)
         const json = await res.json();
         return { comments: (json.events || []).map((e: any) => e.body || e.message || '').filter((s: string) => s.trim().length > 0) };
     } catch (e) { return { comments: [] }; }
+};
+
+export const updateShopifyVariantBarcode = async (settings: ApiSettings, variantId: string, barcode: string): Promise<{ success: boolean; error?: string }> => {
+    if (!settings.shopifyDomain || !settings.shopifyAccessToken) return { success: false, error: 'Shopify credentials missing' };
+    if (!variantId || !variantId.startsWith('gid://')) return { success: false, error: 'Invalid variant ID' };
+    if (!barcode || barcode.trim().length === 0) return { success: false, error: 'Empty barcode' };
+
+    const cleanDomain = settings.shopifyDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
+    const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
+
+    const mutation = `mutation productVariantUpdate($input: ProductVariantInput!) { productVariantUpdate(input: $input) { productVariant { id barcode } userErrors { field message } } }`;
+    const variables = { input: { id: variantId, barcode: barcode.trim() } };
+
+    try {
+        const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query: mutation, variables }) });
+        const json = await res.json();
+        const errors = json.data?.productVariantUpdate?.userErrors;
+        if (errors?.length > 0) return { success: false, error: errors.map((e: any) => e.message).join(', ') };
+        if (json.errors) return { success: false, error: json.errors[0]?.message || 'GraphQL error' };
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message };
+    }
 };
