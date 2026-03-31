@@ -5,7 +5,7 @@ import {
     Search, CalendarClock, Zap, Copy, Terminal, MonitorSmartphone, CheckCircle2, 
     Mail, Link as LinkIcon, ExternalLink, Calendar, Trash2, CalendarDays, Plus, 
     CalendarRange, Database, Server, Info, ShieldCheck, Code2, History, RefreshCw, Key,
-    ShieldAlert
+    ShieldAlert, Truck
 } from 'lucide-react';
 
 export interface HolidayRange {
@@ -39,6 +39,8 @@ export interface ApiSettings {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   autoRefreshInterval?: number;
+  shipStationApiKey?: string;
+  shipStationApiSecret?: string;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -400,6 +402,14 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                                  <input type="text" value={apiSettings.decoUsername} onChange={e => handleApiChange('decoUsername', e.target.value)} placeholder="Username" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
                                  <input type={showSecrets ? "text" : "password"} value={apiSettings.decoPassword} onChange={e => handleApiChange('decoPassword', e.target.value)} placeholder="Password" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
                              </div>
+                        </div>
+                   </div>
+                   <div className="space-y-4 p-5 bg-slate-50 border border-slate-200 rounded-2xl">
+                        <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-widest flex items-center gap-2"><Truck className="w-4 h-4" /> ShipStation</h4>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Pull tracking & carrier data from ShipStation automatically</p>
+                        <div className="space-y-3">
+                            <input type={showSecrets ? "text" : "password"} value={apiSettings.shipStationApiKey || ''} onChange={e => handleApiChange('shipStationApiKey', e.target.value)} placeholder="API Key" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            <input type={showSecrets ? "text" : "password"} value={apiSettings.shipStationApiSecret || ''} onChange={e => handleApiChange('shipStationApiSecret', e.target.value)} placeholder="API Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                    </div>
                    <button onClick={() => setShowSecrets(!showSecrets)} className="text-[9px] font-black uppercase text-indigo-600 hover:text-indigo-800 tracking-widest flex items-center gap-1">{showSecrets ? <EyeOff className="w-3 h-3"/> : <Eye className="w-3 h-3"/>} {showSecrets ? 'Hide Passwords' : 'Reveal Secrets'}</button>

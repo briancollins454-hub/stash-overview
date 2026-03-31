@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { UnifiedOrder, DecoJob } from '../types';
 import { isEligibleForMapping } from '../services/apiService';
+import { getTrackingUrl } from '../services/shipstationService';
 import { 
     AlertCircle, Truck, Clock, AlertTriangle, Package, CheckCircle2, 
     ChevronDown, ChevronUp, ShoppingBag, ArrowUpDown, ExternalLink, 
@@ -1003,6 +1004,11 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                     <ExternalLink className="w-3 h-3 opacity-50" />
                                 </span>
                              </div>
+                             {order.shipStationTracking && (
+                                <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest bg-blue-100 text-blue-700 rounded border border-blue-200">
+                                    <Package className="w-2.5 h-2.5" /> {order.shipStationTracking.carrier}
+                                </div>
+                             )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                              <span className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-full border uppercase tracking-widest ${statusBadgeClass}`}>
@@ -1219,6 +1225,30 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                 </div>
                                                 <div className="text-[10px] text-emerald-600 mb-1 font-bold uppercase tracking-widest">Date: {new Date(order.fulfillmentDate).toLocaleDateString()}</div>
                                                 <div className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Lead Time: {order.fulfillmentDuration} Working Days</div>
+                                            </div>
+                                        )}
+
+                                        {order.shipStationTracking && (
+                                            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 text-sm shadow-sm font-bold uppercase tracking-widest">
+                                                <div className="flex items-center gap-2 text-blue-800 mb-2">
+                                                    <Package className="w-5 h-5" />
+                                                    <span>ShipStation</span>
+                                                </div>
+                                                <div className="text-[10px] text-blue-600 mb-1 font-bold uppercase tracking-widest">Carrier: {order.shipStationTracking.carrier}</div>
+                                                <div className="text-[10px] text-blue-600 mb-1 font-bold uppercase tracking-widest">Ship Date: {new Date(order.shipStationTracking.shipDate).toLocaleDateString()}</div>
+                                                {order.shipStationTracking.shippingCost > 0 && (
+                                                    <div className="text-[10px] text-blue-600 mb-1 font-bold uppercase tracking-widest">Cost: £{order.shipStationTracking.shippingCost.toFixed(2)}</div>
+                                                )}
+                                                {order.shipStationTracking.trackingNumber && (
+                                                    <a 
+                                                        href={getTrackingUrl(order.shipStationTracking.carrier, order.shipStationTracking.trackingNumber) || '#'}
+                                                        target="_blank" 
+                                                        rel="noreferrer"
+                                                        className="mt-2 flex items-center gap-1 text-[10px] text-blue-700 hover:text-blue-900 font-black uppercase tracking-widest underline"
+                                                    >
+                                                        <ExternalLink className="w-3 h-3" /> {order.shipStationTracking.trackingNumber}
+                                                    </a>
+                                                )}
                                             </div>
                                         )}
 

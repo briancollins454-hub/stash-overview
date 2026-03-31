@@ -10,6 +10,7 @@ import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { getItem as getLocalItem, setItem as setLocalItem } from './services/localStore';
 import { UnifiedOrder, DecoJob, DecoItem, ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from './types';
@@ -127,6 +128,7 @@ const App: React.FC = () => {
 
   const [rawShopifyOrders, setRawShopifyOrders] = useState<ShopifyOrder[]>([]);
   const [rawDecoJobs, setRawDecoJobs] = useState<DecoJob[]>([]);
+  const [shipStationData, setShipStationData] = useState<Map<string, ShipStationTracking>>(new Map());
   const [loading, setLoading] = useState(false);
   const [isDeepSyncRunning, setIsDeepSyncRunning] = useState(false);
   const [isBulkRefreshing, setIsBulkRefreshing] = useState(false);
@@ -247,9 +249,12 @@ const App: React.FC = () => {
 
             // Parallel fetch for speed
             setSyncStatusMsg('Syncing APIs...');
-            const [shopifyResult, decoResult] = await Promise.allSettled([
+            const [shopifyResult, decoResult, ssResult] = await Promise.allSettled([
                 fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync),
-                fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync)
+                fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync),
+                apiSettings.shipStationApiKey && apiSettings.shipStationApiSecret
+                    ? fetchShipStationShipments(apiSettings)
+                    : Promise.resolve([] as ShipStationTracking[])
             ]);
 
             if (shopifyResult.status === 'fulfilled') {
@@ -262,6 +267,12 @@ const App: React.FC = () => {
                 dRecentJobs = decoResult.value;
             } else {
                 setToastMsg({ text: `Deco Error: ${decoResult.reason.message}`, type: 'error' });
+            }
+
+            if (ssResult.status === 'fulfilled' && ssResult.value.length > 0) {
+                const ssMap = new Map<string, ShipStationTracking>();
+                ssResult.value.forEach(s => ssMap.set(s.orderNumber, s));
+                setShipStationData(ssMap);
             }
 
             const orderMap = new Map<string, ShopifyOrder>();
@@ -760,12 +771,23 @@ const App: React.FC = () => {
               fulfillmentDate: order.closedAt,
               fulfillmentDuration: order.closedAt ? calculateWorkingDays(order.date, order.closedAt, holidaySet) : undefined,
               productionDueDate: decoJob?.productionDueDate,
+              shipStationTracking: (() => {
+                  const ssData = shipStationData.get(order.orderNumber);
+                  if (!ssData) return undefined;
+                  return {
+                      trackingNumber: ssData.trackingNumber,
+                      carrier: ssData.carrier,
+                      carrierCode: ssData.carrier,
+                      shipDate: ssData.shipDate,
+                      shippingCost: ssData.cost,
+                  };
+              })(),
               _rawOrderDate: new Date(order.date),
               _rawDispatchDate: sla.targetDate,
               _rawProductionDate: decoJob?.productionDueDate ? new Date(decoJob.productionDueDate) : undefined
           } as UnifiedOrder;
       });
-  }, [rawShopifyOrders, rawDecoJobs, confirmedMatches, itemJobLinks, excludedTags, apiSettings.holidayRanges]);
+  }, [rawShopifyOrders, rawDecoJobs, confirmedMatches, itemJobLinks, excludedTags, apiSettings.holidayRanges, shipStationData]);
 
   const allAvailableTags = useMemo(() => {
       const tags = new Set<string>();

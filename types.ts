@@ -148,6 +148,13 @@ export interface UnifiedOrder {
   hasStockItems: boolean;
   isStockDispatchReady: boolean; // Flag for unfulfilled stock items produced in Deco
   hasEmailEnquiry?: boolean;
+  shipStationTracking?: {
+    trackingNumber: string;
+    carrier: string;
+    carrierCode: string;
+    shipDate: string;
+    shippingCost: number;
+  };
   _rawOrderDate?: Date;
   _rawDispatchDate?: Date;
   _rawProductionDate?: Date;
