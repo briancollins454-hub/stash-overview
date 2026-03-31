@@ -171,8 +171,8 @@ function printOrderSheet(order: UnifiedOrder): void {
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
-    '@page { margin: 8mm; size: A4; }',
-    'body { font-family: Arial, sans-serif; padding: 8px; color: #111; font-size: 11px; }',
+    '@page { margin: 0; size: A4; }',
+    'body { font-family: Arial, sans-serif; padding: 10mm; color: #111; font-size: 11px; position: relative; }',
     '.rush { background: #dc2626; color: white; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 4px 12px; margin-bottom: 6px; }',
     '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }',
     '.items-table th, .items-table td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; }',
@@ -191,9 +191,9 @@ function printOrderSheet(order: UnifiedOrder): void {
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { position: absolute; top: 2cm; right: 2cm; width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
+    '.sticker { position: fixed; top: 2cm; right: 2cm; width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
     '.sticker p { margin: 0; }',
-    '@media print { body { padding: 8px; position: relative; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
+    '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
   const orderDate = new Date(order.shopify.date).toLocaleDateString('en-GB');
