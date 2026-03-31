@@ -56,6 +56,7 @@ const ReturnsTracker = lazyRetry(() => import('./components/ReturnsTracker'));
 const ProfitabilityReport = lazyRetry(() => import('./components/ProfitabilityReport'));
 const ClubLeaderboard = lazyRetry(() => import('./components/ClubLeaderboard'));
 const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
+const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
 const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
 const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
@@ -1730,6 +1731,12 @@ const App: React.FC = () => {
                   </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Late Order Report Error">
                     <LateOrderReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="EAN Coverage Error">
+                    <EanCoverageReport
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
