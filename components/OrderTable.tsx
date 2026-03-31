@@ -191,9 +191,9 @@ function printOrderSheet(order: UnifiedOrder): void {
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 5px; font-size: 9px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 2px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
+    '.sticker { position: absolute; top: 2cm; right: 2cm; width: 3.5in; height: 2.2in; border: 1px solid #000; padding: 6px 8px; overflow: hidden; font-size: 9px; line-height: 1.3; box-sizing: border-box; }',
     '.sticker p { margin: 0; }',
-    '@media print { body { padding: 8px; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
+    '@media print { body { padding: 8px; position: relative; } .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
   const orderDate = new Date(order.shopify.date).toLocaleDateString('en-GB');
@@ -210,8 +210,16 @@ function printOrderSheet(order: UnifiedOrder): void {
     : [];
 
   const headerHtml =
-    '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
-    '<td style="vertical-align:top;padding-right:16px;">' +
+    '<div class="sticker">' +
+      '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
+      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
+      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
+      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:8px;">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+    '</div>' +
+    '<table style="width:60%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
+    '<td style="vertical-align:top;">' +
       '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:200px;margin-bottom:4px;" />' +
       '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:40px;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
       '<table style="font-size:10px;border-collapse:collapse;">' +
@@ -220,16 +228,6 @@ function printOrderSheet(order: UnifiedOrder): void {
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
-    '</td>' +
-    '<td style="vertical-align:top;text-align:right;">' +
-      '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:11px;margin-bottom:2px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
-      addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
-      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
-      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Order Note (repeated)</p><p style="font-size:8px;">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
-      '</div>' +
     '</td>' +
     '</tr></table>';
 
