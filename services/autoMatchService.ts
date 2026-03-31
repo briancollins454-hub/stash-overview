@@ -115,19 +115,34 @@ export function autoMatch(
         if (shopifySku && decoSku && shopifySku === decoSku) {
           score += 0.5;
           reasons.push('SKU match');
+        } else if (shopifySku && decoSku && (decoSku.includes(shopifySku) || shopifySku.includes(decoSku))) {
+          score += 0.3;
+          reasons.push('Partial SKU');
         }
 
         // EAN match
-        if (item.ean && decoItem.ean && item.ean === decoItem.ean) {
+        if (item.ean && decoItem.ean && item.ean !== '-' && decoItem.ean !== '-' && item.ean === decoItem.ean) {
           score += 0.4;
           reasons.push('EAN match');
         }
 
-        // Name similarity
+        // Word-level name matching (better than pure bigram for product names)
+        const sWords = shopifyName.split(/\s+/).filter(w => w.length > 1);
+        const dWords = decoName.split(/\s+/).filter(w => w.length > 1);
+        const dWordSet = new Set(dWords);
+        let wordMatches = 0;
+        sWords.forEach(w => { if (dWordSet.has(w)) wordMatches++; });
+        const wordOverlap = sWords.length > 0 ? wordMatches / sWords.length : 0;
+        if (wordOverlap > 0.3) {
+          score += wordOverlap * 0.35;
+          reasons.push(`Words ${Math.round(wordOverlap * 100)}%`);
+        }
+
+        // Bigram similarity as secondary signal
         const nameSim = diceCoefficient(shopifyName, decoName);
         if (nameSim > 0.4) {
-          score += nameSim * 0.3;
-          reasons.push(`Name ${Math.round(nameSim * 100)}%`);
+          score += nameSim * 0.15;
+          reasons.push(`Fuzzy ${Math.round(nameSim * 100)}%`);
         }
 
         // Size match bonus
@@ -142,6 +157,15 @@ export function autoMatch(
         if (shopifyColour && decoColour && shopifyColour === decoColour) {
           score += 0.1;
           reasons.push('Colour match');
+        } else if (shopifyColour && decoColour && shopifyColour !== decoColour) {
+          score -= 0.05;
+        }
+
+        // Vendor match
+        const shopifyVendor = (item.vendor || '').toLowerCase();
+        if (shopifyVendor && decoName.includes(normalize(shopifyVendor))) {
+          score += 0.05;
+          reasons.push('Vendor');
         }
 
         // Quantity match bonus

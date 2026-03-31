@@ -393,33 +393,60 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
 
                                         const { details, size: sSize } = parseItemName(sItem.name);
                                         const sortedDecoItems = [...decoJob.items].sort((a, b) => {
-                                            const aId = (a.vendorSku || a.productCode || a.name || '').toLowerCase();
-                                            const bId = (b.vendorSku || b.productCode || b.name || '').toLowerCase();
-                                            const sSku = (sItem.sku || '').toLowerCase();
-                                            
-                                            // 1. Exact SKU/ID match
-                                            const aSkuMatch = aId === sSku;
-                                            const bSkuMatch = bId === sSku;
-                                            if (aSkuMatch && !bSkuMatch) return -1;
-                                            if (!aSkuMatch && bSkuMatch) return 1;
+                                            const scoreCandidate = (d: typeof decoJob.items[0]) => {
+                                                let score = 0;
+                                                const dSku = (d.vendorSku || d.productCode || '').trim().toLowerCase();
+                                                const dName = d.name.toLowerCase();
+                                                const sSku = (sItem.sku || '').toLowerCase();
+                                                const sName = sItem.name.toLowerCase();
+                                                const sEan = (sItem.ean || '').toLowerCase();
+                                                const dEan = ((d as any).ean || '').toLowerCase();
 
-                                            // 2. Name similarity (fuzzy-ish)
-                                            const aName = a.name.toLowerCase();
-                                            const bName = b.name.toLowerCase();
-                                            const sName = sItem.name.toLowerCase();
-                                            const aNameMatch = aName.includes(sName) || sName.includes(aName);
-                                            const bNameMatch = bName.includes(sName) || sName.includes(bName);
-                                            if (aNameMatch && !bNameMatch) return -1;
-                                            if (!aNameMatch && bNameMatch) return 1;
+                                                // Exact SKU match (strongest signal)
+                                                if (sSku && dSku && sSku === dSku) score += 100;
+                                                // Partial SKU match (one contains the other)
+                                                else if (sSku && dSku && (dSku.includes(sSku) || sSku.includes(dSku))) score += 60;
 
-                                            // 3. Size match
-                                            const aSize = standardizeSize(parseItemName(a.name).size);
-                                            const bSize = standardizeSize(parseItemName(b.name).size);
-                                            const normSSize = standardizeSize(sSize);
-                                            if (normSSize && aSize === normSSize && bSize !== normSSize) return -1;
-                                            if (normSSize && aSize !== normSSize && bSize === normSSize) return 1;
-                                            
-                                            return 0;
+                                                // EAN/barcode match
+                                                if (sEan && dEan && sEan !== '-' && dEan !== '-' && sEan === dEan) score += 80;
+
+                                                // Word-level name matching
+                                                const sWords = sName.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 1);
+                                                const dWords = dName.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 1);
+                                                const noise = new Set(['the','a','an','in','on','of','for','with','and','or','to','club','delivery','returns','info','accepted','expected','dispatch','stock','items','working','days','from','order','date','mto','weeks']);
+                                                const sMeaningful = sWords.filter(w => !noise.has(w));
+                                                const dMeaningful = dWords.filter(w => !noise.has(w));
+                                                const dWordSet = new Set(dMeaningful);
+                                                let wordMatches = 0;
+                                                sMeaningful.forEach(w => { if (dWordSet.has(w)) wordMatches++; });
+                                                if (sMeaningful.length > 0) score += (wordMatches / sMeaningful.length) * 50;
+
+                                                // Full name containment
+                                                if (dName.includes(sName) || sName.includes(dName)) score += 30;
+
+                                                // Size match/mismatch
+                                                const dSize = standardizeSize(parseItemName(d.name).size);
+                                                const normSSize = standardizeSize(sSize);
+                                                if (normSSize && dSize && normSSize === dSize) score += 15;
+                                                else if (normSSize && dSize && normSSize !== dSize) score -= 20;
+
+                                                // Colour match
+                                                const colours = ['black','white','red','blue','green','navy','grey','gray','yellow','orange','purple','pink','brown','maroon','teal','charcoal','royal','heather'];
+                                                const sColour = colours.find(c => sName.includes(c));
+                                                const dColour = colours.find(c => dName.includes(c));
+                                                if (sColour && dColour && sColour === dColour) score += 10;
+                                                else if (sColour && dColour && sColour !== dColour) score -= 10;
+
+                                                // Vendor match
+                                                const sVendor = (sItem.vendor || '').toLowerCase();
+                                                if (sVendor && dName.includes(sVendor)) score += 5;
+
+                                                // Quantity match
+                                                if (sItem.quantity === d.quantity) score += 3;
+
+                                                return score;
+                                            };
+                                            return scoreCandidate(b) - scoreCandidate(a);
                                         });
                                         
                                         return (
