@@ -55,6 +55,10 @@ export interface ShopifyOrder {
     country: string;
     phone?: string;
   };
+  shippingMethod?: string;
+  shippingCost?: string;
+  subtotalPrice?: string;
+  taxPrice?: string;
   timelineComments: string[]; // Looking for 6-digit codes
   items: {
     id: string; // UNIQUE ID (GID) - CRITICAL for mapping
@@ -80,6 +84,7 @@ export interface ShopifyOrder {
     potentialMatchName?: string;
     candidateDecoItems?: DecoItem[]; // Added to fix type error in OrderTable
     imageUrl?: string;
+    price?: string;
     properties?: {
       name: string;
       value: string | number;

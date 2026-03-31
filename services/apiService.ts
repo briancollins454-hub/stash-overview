@@ -168,7 +168,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     let pageCount = 0;
     
     const filterField = isDelta ? 'updated_at' : 'created_at';
-    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
         if (onProgress) onProgress(`Shopify: Page ${pageCount + 1}...`);
@@ -191,14 +191,14 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
         const mappedItems = edges.map((edge: any) => {
             const i = edge?.node; 
             if (!i || i.quantity <= 0) return null;
-            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
+            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
         }).filter(Boolean);
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
         if (fStatus === 'partially_fulfilled') fStatus = 'partial';
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
-        return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress };
+        return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress, shippingMethod: o.shippingLines?.edges?.[0]?.node?.title || undefined, shippingCost: o.totalShippingPriceSet?.shopMoney?.amount || undefined, subtotalPrice: o.subtotalPriceSet?.shopMoney?.amount || undefined, taxPrice: o.totalTaxSet?.shopMoney?.amount || undefined };
     });
 };
 
@@ -303,7 +303,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
     const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
     const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
     
-    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } } } } } }`;
+    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } }`;
     
     try {
         const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, variables: { id: orderId } }) });
@@ -315,7 +315,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
         const mappedItems = edges.map((edge: any) => {
             const i = edge?.node; 
             if (!i || i.quantity <= 0) return null;
-            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
+            return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
         }).filter(Boolean);
 
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
@@ -324,7 +324,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
         
-        return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress };
+        return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress, shippingMethod: o.shippingLines?.edges?.[0]?.node?.title || undefined, shippingCost: o.totalShippingPriceSet?.shopMoney?.amount || undefined, subtotalPrice: o.subtotalPriceSet?.shopMoney?.amount || undefined, taxPrice: o.totalTaxSet?.shopMoney?.amount || undefined };
     } catch (e) {
         console.error("Error fetching single Shopify order:", e);
         return null;
