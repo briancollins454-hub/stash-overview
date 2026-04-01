@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stash-sync-v2';
+const CACHE_NAME = 'stash-sync-v3';
 
 // Install: skip waiting immediately so new SW activates right away
 self.addEventListener('install', (event) => {
@@ -36,8 +36,5 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => caches.match(request))
-  );
-      });
-    })
   );
 });
