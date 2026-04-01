@@ -1404,10 +1404,13 @@ const App: React.FC = () => {
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>
             
             {/* Desktop nav */}
-            <div className="hidden lg:flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1">
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
                 {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
                 <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); }} />
                 <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>
@@ -1416,7 +1419,7 @@ const App: React.FC = () => {
                   {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
                 {lastSyncLabel && (
-                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded ${
+                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded whitespace-nowrap ${
                         lastSyncTime && Date.now() - lastSyncTime > 10 * 60 * 1000
                             ? 'text-amber-300 bg-amber-500/10'
                             : 'text-indigo-400 bg-indigo-500/10'
@@ -1429,8 +1432,8 @@ const App: React.FC = () => {
                 
                 <div className="flex items-center gap-3 pl-2">
                     <div className="flex flex-col items-end">
-                        <span className="text-[9px] font-black uppercase tracking-widest text-white leading-none">{user.displayName || 'User'}</span>
-                        <span className="text-[8px] font-bold text-indigo-300 uppercase leading-none mt-1">{user.email}</span>
+                        <span className="text-[9px] font-black uppercase tracking-widest text-white leading-none whitespace-nowrap">{user.displayName || 'User'}</span>
+                        <span className="text-[8px] font-bold text-indigo-300 uppercase leading-none mt-1 whitespace-nowrap">{user.email}</span>
                     </div>
                     {user.photoURL ? (
                         <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-indigo-400/30 shadow-lg" referrerPolicy="no-referrer" />
@@ -1446,6 +1449,7 @@ const App: React.FC = () => {
                     >
                         <LogOut className="w-4 h-4" />
                     </button>
+                </div>
                 </div>
             </div>
         </nav>
