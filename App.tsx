@@ -58,11 +58,7 @@ const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
 const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
 const CarrierPerformanceReport = lazyRetry(() => import('./components/CarrierPerformanceReport'));
 const BottleneckReport = lazyRetry(() => import('./components/BottleneckReport'));
-const DecorationSpecViewer = lazyRetry(() => import('./components/DecorationSpecViewer'));
-const StaffWorkloadDashboard = lazyRetry(() => import('./components/StaffWorkloadDashboard'));
 const CompletionTracker = lazyRetry(() => import('./components/CompletionTracker'));
-const SupplierLeadTimeReport = lazyRetry(() => import('./components/SupplierLeadTimeReport'));
-const ProductionVelocityReport = lazyRetry(() => import('./components/ProductionVelocityReport'));
 const DecoNotesIntelligence = lazyRetry(() => import('./components/DecoNotesIntelligence'));
 const PaymentStatusSync = lazyRetry(() => import('./components/PaymentStatusSync'));
 const CapacityForecast = lazyRetry(() => import('./components/CapacityForecast'));
@@ -1838,32 +1834,8 @@ const App: React.FC = () => {
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
                   </ErrorBoundary>
-                  <ErrorBoundary fallbackTitle="Decoration Specs Error">
-                    <DecorationSpecViewer
-                      orders={unifiedOrders}
-                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
-                    />
-                  </ErrorBoundary>
-                  <ErrorBoundary fallbackTitle="Staff Workload Error">
-                    <StaffWorkloadDashboard
-                      orders={unifiedOrders}
-                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
-                    />
-                  </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Completion Tracker Error">
                     <CompletionTracker
-                      orders={unifiedOrders}
-                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
-                    />
-                  </ErrorBoundary>
-                  <ErrorBoundary fallbackTitle="Supplier Lead Time Error">
-                    <SupplierLeadTimeReport
-                      orders={unifiedOrders}
-                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
-                    />
-                  </ErrorBoundary>
-                  <ErrorBoundary fallbackTitle="Production Velocity Error">
-                    <ProductionVelocityReport
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
