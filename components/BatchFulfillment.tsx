@@ -47,8 +47,15 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [labelResult, setLabelResult] = useState<ShipStationLabelResult | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
 
-  // Confirmation modal
+  // Confirmation modal (single order)
   const [showConfirmation, setShowConfirmation] = useState(false);
+
+  // Batch ship state
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
+  const [batchShipping, setBatchShipping] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; orderNumber: string; status: string }>({ current: 0, total: 0, orderNumber: '', status: '' });
+  const [batchResults, setBatchResults] = useState<Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string }>>([]);
+  const [showBatchResults, setShowBatchResults] = useState(false);
 
   // Ready orders
   const readyOrders = useMemo(() => {
@@ -187,6 +194,72 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
     printOrderSheet(o);
   }, []);
 
+  // Batch Print + Ship: print packing slips, create labels for all selected, auto-fulfill via ShipStation
+  const handleBatchShip = useCallback(async () => {
+    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id) && !o.shipStationTracking?.trackingNumber);
+    if (selected.length === 0) return;
+
+    setShowBatchConfirm(false);
+    setBatchShipping(true);
+    setBatchResults([]);
+    setShowBatchResults(true);
+
+    // Step 1: Print all packing slips
+    setBatchProgress({ current: 0, total: selected.length, orderNumber: '', status: 'Printing packing slips...' });
+    printOrderSheets(selected);
+
+    // Step 2: Create labels one by one
+    const results: Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string }> = [];
+
+    for (let i = 0; i < selected.length; i++) {
+      const order = selected[i];
+      setBatchProgress({ current: i + 1, total: selected.length, orderNumber: order.shopify.orderNumber, status: 'Creating label...' });
+
+      try {
+        // Look up order in ShipStation
+        const ssOrd = await fetchShipStationOrder(settings, order.shopify.orderNumber);
+        if (!ssOrd) {
+          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Not found in ShipStation' });
+          continue;
+        }
+
+        // Use order's carrier/service if set, otherwise use defaults
+        const carrier = ssOrd.carrierCode || selectedCarrier;
+        const service = ssOrd.serviceCode || selectedService;
+        const wt = ssOrd.weight || weight;
+
+        if (!carrier || !service) {
+          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'No carrier/service configured' });
+          continue;
+        }
+
+        // Create the label
+        const result = await createShipStationLabel(settings, ssOrd.orderId, carrier, service, wt);
+        results.push({ orderNumber: order.shopify.orderNumber, success: true, trackingNumber: result.trackingNumber });
+
+        // Open label PDF
+        if (result.labelData) {
+          const byteChars = atob(result.labelData);
+          const byteNums = new Array(byteChars.length);
+          for (let j = 0; j < byteChars.length; j++) byteNums[j] = byteChars.charCodeAt(j);
+          const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        }
+
+        // Notify parent to refresh
+        onFulfilled(order.shopify.id);
+      } catch (e: any) {
+        results.push({ orderNumber: order.shopify.orderNumber, success: false, error: e.message });
+      }
+
+      setBatchResults([...results]);
+    }
+
+    setBatchProgress({ current: selected.length, total: selected.length, orderNumber: '', status: 'Complete' });
+    setBatchShipping(false);
+  }, [readyOrders, selectedIds, settings, selectedCarrier, selectedService, weight, onFulfilled]);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -223,14 +296,114 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
           </button>
           <span className="text-[10px] font-bold text-gray-500">{selectedIds.size} selected</span>
         </div>
-        <button
-          onClick={handleBatchPrint}
-          disabled={selectedIds.size === 0}
-          className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
-        >
-          <Printer className="w-3.5 h-3.5" /> Print {selectedIds.size} Packing Slip{selectedIds.size !== 1 ? 's' : ''}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleBatchPrint}
+            disabled={selectedIds.size === 0}
+            className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print {selectedIds.size} Packing Slip{selectedIds.size !== 1 ? 's' : ''}
+          </button>
+          <button
+            onClick={() => setShowBatchConfirm(true)}
+            disabled={selectedIds.size === 0 || batchShipping}
+            className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+          >
+            {batchShipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />}
+            Print & Ship {selectedIds.size} Order{selectedIds.size !== 1 ? 's' : ''}
+          </button>
+        </div>
       </div>
+
+      {/* Batch Ship Confirmation */}
+      {showBatchConfirm && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[11px] font-black text-amber-300 mb-1">Confirm Batch Ship</p>
+              <p className="text-[10px] text-amber-200/80 font-bold leading-relaxed">
+                This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && !o.shipStationTracking?.trackingNumber).length} orders using the default carrier/service from ShipStation.
+                Each label will charge your ShipStation account and auto-fulfil the order on Shopify.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Default Carrier</label>
+              <select
+                value={selectedCarrier}
+                onChange={e => {
+                  setSelectedCarrier(e.target.value);
+                  const c = carriers.find(c => c.code === e.target.value);
+                  if (c?.services.length) setSelectedService(c.services[0].code);
+                }}
+                className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+              >
+                {carriers.map(c => <option key={c.code} value={c.code} className="bg-gray-800">{c.name}</option>)}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Default Service</label>
+              <select
+                value={selectedService}
+                onChange={e => setSelectedService(e.target.value)}
+                className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+              >
+                {currentServices.map(s => <option key={s.code} value={s.code} className="bg-gray-800">{s.name}</option>)}
+              </select>
+            </div>
+            <div className="w-24">
+              <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Weight (g)</label>
+              <input
+                type="number"
+                value={weight.value}
+                onChange={e => setWeight({ value: Number(e.target.value), units: 'grams' })}
+                className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleBatchShip} className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-500 hover:bg-blue-600 text-white transition-all flex items-center gap-1.5">
+              <Truck className="w-3.5 h-3.5" /> Yes, Print & Ship All
+            </button>
+            <button onClick={() => setShowBatchConfirm(false)} className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-gray-300 transition-all">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Progress / Results */}
+      {showBatchResults && (
+        <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-white flex items-center gap-1.5">
+              {batchShipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+              {batchShipping ? `Shipping ${batchProgress.current}/${batchProgress.total}...` : 'Batch Ship Complete'}
+            </h4>
+            {!batchShipping && (
+              <button onClick={() => { setShowBatchResults(false); setBatchResults([]); }} className="text-gray-500 hover:text-white"><X className="w-3.5 h-3.5" /></button>
+            )}
+          </div>
+          {batchShipping && (
+            <div>
+              <div className="w-full bg-white/10 rounded-full h-1.5 mb-2">
+                <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }} />
+              </div>
+              <p className="text-[9px] text-gray-400 font-bold">#{batchProgress.orderNumber} — {batchProgress.status}</p>
+            </div>
+          )}
+          {batchResults.length > 0 && (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {batchResults.map((r, idx) => (
+                <div key={idx} className={`flex items-center justify-between text-[10px] font-bold px-2 py-1 rounded ${r.success ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'}`}>
+                  <span>#{r.orderNumber}</span>
+                  <span>{r.success ? `✓ ${r.trackingNumber}` : `✗ ${r.error}`}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Order List */}
       {readyOrders.length === 0 ? (
