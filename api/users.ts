@@ -89,27 +89,37 @@ function fromFirestoreDoc(doc: any): FirestoreUser {
   };
 }
 
-async function firestoreList(): Promise<FirestoreUser[]> {
-  const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}?key=${FIREBASE_API_KEY}`);
+function fsHeaders(authToken?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) h['Authorization'] = `Bearer ${authToken}`;
+  return h;
+}
+
+async function firestoreList(authToken?: string): Promise<FirestoreUser[]> {
+  const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}?key=${FIREBASE_API_KEY}`, {
+    headers: fsHeaders(authToken),
+  });
   if (!resp.ok) {
-    if (resp.status === 404) return []; // collection doesn't exist yet
+    if (resp.status === 404) return [];
     throw new Error(`Firestore list error: ${resp.status}`);
   }
   const data = await resp.json();
   return (data.documents || []).map(fromFirestoreDoc);
 }
 
-async function firestoreGet(docId: string): Promise<FirestoreUser | null> {
-  const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}/${docId}?key=${FIREBASE_API_KEY}`);
+async function firestoreGet(docId: string, authToken?: string): Promise<FirestoreUser | null> {
+  const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}/${docId}?key=${FIREBASE_API_KEY}`, {
+    headers: fsHeaders(authToken),
+  });
   if (!resp.ok) return null;
   return fromFirestoreDoc(await resp.json());
 }
 
-async function firestoreCreate(fields: Record<string, any>): Promise<string> {
+async function firestoreCreate(fields: Record<string, any>, authToken?: string): Promise<string> {
   fields.created_at = new Date().toISOString();
   const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}?key=${FIREBASE_API_KEY}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: fsHeaders(authToken),
     body: JSON.stringify({ fields: toFirestoreFields(fields) }),
   });
   if (!resp.ok) throw new Error(`Firestore create error: ${resp.status} ${await resp.text()}`);
@@ -117,11 +127,11 @@ async function firestoreCreate(fields: Record<string, any>): Promise<string> {
   return (doc.name || '').split('/').pop() || '';
 }
 
-async function firestoreUpdate(docId: string, updates: Record<string, any>): Promise<void> {
+async function firestoreUpdate(docId: string, updates: Record<string, any>, authToken?: string): Promise<void> {
   const updateMask = Object.keys(updates).map(k => `updateMask.fieldPaths=${k}`).join('&');
   const resp = await fetch(`${FIRESTORE_BASE}/${COLLECTION}/${docId}?${updateMask}&key=${FIREBASE_API_KEY}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: fsHeaders(authToken),
     body: JSON.stringify({ fields: toFirestoreFields(updates) }),
   });
   if (!resp.ok) throw new Error(`Firestore update error: ${resp.status} ${await resp.text()}`);
@@ -205,7 +215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!username || !password) {
           return res.status(400).json({ error: 'Username and password required' });
         }
-        const allUsers = await firestoreList();
+        const allUsers = await firestoreList(firebaseIdToken);
         const user = allUsers.find(u => u.username === username && u.is_active);
         if (!user) {
           return res.status(401).json({ error: 'Invalid username or password' });
@@ -222,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!token) return res.status(401).json({ error: 'No token provided' });
         const verified = verifyToken(token);
         if (!verified) return res.status(401).json({ error: 'Invalid or expired token' });
-        const user = await firestoreGet(verified.userId);
+        const user = await firestoreGet(verified.userId, firebaseIdToken);
         if (!user || !user.is_active) {
           return res.status(401).json({ error: 'User no longer active' });
         }
@@ -232,7 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // ─── LIST USERS ──────────────────────────────────
       case 'list': {
         await requireAdmin(token, firebaseIdToken);
-        const users = await firestoreList();
+        const users = await firestoreList(firebaseIdToken);
         return res.json(users.map(formatUser));
       }
 
@@ -251,7 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(403).json({ error: 'Only superusers can create superuser accounts' });
         }
         // Check for duplicate username
-        const allUsers = await firestoreList();
+        const allUsers = await firestoreList(firebaseIdToken);
         if (allUsers.some(u => u.username === username)) {
           return res.status(409).json({ error: 'Username already exists' });
         }
@@ -264,7 +274,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role,
           is_active: true,
           created_by: caller.userId,
-        });
+        }, firebaseIdToken);
         return res.json({ success: true });
       }
 
@@ -293,7 +303,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (Object.keys(updates).length === 0) {
           return res.status(400).json({ error: 'No updates provided' });
         }
-        await firestoreUpdate(userId, updates);
+        await firestoreUpdate(userId, updates, firebaseIdToken);
         return res.json({ success: true });
       }
 
@@ -305,13 +315,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (userId === caller.userId) {
           return res.status(400).json({ error: 'Cannot delete your own account' });
         }
-        await firestoreUpdate(userId, { is_active: false });
+        await firestoreUpdate(userId, { is_active: false }, firebaseIdToken);
         return res.json({ success: true });
       }
 
       // ─── BOOTSTRAP: create first superuser (no auth needed) ──
       case 'bootstrap': {
-        const allUsers = await firestoreList();
+        const allUsers = await firestoreList(firebaseIdToken);
         if (allUsers.length > 0) {
           return res.status(403).json({ error: 'Users already exist. Use admin panel to add users.' });
         }
@@ -328,7 +338,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role: 'superuser',
           is_active: true,
           created_by: 'bootstrap',
-        });
+        }, firebaseIdToken);
         return res.json({ success: true, message: 'Superuser created. You can now log in.' });
       }
 
