@@ -3,11 +3,11 @@ import { UnifiedOrder } from '../types';
 import {
   Package, CheckCircle2, Loader2, Truck, X, AlertTriangle, ChevronDown,
   ChevronUp, Printer, MapPin, Phone, Mail, ExternalLink, Tag, ShoppingBag,
-  Search
+  Search, RotateCcw, AlertCircle
 } from 'lucide-react';
 import {
   fetchShipStationOrder, createShipStationLabel, fetchShipStationCarriers,
-  getCarrierName, getTrackingUrl,
+  getCarrierName, getTrackingUrl, validateShipStationAddress,
   ShipStationOrder, ShipStationLabelResult
 } from '../services/shipstationService';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
@@ -54,8 +54,25 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [showBatchConfirm, setShowBatchConfirm] = useState(false);
   const [batchShipping, setBatchShipping] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; orderNumber: string; status: string }>({ current: 0, total: 0, orderNumber: '', status: '' });
-  const [batchResults, setBatchResults] = useState<Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string }>>([]);
+  const [batchResults, setBatchResults] = useState<Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string; orderId?: string }>>([]);
   const [showBatchResults, setShowBatchResults] = useState(false);
+
+  // Address warnings — computed from order data, no API call needed for basic checks
+  const getAddressWarnings = useCallback((o: UnifiedOrder): string[] => {
+    const warnings: string[] = [];
+    const addr = o.shopify.shippingAddress;
+    if (!addr) {
+      warnings.push('No shipping address');
+      return warnings;
+    }
+    if (!addr.name || addr.name.trim().length < 2) warnings.push('Missing recipient name');
+    if (!addr.address1 || addr.address1.trim().length < 3) warnings.push('Missing street address');
+    if (!addr.city || addr.city.trim().length < 2) warnings.push('Missing city');
+    if (!addr.zip || addr.zip.trim().length < 3) warnings.push('Missing or short postcode');
+    if (!addr.country || addr.country.trim().length < 2) warnings.push('Missing country');
+    if (!addr.phone) warnings.push('No phone number');
+    return warnings;
+  }, []);
 
   // Ready orders
   const readyOrders = useMemo(() => {
@@ -209,17 +226,26 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
     printOrderSheets(selected);
 
     // Step 2: Create labels one by one
-    const results: Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string }> = [];
+    const results: Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string; orderId?: string }> = [];
 
     for (let i = 0; i < selected.length; i++) {
       const order = selected[i];
       setBatchProgress({ current: i + 1, total: selected.length, orderNumber: order.shopify.orderNumber, status: 'Creating label...' });
 
+      // Check address before attempting label
+      const addrWarnings = getAddressWarnings(order);
+      const hasBlockingWarning = addrWarnings.some(w => w !== 'No phone number');
+      if (hasBlockingWarning) {
+        results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Address issue: ' + addrWarnings.filter(w => w !== 'No phone number').join(', '), orderId: order.shopify.id });
+        setBatchResults([...results]);
+        continue;
+      }
+
       try {
         // Look up order in ShipStation
         const ssOrd = await fetchShipStationOrder(settings, order.shopify.orderNumber);
         if (!ssOrd) {
-          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Not found in ShipStation' });
+          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Not found in ShipStation', orderId: order.shopify.id });
           continue;
         }
 
@@ -229,13 +255,13 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
         const wt = ssOrd.weight || weight;
 
         if (!carrier || !service) {
-          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'No carrier/service configured' });
+          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'No carrier/service configured', orderId: order.shopify.id });
           continue;
         }
 
         // Create the label
         const result = await createShipStationLabel(settings, ssOrd.orderId, carrier, service, wt);
-        results.push({ orderNumber: order.shopify.orderNumber, success: true, trackingNumber: result.trackingNumber });
+        results.push({ orderNumber: order.shopify.orderNumber, success: true, trackingNumber: result.trackingNumber, orderId: order.shopify.id });
 
         // Open label PDF
         if (result.labelData) {
@@ -250,7 +276,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
         // Notify parent to refresh
         onFulfilled(order.shopify.id);
       } catch (e: any) {
-        results.push({ orderNumber: order.shopify.orderNumber, success: false, error: e.message });
+        results.push({ orderNumber: order.shopify.orderNumber, success: false, error: e.message, orderId: order.shopify.id });
       }
 
       setBatchResults([...results]);
@@ -258,7 +284,66 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
 
     setBatchProgress({ current: selected.length, total: selected.length, orderNumber: '', status: 'Complete' });
     setBatchShipping(false);
-  }, [readyOrders, selectedIds, settings, selectedCarrier, selectedService, weight, onFulfilled]);
+  }, [readyOrders, selectedIds, settings, selectedCarrier, selectedService, weight, onFulfilled, getAddressWarnings]);
+
+  // Retry only the failed orders from the last batch
+  const handleRetryFailed = useCallback(async () => {
+    const failedOrderNumbers = batchResults.filter(r => !r.success).map(r => r.orderNumber);
+    if (failedOrderNumbers.length === 0) return;
+
+    const failedOrders = readyOrders.filter(o => failedOrderNumbers.includes(o.shopify.orderNumber));
+    if (failedOrders.length === 0) return;
+
+    setBatchShipping(true);
+    // Keep successful results, clear failed ones
+    const keptResults = batchResults.filter(r => r.success);
+    const newResults = [...keptResults];
+    setBatchResults(newResults);
+
+    for (let i = 0; i < failedOrders.length; i++) {
+      const order = failedOrders[i];
+      setBatchProgress({ current: i + 1, total: failedOrders.length, orderNumber: order.shopify.orderNumber, status: 'Retrying...' });
+
+      try {
+        const ssOrd = await fetchShipStationOrder(settings, order.shopify.orderNumber);
+        if (!ssOrd) {
+          newResults.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Not found in ShipStation', orderId: order.shopify.id });
+          setBatchResults([...newResults]);
+          continue;
+        }
+
+        const carrier = ssOrd.carrierCode || selectedCarrier;
+        const service = ssOrd.serviceCode || selectedService;
+        const wt = ssOrd.weight || weight;
+
+        if (!carrier || !service) {
+          newResults.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'No carrier/service configured', orderId: order.shopify.id });
+          setBatchResults([...newResults]);
+          continue;
+        }
+
+        const result = await createShipStationLabel(settings, ssOrd.orderId, carrier, service, wt);
+        newResults.push({ orderNumber: order.shopify.orderNumber, success: true, trackingNumber: result.trackingNumber, orderId: order.shopify.id });
+
+        if (result.labelData) {
+          const byteChars = atob(result.labelData);
+          const byteNums = new Array(byteChars.length);
+          for (let j = 0; j < byteChars.length; j++) byteNums[j] = byteChars.charCodeAt(j);
+          const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+          window.open(URL.createObjectURL(blob), '_blank');
+        }
+
+        onFulfilled(order.shopify.id);
+      } catch (e: any) {
+        newResults.push({ orderNumber: order.shopify.orderNumber, success: false, error: e.message, orderId: order.shopify.id });
+      }
+
+      setBatchResults([...newResults]);
+    }
+
+    setBatchProgress({ current: failedOrders.length, total: failedOrders.length, orderNumber: '', status: 'Complete' });
+    setBatchShipping(false);
+  }, [batchResults, readyOrders, settings, selectedCarrier, selectedService, weight, onFulfilled]);
 
   return (
     <div className="space-y-4">
@@ -326,6 +411,14 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                 This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled').length} orders using the default carrier/service from ShipStation.
                 Each label will charge your ShipStation account and auto-fulfil the order on Shopify.
               </p>
+              {(() => {
+                const addrIssueCount = readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled' && getAddressWarnings(o).some(w => w !== 'No phone number')).length;
+                return addrIssueCount > 0 ? (
+                  <p className="text-[10px] text-red-400 font-bold mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" /> {addrIssueCount} order{addrIssueCount !== 1 ? 's have' : ' has'} address issues and will be skipped
+                  </p>
+                ) : null;
+              })()}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -380,10 +473,27 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
               {batchShipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
               {batchShipping ? `Shipping ${batchProgress.current}/${batchProgress.total}...` : 'Batch Ship Complete'}
             </h4>
-            {!batchShipping && (
-              <button onClick={() => { setShowBatchResults(false); setBatchResults([]); }} className="text-gray-500 hover:text-white"><X className="w-3.5 h-3.5" /></button>
-            )}
+            <div className="flex items-center gap-2">
+              {!batchShipping && batchResults.some(r => !r.success) && (
+                <button
+                  onClick={handleRetryFailed}
+                  className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 transition-all flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3 h-3" /> Retry {batchResults.filter(r => !r.success).length} Failed
+                </button>
+              )}
+              {!batchShipping && (
+                <button onClick={() => { setShowBatchResults(false); setBatchResults([]); }} className="text-gray-500 hover:text-white"><X className="w-3.5 h-3.5" /></button>
+              )}
+            </div>
           </div>
+          {/* Summary counts */}
+          {!batchShipping && batchResults.length > 0 && (
+            <div className="flex items-center gap-4">
+              <span className="text-[9px] font-black text-emerald-400">{batchResults.filter(r => r.success).length} succeeded</span>
+              {batchResults.some(r => !r.success) && <span className="text-[9px] font-black text-red-400">{batchResults.filter(r => !r.success).length} failed</span>}
+            </div>
+          )}
           {batchShipping && (
             <div>
               <div className="w-full bg-white/10 rounded-full h-1.5 mb-2">
@@ -421,6 +531,8 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
             const hasTracking = !!o.shipStationTracking?.trackingNumber;
             const isPartial = o.shopify.fulfillmentStatus === 'partial';
             const isFullyShipped = hasTracking && !isPartial;
+            const addrWarnings = getAddressWarnings(o);
+            const hasAddrWarning = addrWarnings.length > 0 && addrWarnings.some(w => w !== 'No phone number');
 
             return (
               <div key={o.shopify.id} className={`rounded-xl border transition-all ${isExpanded ? 'bg-white/[0.07] border-blue-500/30' : 'bg-white/5 border-white/10 hover:border-white/20'}`}>
@@ -445,6 +557,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                       {o.clubName && <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-[8px] font-black text-indigo-300">{o.clubName}</span>}
                       {hasTracking && isPartial && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[8px] font-black text-amber-400 flex items-center gap-1"><Package className="w-2.5 h-2.5" /> Partial</span>}
                       {isFullyShipped && <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[8px] font-black text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /> Shipped</span>}
+                      {hasAddrWarning && <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-[8px] font-black text-red-400 flex items-center gap-1" title={addrWarnings.join(', ')}><AlertCircle className="w-2.5 h-2.5" /> Address</span>}
                     </div>
                     <div className="flex items-center gap-3 mt-0.5">
                       <span className="text-[9px] text-gray-500 font-bold">{itemCount} items</span>
@@ -488,6 +601,15 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                           </div>
                         ) : (
                           <p className="text-[10px] text-red-400 font-bold">No shipping address on file</p>
+                        )}
+                        {addrWarnings.length > 0 && (
+                          <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded p-2 space-y-0.5">
+                            {addrWarnings.map((w, i) => (
+                              <p key={i} className="text-[9px] font-bold text-red-400 flex items-center gap-1">
+                                <AlertCircle className="w-2.5 h-2.5 shrink-0" /> {w}
+                              </p>
+                            ))}
+                          </div>
                         )}
                       </div>
 

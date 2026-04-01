@@ -262,3 +262,44 @@ export const fetchShipStationCarriers = async (
 
   return carriersWithServices;
 };
+
+/** Validate an address via ShipStation API */
+export const validateShipStationAddress = async (
+  settings: ApiSettings,
+  address: { name: string; street1: string; street2?: string; city: string; state?: string; postalCode: string; country: string; phone?: string }
+): Promise<{ valid: boolean; messages: string[] }> => {
+  const auth = settings.shipStationApiKey && settings.shipStationApiSecret
+    ? btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`)
+    : undefined;
+
+  try {
+    const response = await fetch('/api/shipstation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://ssapi.shipstation.com/addresses/validate',
+        auth,
+        method: 'POST',
+        body: address,
+      }),
+    });
+
+    if (!response.ok) {
+      return { valid: false, messages: ['Address validation unavailable'] };
+    }
+
+    const data = await response.json();
+    // ShipStation returns an array; first item has the result
+    if (Array.isArray(data) && data.length > 0) {
+      const result = data[0];
+      const messages: string[] = [];
+      if (result.Address_Not_Found) messages.push('Address not found');
+      if (result.valid === false || result.match === false) messages.push('Address could not be verified');
+      return { valid: messages.length === 0, messages };
+    }
+
+    return { valid: true, messages: [] };
+  } catch {
+    return { valid: false, messages: ['Address validation failed'] };
+  }
+};
