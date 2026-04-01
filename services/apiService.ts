@@ -128,6 +128,23 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
         paymentMethod: job.payment_method || job.payment_type || undefined,
         discount: parseFloat(job.discount) || parseFloat(job.discount_amount) || undefined,
         couponCode: job.coupon_code || job.promo_code || undefined,
+        outstandingBalance: parseFloat(job.outstanding_balance) || 0,
+        billableAmount: parseFloat(job.billable_amount) || 0,
+        creditUsed: parseFloat(job.credit_used) || 0,
+        accountTerms: job.account_terms || undefined,
+        dateInvoiced: job.date_invoiced || undefined,
+        payments: Array.isArray(job.payments) ? job.payments.map((p: any) => ({
+            id: p.id || p.payment_id,
+            datePaid: p.date_paid,
+            method: p.payment_method || 'Unknown',
+            amount: parseFloat(p.paid_amount) || 0,
+            refundedAmount: parseFloat(p.refunded_amount) || 0,
+        })) : [],
+        refunds: Array.isArray(job.refunds) ? job.refunds.map((r: any) => ({
+            id: r.id,
+            amount: parseFloat(r.amount || r.refund_amount) || 0,
+            date: r.date || r.date_refunded || '',
+        })) : [],
     };
 };
 

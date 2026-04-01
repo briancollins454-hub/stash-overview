@@ -68,6 +68,7 @@ const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
 const AutoJobLinker = lazyRetry(() => import('./components/AutoJobLinker'));
 const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment'));
+const FinancialDashboard = lazyRetry(() => import('./components/FinancialDashboard'));
 const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
@@ -78,7 +79,7 @@ import {
     AlertTriangle, X, Calendar as CalendarIcon, Square, Package, ShoppingBag, 
     Boxes, CheckCircle2, Loader2, TrendingUp, Link2, ChevronDown, ArrowDownToLine, Percent,
     Zap, Store, LogOut, ShieldCheck, Download, Menu, Moon, Sun, Monitor,
-    Bell, BellRing, Kanban, MessageSquare, Truck, BookOpen
+    Bell, BellRing, Kanban, MessageSquare, Truck, BookOpen, PoundSterling
 } from 'lucide-react';
 
 const getHolidayDateSet = (ranges: HolidayRange[] = []) => {
@@ -244,7 +245,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'users', 'manual'];
+  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'users', 'manual'];
   const activeTab = validTabs.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'dashboard';
   const setActiveTab = useCallback((tab: string) => {
     setSearchParams(prev => {
@@ -1536,6 +1537,7 @@ const App: React.FC = () => {
                 <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); }} />
                 <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>
                 <button onClick={() => setActiveTab('manual')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'manual' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Instruction Manual"><BookOpen className="w-4 h-4" /></button>
+<button onClick={() => setActiveTab('finance')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'finance' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Accounts & Finance"><PoundSterling className="w-4 h-4" /></button>
                 <button onClick={() => setShowSettings(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Settings (⌘,)"><Settings className="w-4 h-4" /></button>
                 <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Toggle Dark Mode">
                   {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -1585,6 +1587,7 @@ const App: React.FC = () => {
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
                         <button onClick={() => { setActiveTab('manual'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-4 h-4" /> Manual</button>
+                <button onClick={() => { setActiveTab('finance'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><PoundSterling className="w-4 h-4" /> Finance</button>
                         <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>
                         <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); setMobileMenuOpen(false); }} />
                         <button onClick={() => { signOut(); setMobileMenuOpen(false); }} className="text-red-300 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button>
@@ -2061,6 +2064,19 @@ const App: React.FC = () => {
                 <ErrorBoundary fallbackTitle="Revenue Dashboard Error">
                   <RevenueDashboard
                     orders={unifiedOrders}
+                    onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Accounts & Finance Tab */}
+            {activeTab === 'finance' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Financial Dashboard Error">
+                  <FinancialDashboard
+                    decoJobs={rawDecoJobs}
+                    isDark={isDark}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                   />
                 </ErrorBoundary>

@@ -146,6 +146,14 @@ export interface DecoJob {
   paymentMethod?: string;
   discount?: number;
   couponCode?: string;
+  // Financial / accounts receivable fields
+  outstandingBalance?: number;
+  billableAmount?: number;
+  creditUsed?: number;
+  accountTerms?: string;
+  dateInvoiced?: string;
+  payments?: { id: number; datePaid: string; method: string; amount: number; refundedAmount: number }[];
+  refunds?: { id: number; amount: number; date: string }[];
 }
 
 export type ProductionStatus = string;
