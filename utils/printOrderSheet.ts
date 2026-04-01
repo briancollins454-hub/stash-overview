@@ -25,7 +25,7 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
     '</tr>';
 }
 
-export function printOrderSheet(order: UnifiedOrder): void {
+function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: string; orderNumber: string } {
   const items = order.shopify.items;
   const isRush = order.shopify.tags.some(t => ['rush', 'urgent', 'priority', 'express'].includes(t.toLowerCase()));
   const notes = getNotesForOrder(order.shopify.id);
@@ -191,9 +191,7 @@ export function printOrderSheet(order: UnifiedOrder): void {
       }).join('') + '</div>';
   }
 
-  const html = '<!DOCTYPE html><html><head><title>Order #' + order.shopify.orderNumber + '</title>' +
-    '<link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">' +
-    '<style>' + css + '</style></head><body>' +
+  const bodyHtml =
     (isRush ? '<div class="rush">\u26A1 RUSH ORDER \u26A1</div>' : '') +
     headerHtml +
     orderHeadingHtml +
@@ -205,7 +203,18 @@ export function printOrderSheet(order: UnifiedOrder): void {
     decoHtml +
     qcHtml +
     savedNotesHtml +
-    '<div class="notes-section">Production Notes (write here):</div>' +
+    '<div class="notes-section">Production Notes (write here):</div>';
+
+  return { css, bodyHtml, orderNumber: order.shopify.orderNumber };
+}
+
+export function printOrderSheet(order: UnifiedOrder): void {
+  const { css, bodyHtml, orderNumber } = buildOrderSheetHtml(order);
+
+  const html = '<!DOCTYPE html><html><head><title>Order #' + orderNumber + '</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">' +
+    '<style>' + css + '</style></head><body>' +
+    bodyHtml +
     '</body></html>';
 
   const w = window.open('', '_blank', 'width=800,height=1100');
@@ -224,6 +233,25 @@ export function printOrderSheets(ordersToPrint: UnifiedOrder[]): void {
     printOrderSheet(ordersToPrint[0]);
     return;
   }
-  // For batch: open each in its own window so each gets the full layout
-  ordersToPrint.forEach(order => printOrderSheet(order));
+
+  // Build all sheets and combine into one window with page breaks
+  const sheets = ordersToPrint.map(order => buildOrderSheetHtml(order));
+  const css = sheets[0].css + '\n.page-break { page-break-after: always; }';
+
+  const combinedBody = sheets.map(function(s, idx) {
+    const isLast = idx === sheets.length - 1;
+    return '<div' + (isLast ? '' : ' class="page-break"') + '>' + s.bodyHtml + '</div>';
+  }).join('');
+
+  const html = '<!DOCTYPE html><html><head><title>Print ' + sheets.length + ' Order Sheets</title>' +
+    '<link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+39+Text&display=swap" rel="stylesheet">' +
+    '<style>' + css + '</style></head><body>' +
+    combinedBody +
+    '</body></html>';
+
+  const w = window.open('', '_blank', 'width=800,height=1100');
+  if (!w) return;
+  w.document.write(html);
+  w.document.close();
+  w.print();
 }
