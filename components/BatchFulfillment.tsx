@@ -3,7 +3,7 @@ import { UnifiedOrder } from '../types';
 import {
   Package, CheckCircle2, Loader2, Truck, X, AlertTriangle, ChevronDown,
   ChevronUp, Printer, MapPin, Phone, Mail, ExternalLink, Tag, ShoppingBag,
-  PackageCheck, Search
+  Search
 } from 'lucide-react';
 import {
   fetchShipStationOrder, createShipStationLabel, fetchShipStationCarriers,
@@ -29,6 +29,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [filter, setFilter] = useState<'ready' | 'all'>('ready');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // ShipStation state per expanded order
   const [ssOrder, setSsOrder] = useState<ShipStationOrder | null>(null);
@@ -159,23 +160,26 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const currentCarrier = carriers.find(c => c.code === selectedCarrier);
   const currentServices = currentCarrier?.services || [];
 
-  // Print packing slip
-  const handlePrintPackingSlip = useCallback((o: UnifiedOrder) => {
+  // Toggle selection
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedIds.size === readyOrders.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(readyOrders.map(o => o.shopify.id)));
+  }, [readyOrders, selectedIds]);
+
+  // Build packing slip HTML for one order
+  const buildPackingSlipHtml = useCallback((o: UnifiedOrder) => {
     const addr = o.shopify.shippingAddress;
     const items = o.shopify.items;
-    const html = `<!DOCTYPE html><html><head><title>Packing Slip #${o.shopify.orderNumber}</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:700px;margin:20px auto;font-size:12px;color:#333}
-h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px}
-.header{display:flex;justify-content:space-between;margin-bottom:20px}
-.addr{line-height:1.6}
-table{width:100%;border-collapse:collapse;margin-top:16px}
-th,td{border:1px solid #ddd;padding:8px;text-align:left}
-th{background:#f5f5f5;font-weight:bold;text-transform:uppercase;font-size:10px;letter-spacing:1px}
-.total{font-weight:bold;text-align:right}
-.footer{margin-top:24px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999}
-@media print{body{margin:0}button{display:none!important}}
-</style></head><body>
+    return `<div class="order-page">
 <h1>STASH SHOP — Order #${o.shopify.orderNumber}</h1>
 <div class="header">
 <div class="addr"><strong>Ship To:</strong><br>
@@ -185,14 +189,42 @@ ${addr ? `${addr.name}<br>${addr.address1}<br>${addr.address2 ? addr.address2 + 
 <table><thead><tr><th>Item</th><th>SKU</th><th>Qty</th><th>Price</th></tr></thead><tbody>
 ${items.map(i => `<tr><td>${i.title}${i.variantTitle ? ' — ' + i.variantTitle : ''}</td><td>${i.sku || '—'}</td><td>${i.quantity}</td><td>£${parseFloat(i.price).toFixed(2)}</td></tr>`).join('')}
 </tbody></table>
-<p class="total" style="margin-top:12px">Total: £${parseFloat(o.shopify.totalPrice).toFixed(2)}</p>
+<p class="total">Total: £${parseFloat(o.shopify.totalPrice).toFixed(2)}</p>
 ${o.clubName ? `<p><strong>Club/Tag:</strong> ${o.clubName}</p>` : ''}
 <div class="footer">Printed ${new Date().toLocaleString('en-GB')}</div>
-<script>window.onload=()=>window.print()</script>
-</body></html>`;
+</div>`;
+  }, []);
+
+  const packingSlipStyles = `body{font-family:Arial,sans-serif;max-width:700px;margin:0 auto;font-size:12px;color:#333}
+.order-page{padding:20px 0;page-break-after:always}
+.order-page:last-child{page-break-after:auto}
+h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px}
+.header{display:flex;justify-content:space-between;margin-bottom:20px}
+.addr{line-height:1.6}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+th{background:#f5f5f5;font-weight:bold;text-transform:uppercase;font-size:10px;letter-spacing:1px}
+.total{font-weight:bold;text-align:right}
+.footer{margin-top:24px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999}
+@media print{body{margin:0}button{display:none!important}}`;
+
+  // Batch print packing slips
+  const handleBatchPrint = useCallback(() => {
+    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id));
+    if (selected.length === 0) return;
+    const pages = selected.map(o => buildPackingSlipHtml(o)).join('\n');
+    const html = `<!DOCTYPE html><html><head><title>Packing Slips (${selected.length} orders)</title><style>${packingSlipStyles}</style></head><body>${pages}<script>window.onload=()=>window.print()<\/script></body></html>`;
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
-  }, []);
+  }, [readyOrders, selectedIds, buildPackingSlipHtml, packingSlipStyles]);
+
+  // Print packing slip
+  const handlePrintPackingSlip = useCallback((o: UnifiedOrder) => {
+    const page = buildPackingSlipHtml(o);
+    const html = `<!DOCTYPE html><html><head><title>Packing Slip #${o.shopify.orderNumber}</title><style>${packingSlipStyles}</style></head><body>${page}<script>window.onload=()=>window.print()<\/script></body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  }, [buildPackingSlipHtml, packingSlipStyles]);
 
   return (
     <div className="space-y-4">
@@ -222,12 +254,21 @@ ${o.clubName ? `<p><strong>Club/Tag:</strong> ${o.clubName}</p>` : ''}
         </div>
       </div>
 
-      {/* Info Banner */}
-      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2">
-        <PackageCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-        <p className="text-[10px] text-blue-300 font-bold leading-relaxed">
-          Click an order to view details and print a packing slip. Use <strong>Create + Print Label</strong> to generate a ShipStation shipping label — this will automatically mark the order as fulfilled in Shopify.
-        </p>
+      {/* Batch Action Bar */}
+      <div className="flex items-center justify-between bg-white/5 rounded-xl border border-white/10 p-3">
+        <div className="flex items-center gap-3">
+          <button onClick={toggleSelectAll} className="text-[9px] font-black uppercase tracking-wider text-gray-400 hover:text-white transition-colors">
+            {selectedIds.size === readyOrders.length && readyOrders.length > 0 ? 'Deselect All' : 'Select All'}
+          </button>
+          <span className="text-[10px] font-bold text-gray-500">{selectedIds.size} selected</span>
+        </div>
+        <button
+          onClick={handleBatchPrint}
+          disabled={selectedIds.size === 0}
+          className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+        >
+          <Printer className="w-3.5 h-3.5" /> Print {selectedIds.size} Packing Slip{selectedIds.size !== 1 ? 's' : ''}
+        </button>
       </div>
 
       {/* Order List */}
@@ -250,8 +291,15 @@ ${o.clubName ? `<p><strong>Club/Tag:</strong> ${o.clubName}</p>` : ''}
                 {/* Order Row */}
                 <div
                   onClick={() => handleExpand(o.shopify.id, o.shopify.orderNumber)}
-                  className="flex items-center gap-3 p-3 cursor-pointer"
+                  className={`flex items-center gap-3 p-3 cursor-pointer ${selectedIds.has(o.shopify.id) ? 'bg-blue-500/5' : ''}`}
                 >
+                  {/* Checkbox */}
+                  <div
+                    onClick={(e) => toggleSelect(o.shopify.id, e)}
+                    className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all cursor-pointer ${selectedIds.has(o.shopify.id) ? 'bg-blue-500 border-blue-500' : 'border-gray-600 hover:border-gray-400'}`}
+                  >
+                    {selectedIds.has(o.shopify.id) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <button onClick={e => { e.stopPropagation(); onNavigateToOrder(o.shopify.orderNumber); }} className="text-[11px] font-black text-indigo-300 hover:text-indigo-200">
