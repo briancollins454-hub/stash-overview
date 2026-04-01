@@ -9,38 +9,114 @@ interface Props {
 
 const POLL_INTERVAL = 30_000; // 30 seconds
 
+// Play a notification sound
+function playNotificationSound() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.value = 0.15;
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.stop(ctx.currentTime + 0.3);
+    // Second tone
+    setTimeout(() => {
+      try {
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.frequency.value = 1100;
+        osc2.type = 'sine';
+        gain2.gain.value = 0.15;
+        osc2.start();
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc2.stop(ctx.currentTime + 0.3);
+      } catch {}
+    }, 150);
+  } catch {}
+}
+
+// Show notification via service worker (works in PWAs on mobile)
+async function showPushNotification(title: string, body: string, tag: string) {
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, {
+        body,
+        tag,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        vibrate: [200, 100, 200],
+        renotify: true,
+        requireInteraction: false,
+      });
+      return;
+    }
+  } catch {}
+  // Fallback to basic Notification API
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification(title, { body, tag, icon: '/icon-192.png' });
+    }
+  } catch {}
+}
+
 const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
-  const seenIdsRef = useRef<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem('stash_seen_notif_ids');
-      return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
-    } catch { return new Set<string>(); }
-  });
+  const seenIdsRef = useRef<Set<string>>(new Set<string>());
+  const initedRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Load seenIds from localStorage once on mount
+  useEffect(() => {
+    if (initedRef.current) return;
+    initedRef.current = true;
+    try {
+      const saved = localStorage.getItem('stash_seen_notif_ids');
+      if (saved) seenIdsRef.current = new Set<string>(JSON.parse(saved));
+    } catch {}
+  }, []);
 
   const poll = useCallback(async () => {
     if (!username) return;
     const notifs = await fetchUnreadNotifications(username);
     setNotifications(notifs);
 
-    // Browser notification for truly new ones
-    const seenIds = seenIdsRef.current instanceof Set ? seenIdsRef.current : new Set<string>();
-    const newOnes = notifs.filter(n => !seenIds.has(n.id));
-    if (newOnes.length > 0 && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      for (const n of newOnes.slice(0, 3)) {
-        new Notification(`💬 ${n.sender_name} mentioned you`, {
-          body: `Order #${n.order_number}: ${n.message_preview.slice(0, 80)}`,
-          tag: `mention-${n.id}`,
-          icon: '/icon-192.png',
-        });
+    // Check for truly new notifications
+    const newOnes = notifs.filter(n => !seenIdsRef.current.has(n.id));
+    if (newOnes.length > 0) {
+      // Request permission if needed
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await Notification.requestPermission();
       }
-      const next = new Set(seenIds);
-      newOnes.forEach(n => next.add(n.id));
-      // Keep only last 200 seen IDs
-      const arr = [...next].slice(-200);
+
+      const canNotify = typeof Notification !== 'undefined' && Notification.permission === 'granted';
+
+      // Show OS-level notifications
+      if (canNotify) {
+        for (const n of newOnes.slice(0, 3)) {
+          showPushNotification(
+            `💬 ${n.sender_name} mentioned you`,
+            `Order #${n.order_number}: ${n.message_preview.slice(0, 80)}`,
+            `mention-${n.id}`
+          );
+        }
+      }
+
+      // Play sound
+      playNotificationSound();
+
+      // Update seen IDs
+      newOnes.forEach(n => seenIdsRef.current.add(n.id));
+      // Trim to last 200
+      const arr = [...seenIdsRef.current].slice(-200);
       seenIdsRef.current = new Set(arr);
       localStorage.setItem('stash_seen_notif_ids', JSON.stringify(arr));
     }
@@ -51,13 +127,6 @@ const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
     pollRef.current = setInterval(poll, POLL_INTERVAL);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [poll]);
-
-  // Request notification permission on mount
-  useEffect(() => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -100,7 +169,7 @@ const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[340px] max-h-[420px] bg-white rounded-xl shadow-2xl border border-gray-200 z-[200] overflow-hidden">
+        <div className="fixed inset-x-2 top-16 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[340px] max-h-[420px] bg-white rounded-xl shadow-2xl border border-gray-200 z-[200] overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-white">
             <span className="text-xs font-black uppercase tracking-widest text-gray-700">Mentions</span>

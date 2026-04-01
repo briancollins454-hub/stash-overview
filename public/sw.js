@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stash-sync-v3';
+const CACHE_NAME = 'stash-sync-v4';
 
 // Install: skip waiting immediately so new SW activates right away
 self.addEventListener('install', (event) => {
@@ -13,6 +13,23 @@ self.addEventListener('activate', (event) => {
     )
   );
   self.clients.claim();
+});
+
+// Handle notification click: focus/open the app
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // Focus existing window if available
+      for (const client of clients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // Otherwise open a new window
+      return self.clients.openWindow('/');
+    })
+  );
 });
 
 // Fetch: network-first for everything — guarantees fresh code on every deploy

@@ -1457,11 +1457,9 @@ const App: React.FC = () => {
                     {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
-                    <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center gap-3">
-                        <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); setMobileMenuOpen(false); }} />
-                    </div>
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
                         <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>
+                        <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); setMobileMenuOpen(false); }} />
                         <button onClick={() => { signOut(); setMobileMenuOpen(false); }} className="text-red-300 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button>
                     </div>
                 </div>
