@@ -72,7 +72,7 @@ import {
     AlertTriangle, X, Calendar as CalendarIcon, Square, Package, ShoppingBag, 
     Boxes, CheckCircle2, Loader2, TrendingUp, Link2, ChevronDown, ArrowDownToLine, Percent,
     Zap, Store, LogOut, ShieldCheck, Download, Menu, Moon, Sun, Monitor,
-    Bell, Kanban, MessageSquare, Truck
+    Bell, BellRing, Kanban, MessageSquare, Truck
 } from 'lucide-react';
 
 const getHolidayDateSet = (ranges: HolidayRange[] = []) => {
@@ -1410,7 +1410,7 @@ const App: React.FC = () => {
                 ))}
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
                 <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); }} />
-                <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><Bell className="w-4 h-4" /></button>
+                <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>
                 <button onClick={() => setShowSettings(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Settings (⌘,)"><Settings className="w-4 h-4" /></button>
                 <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Toggle Dark Mode">
                   {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
