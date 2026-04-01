@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { OrderNote, getNotesForOrder, saveNote, deleteNote, syncNotesToCloud, fetchNotesFromCloud, deleteNoteFromCloud, mergeNotes, fetchMentionUsers, MentionUser } from '../services/notesService';
+import { createMentionNotifications } from '../services/notificationService';
 import { ApiSettings } from './SettingsModal';
 import { MessageSquare, Send, Trash2, X, Edit3, Pin, Maximize2, Minimize2, Loader2, Bell } from 'lucide-react';
 
@@ -10,7 +11,6 @@ interface Props {
   authorName: string;
   settings: ApiSettings;
   onClose: () => void;
-  onNotify?: (title: string, options?: NotificationOptions) => void;
 }
 
 const PRIORITY_COLORS: Record<string, { bg: string; text: string; label: string }> = {
@@ -20,7 +20,7 @@ const PRIORITY_COLORS: Record<string, { bg: string; text: string; label: string 
   action: { bg: 'bg-amber-50 border-amber-200', text: 'text-amber-600', label: '⚡ ACTION NEEDED' },
 };
 
-const OrderNotes: React.FC<Props> = ({ orderId, orderNumber, authorEmail, authorName, settings, onClose, onNotify }) => {
+const OrderNotes: React.FC<Props> = ({ orderId, orderNumber, authorEmail, authorName, settings, onClose }) => {
   const [notes, setNotes] = useState<OrderNote[]>([]);
   const [newText, setNewText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,16 +105,16 @@ const OrderNotes: React.FC<Props> = ({ orderId, orderNumber, authorEmail, author
     setShowMentionPicker(false);
     syncNotesToCloud(settings, [note]).catch(console.error);
 
-    // Send browser notification for mentions
-    if (onNotify && mentions.length > 0) {
-      const mentionedNames = mentions.map(u => {
-        const user = mentionUsers.find(mu => mu.username === u);
-        return user ? user.displayName : u;
-      }).join(', ');
-      onNotify(`New mention in Order #${orderNumber}`, {
-        body: `${authorName} mentioned ${mentionedNames}: "${newText.trim().slice(0, 100)}"`,
-        tag: `mention-${note.id}`,
-      });
+    // Create server-side notifications for mentioned users
+    if (mentions.length > 0) {
+      createMentionNotifications({
+        mentions,
+        senderName: authorName,
+        orderId,
+        orderNumber,
+        noteId: note.id,
+        messageText: newText.trim(),
+      }).catch(console.error);
     }
   };
 
