@@ -22,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Only allow stash_ prefixed tables
   const tableName = path.split('?')[0];
-  if (!tableName.startsWith('stash_') && !tableName.startsWith('order_notes')) {
+  if (!tableName.startsWith('stash_') && tableName !== 'order_notes') {
     return res.status(403).json({ error: 'Only stash_ and order_notes tables are allowed' });
   }
 

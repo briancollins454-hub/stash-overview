@@ -357,6 +357,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json({ success: true, message: 'Superuser created. You can now log in.' });
       }
 
+      // ─── LIST BASIC: public user list for @mentions (no admin required) ──
+      case 'list_basic': {
+        const users = await firestoreList(authToken);
+        return res.json(users.filter(u => u.is_active).map(u => ({
+          id: u.id,
+          firstName: u.first_name,
+          lastName: u.last_name,
+          username: u.username,
+          displayName: `${u.first_name} ${u.last_name}`,
+        })));
+      }
+
       default:
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }

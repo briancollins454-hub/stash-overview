@@ -1941,15 +1941,17 @@ const App: React.FC = () => {
         </Suspense>
 
         {/* Order Notes Popover */}
-        {notesOrderId && user && (
+        {notesOrderId && (user || customUserData) && (
           <div className="fixed bottom-4 right-4 z-[150]">
             <Suspense fallback={null}>
               <OrderNotes
                 orderId={notesOrderId}
                 orderNumber={notesOrderNumber}
-                authorEmail={user.email || 'unknown'}
+                authorEmail={isCustomUser ? (customUserData?.username || 'unknown') : (user?.email || 'unknown')}
+                authorName={isCustomUser ? (customUserData?.displayName || customUserData?.username || 'User') : (user?.displayName || user?.email || 'User')}
                 settings={apiSettings}
                 onClose={() => { setNotesOrderId(null); setNoteCounts(getNoteCounts()); }}
+                onNotify={notify}
               />
             </Suspense>
           </div>
