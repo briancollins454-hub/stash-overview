@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stash Shop Overview — Instruction Manual</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+  :root {
+    --brand: #1e1b4b;
+    --brand-mid: #3730a3;
+    --brand-light: #6366f1;
+    --accent: #6366f1;
+    --accent-soft: #e0e7ff;
+    --emerald: #059669;
+    --emerald-soft: #d1fae5;
+    --amber: #d97706;
+    --amber-soft: #fef3c7;
+    --red: #dc2626;
+    --red-soft: #fee2e2;
+    --blue: #2563eb;
+    --blue-soft: #dbeafe;
+    --purple: #7c3aed;
+    --purple-soft: #ede9fe;
+    --slate: #475569;
+    --slate-light: #94a3b8;
+    --bg: #ffffff;
+    --bg-alt: #f8fafc;
+    --border: #e2e8f0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1e293b;
+    line-height: 1.7;
+    background: var(--bg);
+    font-size: 11pt;
+  }
+
+  @media print {
+    body { font-size: 10pt; }
+    .page-break { page-break-before: always; }
+    .no-break { page-break-inside: avoid; }
+    .cover { height: 100vh; }
+    @page { margin: 15mm 20mm; size: A4; }
+  }
+
+  /* ─────── COVER ─────── */
+  .cover {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 35%, #4338ca 70%, #6366f1 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; color: white; position: relative; overflow: hidden;
+    padding: 60px 40px;
+  }
+  .cover::before {
+    content: ''; position: absolute; top: -50%; right: -30%; width: 800px; height: 800px;
+    background: radial-gradient(circle, rgba(99,102,241,0.3) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .cover::after {
+    content: ''; position: absolute; bottom: -40%; left: -20%; width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(129,140,248,0.2) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .cover-logo {
+    width: 100px; height: 100px; background: rgba(255,255,255,0.15);
+    border-radius: 24px; display: flex; align-items: center; justify-content: center;
+    font-size: 48px; font-weight: 900; letter-spacing: -2px;
+    backdrop-filter: blur(10px); border: 2px solid rgba(255,255,255,0.2);
+    margin-bottom: 40px; position: relative; z-index: 1;
+  }
+  .cover h1 {
+    font-size: 42px; font-weight: 900; letter-spacing: -1px;
+    margin-bottom: 12px; position: relative; z-index: 1;
+  }
+  .cover .subtitle {
+    font-size: 18px; font-weight: 400; opacity: 0.8;
+    margin-bottom: 8px; position: relative; z-index: 1;
+  }
+  .cover .tagline {
+    font-size: 13px; font-weight: 500; opacity: 0.6;
+    letter-spacing: 3px; text-transform: uppercase;
+    margin-bottom: 50px; position: relative; z-index: 1;
+  }
+  .cover-badge {
+    display: inline-block; background: rgba(255,255,255,0.15);
+    padding: 8px 24px; border-radius: 100px;
+    font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.2);
+    position: relative; z-index: 1;
+  }
+  .cover-meta {
+    position: absolute; bottom: 40px; font-size: 11px;
+    opacity: 0.5; letter-spacing: 1px; z-index: 1;
+  }
+
+  /* ─────── TABLE OF CONTENTS ─────── */
+  .toc {
+    max-width: 700px; margin: 0 auto; padding: 60px 40px;
+  }
+  .toc h2 {
+    font-size: 28px; font-weight: 900; color: var(--brand);
+    margin-bottom: 30px; letter-spacing: -0.5px;
+  }
+  .toc-section {
+    margin-bottom: 24px;
+  }
+  .toc-section-title {
+    font-size: 10px; font-weight: 800; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--brand-light);
+    margin-bottom: 8px; padding-bottom: 6px;
+    border-bottom: 2px solid var(--accent-soft);
+  }
+  .toc-item {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 4px 0; font-size: 12px; color: var(--slate);
+  }
+  .toc-item .num { font-weight: 700; color: var(--brand-mid); min-width: 24px; }
+  .toc-item .title { font-weight: 500; }
+  .toc-item .dots { flex: 1; border-bottom: 1px dotted #cbd5e1; margin: 0 8px; min-width: 20px; }
+  .toc-item .page { font-weight: 600; color: var(--slate-light); font-size: 11px; }
+
+  /* ─────── SECTIONS ─────── */
+  .section {
+    max-width: 750px; margin: 0 auto; padding: 50px 40px;
+  }
+  .section-header {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 28px; padding-bottom: 16px;
+    border-bottom: 3px solid var(--brand);
+  }
+  .section-num {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--brand); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 900; flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 26px; font-weight: 900; color: var(--brand);
+    letter-spacing: -0.5px;
+  }
+  .section-header .tab-badge {
+    font-size: 9px; font-weight: 800; letter-spacing: 2px;
+    text-transform: uppercase; padding: 3px 10px;
+    border-radius: 6px; background: var(--accent-soft);
+    color: var(--brand-mid);
+  }
+  h3 {
+    font-size: 16px; font-weight: 800; color: var(--brand-mid);
+    margin: 28px 0 12px; letter-spacing: -0.3px;
+  }
+  h4 {
+    font-size: 13px; font-weight: 700; color: var(--slate);
+    margin: 20px 0 8px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  p { margin-bottom: 12px; color: #334155; font-size: 11.5pt; }
+
+  /* ─────── CALLOUT BOXES ─────── */
+  .callout {
+    padding: 16px 20px; border-radius: 12px; margin: 16px 0;
+    border-left: 4px solid; font-size: 11pt;
+  }
+  .callout-info { background: var(--blue-soft); border-color: var(--blue); }
+  .callout-tip { background: var(--emerald-soft); border-color: var(--emerald); }
+  .callout-warn { background: var(--amber-soft); border-color: var(--amber); }
+  .callout-danger { background: var(--red-soft); border-color: var(--red); }
+  .callout-purple { background: var(--purple-soft); border-color: var(--purple); }
+  .callout .callout-title {
+    font-weight: 800; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 2px; margin-bottom: 4px;
+  }
+  .callout-info .callout-title { color: var(--blue); }
+  .callout-tip .callout-title { color: var(--emerald); }
+  .callout-warn .callout-title { color: var(--amber); }
+  .callout-danger .callout-title { color: var(--red); }
+  .callout-purple .callout-title { color: var(--purple); }
+
+  /* ─────── STATUS BADGES (inline) ─────── */
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 6px;
+    font-size: 9px; font-weight: 800; letter-spacing: 1px;
+    text-transform: uppercase; border: 1.5px solid; vertical-align: middle;
+  }
+  .badge-red { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  .badge-amber { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .badge-blue { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .badge-emerald { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .badge-indigo { background: #e0e7ff; color: #3730a3; border-color: #a5b4fc; }
+  .badge-purple { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+  .badge-slate { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+  .badge-gray { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
+
+  /* ─────── STATUS TABLE ─────── */
+  .status-table {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    font-size: 10.5pt;
+  }
+  .status-table th {
+    text-align: left; padding: 10px 14px; font-size: 9px;
+    font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    background: var(--brand); color: white; border: none;
+  }
+  .status-table th:first-child { border-radius: 8px 0 0 0; }
+  .status-table th:last-child { border-radius: 0 8px 0 0; }
+  .status-table td {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .status-table tr:last-child td { border-bottom: none; }
+  .status-table tr:nth-child(even) td { background: var(--bg-alt); }
+
+  /* ─────── STEP LISTS ─────── */
+  .steps { counter-reset: step; margin: 16px 0; }
+  .step {
+    display: flex; gap: 14px; margin-bottom: 14px;
+    counter-increment: step;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--accent-soft); color: var(--brand-mid);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-text { flex: 1; }
+  .step-text strong { color: var(--brand); }
+
+  /* ─────── KEYBOARD / UI LABELS ─────── */
+  kbd, .ui-label {
+    display: inline-block; padding: 1px 8px; border-radius: 5px;
+    font-size: 10px; font-weight: 700;
+    background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;
+    font-family: 'Inter', sans-serif;
+  }
+  .ui-label { background: var(--accent-soft); color: var(--brand-mid); border-color: #a5b4fc; }
+
+  /* ─────── DIVIDERS ─────── */
+  hr.section-divider {
+    border: none; height: 1px; background: linear-gradient(to right, transparent, var(--border), transparent);
+    margin: 40px 0;
+  }
+
+  /* bullet lists */
+  ul { margin: 8px 0 16px 20px; }
+  li { margin-bottom: 6px; color: #334155; }
+  li strong { color: var(--brand-mid); }
+  ol { margin: 8px 0 16px 20px; }
+  ol li { margin-bottom: 8px; }
+
+  /* mini-card grid */
+  .card-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 12px; margin: 16px 0;
+  }
+  .mini-card {
+    padding: 14px 16px; border-radius: 10px;
+    border: 1.5px solid var(--border); background: var(--bg-alt);
+  }
+  .mini-card h5 {
+    font-size: 10px; font-weight: 800; letter-spacing: 1.5px;
+    text-transform: uppercase; margin-bottom: 6px;
+  }
+  .mini-card p { font-size: 10.5pt; margin: 0; color: var(--slate); }
+
+  .icon-inline {
+    display: inline-block; width: 16px; height: 16px; vertical-align: middle;
+    margin-right: 4px;
+  }
+
+  /* tick row */
+  .tick-row {
+    display: flex; gap: 4px; align-items: center; margin: 8px 0;
+  }
+  .tick {
+    width: 24px; height: 24px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+  }
+  .tick-green { background: #d1fae5; color: #059669; }
+  .tick-amber { background: #fef3c7; color: #d97706; }
+  .tick-gray { background: #f1f5f9; color: #cbd5e1; }
+  .tick-label { font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--slate-light); margin-left: 8px; }
+
+  /* footer */
+  .doc-footer {
+    text-align: center; padding: 40px; font-size: 10px;
+    color: var(--slate-light); letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- COVER PAGE                                          -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="cover">
+  <div class="cover-logo">S</div>
+  <h1>Stash Shop Overview</h1>
+  <div class="subtitle">Shopify × DecoNetwork Production Bridge</div>
+  <div class="tagline">Complete Instruction Manual</div>
+  <div class="cover-badge">Version 4.0 &mdash; April 2026</div>
+  <div class="cover-meta">stashoverview.co.uk &bull; Stash Sportswear</div>
+</div>
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- TABLE OF CONTENTS                                   -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="toc page-break">
+  <h2>Contents</h2>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Getting Started</div>
+    <div class="toc-item"><span class="num">1</span><span class="title">Navigating the App</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">2</span><span class="title">Understanding Status Badges</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">3</span><span class="title">Production Status Meanings</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Core Tabs</div>
+    <div class="toc-item"><span class="num">4</span><span class="title">Dashboard — The Order Table</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">5</span><span class="title">Summary Cards &amp; Quick Filters</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">6</span><span class="title">Working with Individual Orders</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">7</span><span class="title">Multi-Select &amp; Batch Actions</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">8</span><span class="title">Kanban Board</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Linking &amp; Matching</div>
+    <div class="toc-item"><span class="num">9</span><span class="title">Understanding Deco Job Linking</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">10</span><span class="title">Auto-Match, Scan &amp; Manual Link</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">11</span><span class="title">Item Mapping &amp; Completion %</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Fulfilment &amp; Shipping</div>
+    <div class="toc-item"><span class="num">12</span><span class="title">FULFILL Tab — Batch Ship Dashboard</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">13</span><span class="title">Print Order Sheets &amp; Packing Slips</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Reports &amp; Analytics</div>
+    <div class="toc-item"><span class="num">14</span><span class="title">Reports Tab Overview</span><span class="dots"></span></div>
+  </div>
+
+  <div class="toc-section">
+    <div class="toc-section-title">Other Features</div>
+    <div class="toc-item"><span class="num">15</span><span class="title">Stock Management</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">16</span><span class="title">Notes, Chat &amp; Notifications</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">17</span><span class="title">Syncing &amp; Data Refresh</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">18</span><span class="title">Quick Reference — Status Cheat Sheet</span><span class="dots"></span></div>
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 1: NAVIGATING THE APP                      -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">1</div>
+    <div>
+      <h2>Navigating the App</h2>
+    </div>
+  </div>
+
+  <p>Stash Shop Overview runs entirely in your browser at <strong>stashoverview.co.uk</strong>. The top navigation bar gives you access to every area of the system. Here's what each tab does:</p>
+
+  <table class="status-table">
+    <thead>
+      <tr><th>Tab</th><th>What It Does</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>DASHBOARD</strong></td><td>Your home base. Every Shopify order in one table, grouped by club/vendor with filters, search, and summary cards.</td></tr>
+      <tr><td><strong>KANBAN</strong></td><td>Visual board with columns: <strong>New → Linked → In Production → Ready to Ship</strong>. Drag-and-drop style overview.</td></tr>
+      <tr><td><strong>INTEL</strong></td><td>Intelligence tools: auto-matching engine, duplicate detection, and production forecasting.</td></tr>
+      <tr><td><strong>PRODUCTION</strong></td><td>Priority queue, production calendar, and batch print sheets.</td></tr>
+      <tr><td><strong>REPORTS</strong></td><td>Analytics suite: profitability, club leaderboard, late orders, EAN coverage, carrier performance, bottlenecks, and more.</td></tr>
+      <tr><td><strong>OPS</strong></td><td>Operations dashboard — alert rules, returns tracker, artwork approvals.</td></tr>
+      <tr><td><strong>STOCK</strong></td><td>Physical inventory management: stock counts, EAN barcodes, reorder points.</td></tr>
+      <tr><td><strong>EFFICIENCY</strong></td><td>Efficiency metrics and workflow analysis.</td></tr>
+      <tr><td><strong>MTO</strong></td><td>Make-To-Order dashboard for bespoke/custom items with per-item job tracking.</td></tr>
+      <tr><td><strong>DECO</strong></td><td>DecoNetwork job search: find, view, and manage Deco production jobs.</td></tr>
+      <tr><td><strong>REVENUE</strong></td><td>Revenue dashboard with sales breakdowns and trends.</td></tr>
+      <tr><td><strong>LINKER</strong></td><td>Auto job linking tools for bulk matching Shopify orders to Deco jobs.</td></tr>
+      <tr><td><strong>FULFILL</strong></td><td>Batch fulfillment &amp; shipping — create ShipStation labels and ship multiple orders at once.</td></tr>
+      <tr><td><strong>ANALYST</strong></td><td>Process analysis tools for workflow optimisation.</td></tr>
+      <tr><td><strong>USERS</strong></td><td>User management (admin only) — add/remove users, assign roles.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Tip</div>
+    The tab you're on is highlighted in the navigation bar. You can also switch tabs using the summary card links and "Navigate to Order" buttons throughout the app.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 2: UNDERSTANDING STATUS BADGES              -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">2</div>
+    <div>
+      <h2>Understanding Status Badges</h2>
+    </div>
+  </div>
+
+  <p>Orders display two key status badges — one from <strong>Shopify</strong> (fulfilment) and one from <strong>DecoNetwork</strong> (production). Understanding these is essential.</p>
+
+  <h3>Shopify Fulfilment Status</h3>
+  <p>This shows whether the order has been shipped to the customer:</p>
+
+  <table class="status-table no-break">
+    <thead><tr><th>Badge</th><th>Meaning</th><th>What To Do</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-emerald">Fulfilled</span></td>
+        <td>All items have been dispatched and tracking sent to customer.</td>
+        <td>Nothing — this order is complete.</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-amber">Partial</span></td>
+        <td>Some items shipped but others remain. Common with split shipments.</td>
+        <td>Check the expanded view to see which items are still outstanding.</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-slate">Unfulfilled</span></td>
+        <td>Nothing has been shipped yet.</td>
+        <td>Standard state — this order needs production and/or shipping.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Days Remaining Progress Bar</h3>
+  <p>The coloured bar next to the dispatch date tells you how much time is left:</p>
+
+  <table class="status-table no-break">
+    <thead><tr><th>Colour</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge badge-emerald">Green</span></td><td><strong>On track</strong> — More than 10 working days remaining.</td></tr>
+      <tr><td><span class="badge badge-blue">Blue</span></td><td><strong>Approaching</strong> — 6–10 working days left. Keep an eye on it.</td></tr>
+      <tr><td><span class="badge badge-amber">Orange</span></td><td><strong>Urgent</strong> — 5 or fewer days. Needs priority attention.</td></tr>
+      <tr><td><span class="badge badge-red">Red</span></td><td><strong>Overdue</strong> — Past the dispatch date. Immediate action required.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 3: PRODUCTION STATUS MEANINGS               -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">3</div>
+    <div>
+      <h2>Production Status Meanings</h2>
+    </div>
+  </div>
+
+  <p>The <strong>Production Status</strong> badge shows where the order is in the DecoNetwork production pipeline. This is the most important indicator for daily workflow decisions.</p>
+
+  <table class="status-table">
+    <thead><tr><th>Status</th><th>Badge</th><th>What It Means</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Not Ordered</strong></td>
+        <td><span class="badge badge-red">Not Ordered</span></td>
+        <td>The Shopify order exists but <strong>no production order has been placed with Deco</strong>. The customer has ordered, but work hasn't started. This needs a Deco job to be created.</td>
+      </tr>
+      <tr>
+        <td><strong>Awaiting Deco Data...</strong></td>
+        <td><span class="badge badge-indigo" style="font-style: italic;">Awaiting Deco Data...</span></td>
+        <td>The system is <strong>actively syncing</strong> with DecoNetwork to pull in production data. This is a temporary state — it will update automatically once the sync completes. <em>No action needed, just wait.</em></td>
+      </tr>
+      <tr>
+        <td><strong>Awaiting Deco Detail...</strong></td>
+        <td><span class="badge badge-indigo" style="font-style: italic;">Awaiting Deco Detail...</span></td>
+        <td>Similar to above — the system has identified a Deco job but is <strong>fetching the detailed item-level data</strong>. Wait for sync to finish.</td>
+      </tr>
+      <tr>
+        <td><strong>Awaiting Stock</strong></td>
+        <td><span class="badge badge-amber">Awaiting Stock</span></td>
+        <td>Deco has the order but is <strong>waiting for blank garments/stock</strong> to arrive before production can begin.</td>
+      </tr>
+      <tr>
+        <td><strong>Awaiting Processing</strong></td>
+        <td><span class="badge badge-blue">Awaiting Processing</span></td>
+        <td>Stock is in but the job is <strong>queued for production</strong>. It's in the pipeline but not yet on the machines.</td>
+      </tr>
+      <tr>
+        <td><strong>In Production</strong></td>
+        <td><span class="badge badge-blue">In Production</span></td>
+        <td>Items are <strong>actively being decorated</strong> — embroidery, printing, or other processes underway.</td>
+      </tr>
+      <tr>
+        <td><strong>Quality / Process</strong></td>
+        <td><span class="badge badge-blue">Quality</span></td>
+        <td>Production complete, items are in <strong>quality checking</strong> or a specialist process stage.</td>
+      </tr>
+      <tr>
+        <td><strong>Artwork / Quote / PO</strong></td>
+        <td><span class="badge badge-amber">Artwork</span></td>
+        <td><strong>Pre-production phase</strong> — artwork needs approval, quote needs confirmation, or purchase order needs raising.</td>
+      </tr>
+      <tr>
+        <td><strong>Ready / Completed</strong></td>
+        <td><span class="badge badge-emerald">Ready</span></td>
+        <td>Production finished — items are <strong>ready to be dispatched</strong>. Head to the FULFILL tab to ship.</td>
+      </tr>
+      <tr>
+        <td><strong>Shipped</strong></td>
+        <td><span class="badge badge-emerald">Shipped</span></td>
+        <td>Deco has <strong>dispatched the items</strong>. Check ShipStation for tracking details.</td>
+      </tr>
+      <tr>
+        <td><strong>Identified / Linked</strong></td>
+        <td><span class="badge badge-indigo">Linked</span></td>
+        <td>The Shopify order has been <strong>matched to a Deco job</strong> but detailed production status hasn't been pulled yet.</td>
+      </tr>
+      <tr>
+        <td><strong>Cancelled / On Hold</strong></td>
+        <td><span class="badge badge-red">Cancelled</span></td>
+        <td>Order has been <strong>cancelled or put on hold</strong> at the Deco level.</td>
+      </tr>
+      <tr>
+        <td><strong>Unknown</strong></td>
+        <td><span class="badge badge-gray">Unknown</span></td>
+        <td>The system <strong>couldn't determine</strong> the production status. May need a manual check or re-sync.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">⚠️ Common Confusion</div>
+    <strong>"Awaiting Deco Data..."</strong> does NOT mean the order hasn't been placed. It means the <em>app</em> is still loading data from DecoNetwork. If it persists for more than a few minutes, try hitting <span class="ui-label">STATUS REFRESH</span> or <span class="ui-label">SYNC</span>.
+  </div>
+
+  <h3>Workflow Progress Ticks</h3>
+  <p>When you expand an order, each item shows four progress ticks:</p>
+
+  <div class="tick-row" style="margin-bottom: 16px;">
+    <div class="tick tick-green">✓</div><span class="tick-label">Ordered</span>
+    <div class="tick tick-green" style="margin-left:12px;">✓</div><span class="tick-label">Received</span>
+    <div class="tick tick-amber" style="margin-left:12px;">✓</div><span class="tick-label">Produced</span>
+    <div class="tick tick-gray" style="margin-left:12px;">—</div><span class="tick-label">Shipped</span>
+  </div>
+
+  <ul>
+    <li><strong style="color:#059669;">Green ✓</strong> = Stage complete</li>
+    <li><strong style="color:#d97706;">Orange ✓</strong> = In progress at this stage</li>
+    <li><strong style="color:#cbd5e1;">Gray —</strong> = Not reached yet</li>
+  </ul>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 4: DASHBOARD — THE ORDER TABLE              -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">4</div>
+    <div>
+      <h2>Dashboard — The Order Table</h2>
+      <span class="tab-badge">Dashboard Tab</span>
+    </div>
+  </div>
+
+  <p>The Dashboard is your central command post. Every Shopify order appears here, grouped by club or vendor, with all linked Deco data alongside it.</p>
+
+  <h3>Table Columns</h3>
+  <table class="status-table">
+    <thead><tr><th>Column</th><th>What It Shows</th></tr></thead>
+    <tbody>
+      <tr><td><strong>☑</strong></td><td>Selection checkbox — tick to include in batch actions.</td></tr>
+      <tr><td><strong>Shopify Order #</strong></td><td>Order number, customer name, date, and club tags. Click the order number to open in Shopify admin.</td></tr>
+      <tr><td><strong>Deco Job #</strong></td><td>Linked DecoNetwork job ID. Shows <span class="ui-label">Find Job</span> if not yet linked.</td></tr>
+      <tr><td><strong>Est Dispatch</strong></td><td>Estimated dispatch date with a progress bar showing days remaining. Colour-coded by urgency.</td></tr>
+      <tr><td><strong>Shopify Status</strong></td><td>Fulfilment status: Fulfilled, Partial, or Unfulfilled.</td></tr>
+      <tr><td><strong>Production Status</strong></td><td>DecoNetwork production stage (see Section 3).</td></tr>
+      <tr><td><strong>Items Ready</strong></td><td>Two progress bars — <strong>Mapped %</strong> (how many items linked to Deco products) and <strong>Stock %</strong> (how many have physical stock ready).</td></tr>
+      <tr><td><strong>Order Fulfilled</strong></td><td>Fulfilment date and how many working days it took.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Searching &amp; Filtering</h3>
+  <ul>
+    <li><strong>Search bar</strong> — Type an order number, customer name, job ID, or tag. Search is instant (debounced).</li>
+    <li><strong>Filter Tags</strong> — Click the dropdown to filter by specific clubs or teams.</li>
+    <li><strong>Date Range</strong> — Set start/end dates to narrow the view to a specific period.</li>
+    <li><strong>Show Fulfilled</strong> — Toggle this on to include completed orders in the table.</li>
+    <li><strong>Group by Vendor</strong> — Switch from club grouping to vendor grouping.</li>
+  </ul>
+
+  <h3>Grouping</h3>
+  <p>Orders are automatically grouped by <strong>club/team name</strong> (from Shopify tags). Each group shows a header with the club name and a green badge showing the number of instances. You can toggle to <strong>vendor grouping</strong> to see orders by supplier instead.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">ℹ️ Saved Views</div>
+    Click <span class="ui-label">+ Save View</span> to save your current combination of filters, search term, and date range. Name it (e.g., "Overdue AFC") and click it anytime to instantly restore those filters.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 5: SUMMARY CARDS                           -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">5</div>
+    <div>
+      <h2>Summary Cards &amp; Quick Filters</h2>
+      <span class="tab-badge">Dashboard Tab</span>
+    </div>
+  </div>
+
+  <p>The five summary cards at the top of the Dashboard give you an instant overview and act as one-click filters:</p>
+
+  <div class="card-grid" style="grid-template-columns: 1fr;">
+    <div class="mini-card" style="border-color: #fca5a5;">
+      <h5 style="color: #dc2626;">🔴 Not On Deco</h5>
+      <p>Orders that have <strong>no linked Deco job at all</strong>. These customers have ordered on Shopify but no production has been set up. Sub-filters: <strong>5+ Days</strong> (orders placed more than 5 days ago without a job) and <strong>10+ Days</strong> (even more overdue).</p>
+    </div>
+  </div>
+
+  <div class="card-grid" style="grid-template-columns: 1fr;">
+    <div class="mini-card" style="border-color: #fcd34d;">
+      <h5 style="color: #d97706;">🟠 Mapping Gaps</h5>
+      <p>Orders that <strong>have a Deco job linked</strong> but the individual line items haven't been mapped to specific Deco products yet. The warning text <em>"Job ID exists but items need mapping to track progress"</em> means you need to open the order and run item mapping.</p>
+    </div>
+  </div>
+
+  <div class="card-grid" style="grid-template-columns: 1fr;">
+    <div class="mini-card" style="border-color: #6ee7b7;">
+      <h5 style="color: #059669;">🟢 Ready to Ship</h5>
+      <p>Production is <strong>100% complete</strong> — these orders are sitting on the shelf waiting to be packed and shipped. Sub-filters: <strong>Order Complete</strong> (completely done), <strong>Stock Ready</strong> (stock items available), <strong>Partially Ready</strong> (some items ready, slider to set threshold).</p>
+    </div>
+  </div>
+
+  <div class="card-grid" style="grid-template-columns: 1fr;">
+    <div class="mini-card" style="border-color: #93c5fd;">
+      <h5 style="color: #2563eb;">🔵 Unfulfilled</h5>
+      <p>All orders that <strong>haven't been shipped yet</strong>. Sub-filters: <strong>Late (20D+)</strong> (unfulfilled for 20+ days — investigate immediately), <strong>Production After Dispatch</strong> (Deco finished but not yet shipped — why?), <strong>Due Soon</strong> (approaching dispatch deadline).</p>
+    </div>
+  </div>
+
+  <div class="card-grid" style="grid-template-columns: 1fr;">
+    <div class="mini-card" style="border-color: #6ee7b7;">
+      <h5 style="color: #059669;">🟢 Fulfilled (7D)</h5>
+      <p>Orders <strong>shipped in the last 7 days</strong>. Useful for reviewing recent dispatches. Sub-filter: <strong>Recent Activity</strong> and count of <strong>Partial</strong> shipments that still need completing.</p>
+    </div>
+  </div>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 How To Use</div>
+    Click any summary card to instantly filter the table below to just those orders. Click the sub-filter checkboxes for more specific views. Click the card again (or clear filters) to return to the full list.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 6: WORKING WITH INDIVIDUAL ORDERS           -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">6</div>
+    <div>
+      <h2>Working with Individual Orders</h2>
+      <span class="tab-badge">Dashboard Tab</span>
+    </div>
+  </div>
+
+  <p>Click any order row to expand it and see full details.</p>
+
+  <h3>Expanded Item Table</h3>
+  <p>Each line item in the order is displayed with:</p>
+  <ul>
+    <li><strong>Product name, variant, SKU, vendor</strong> — What was ordered</li>
+    <li><strong>Size &amp; colour</strong> — Specific variant details</li>
+    <li><strong>Quantity</strong> — How many, plus fulfilment breakdown</li>
+    <li><strong>Personalisation</strong> — Custom text, numbers, names (from Shopify line item properties)</li>
+    <li><strong>Production method</strong> — Auto-detected: Embroidery, Screen Print, DTF, Sublimation, etc.</li>
+    <li><strong>EAN / Barcode</strong> — If barcode data exists from stock scans</li>
+    <li><strong>Tracking</strong> — Carrier name and tracking number (clickable link)</li>
+    <li><strong>Workflow ticks</strong> — Ordered ✓ → Received ✓ → Produced ✓ → Shipped ✓ (see Section 3)</li>
+  </ul>
+
+  <h3>Order Sidebar</h3>
+  <p>To the right of the expanded item table, you'll see info cards:</p>
+  <ul>
+    <li><strong>Fulfilment Card</strong> — If shipped: date, lead time in working days</li>
+    <li><strong>ShipStation Card</strong> — Carrier, ship date, tracking link, shipping cost</li>
+    <li><strong>Linked Job Card</strong> — Deco job number, production status, produced item count</li>
+    <li><strong>Print Order Sheet</strong> — Button to generate a printable production sheet with QC checklist and product images</li>
+  </ul>
+
+  <h3>Actions Per Order</h3>
+  <div class="steps">
+    <div class="step"><div class="step-num">🔍</div><div class="step-text"><strong>Find Job</strong> — Automatically scans Deco for matching jobs based on customer name and order details.</div></div>
+    <div class="step"><div class="step-num">✏️</div><div class="step-text"><strong>Enter Job ID Manually</strong> — Type a 6-digit Deco job number to link directly.</div></div>
+    <div class="step"><div class="step-num">📦</div><div class="step-text"><strong>Map Items</strong> — Opens the mapping modal to link each Shopify line item to a specific Deco product.</div></div>
+    <div class="step"><div class="step-num">📝</div><div class="step-text"><strong>Notes</strong> — Open the notes/chat panel to add comments, @mention team members, or flag priority.</div></div>
+    <div class="step"><div class="step-num">🖨️</div><div class="step-text"><strong>Print</strong> — Generate a full-page order sheet with product images, sizes, personalisation, and QC checklist.</div></div>
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 7: MULTI-SELECT & BATCH ACTIONS             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">7</div>
+    <div>
+      <h2>Multi-Select &amp; Batch Actions</h2>
+      <span class="tab-badge">Dashboard Tab</span>
+    </div>
+  </div>
+
+  <p>Select multiple orders using the checkboxes on the left of each row. You can also use the group-level checkbox to select an entire club at once. A floating action bar appears at the bottom of the screen.</p>
+
+  <h3>The Selection Toolbar</h3>
+  <p>When one or more orders are selected, a dark indigo bar slides up from the bottom centre of the screen:</p>
+
+  <table class="status-table">
+    <thead><tr><th>Button</th><th>What It Does</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>🔍 SCAN</strong></td>
+        <td>Runs a bulk auto-match scan — searches DecoNetwork for matching jobs for all selected orders at once. Great for linking a whole club's orders in one go.</td>
+      </tr>
+      <tr>
+        <td><strong>🔗 LINK</strong></td>
+        <td>Opens a dialog to manually enter a single Deco Job ID and assign it to all selected orders.</td>
+      </tr>
+      <tr>
+        <td><strong>📦 BULK MAP</strong></td>
+        <td>Opens the item mapping modal for the selected orders, allowing you to link Shopify line items to Deco products in bulk.</td>
+      </tr>
+      <tr>
+        <td><strong>📥 EXPORT</strong></td>
+        <td>Downloads a CSV file of the selected orders including all details, completion percentages, and production status.</td>
+      </tr>
+      <tr>
+        <td><strong>🖨️ PRINT</strong></td>
+        <td>Batch prints order sheets for all selected orders — opens a single print window with page breaks between each order. Perfect for printing a club's worth of production sheets.</td>
+      </tr>
+      <tr>
+        <td><strong>✕ CANCEL</strong></td>
+        <td>Clears the selection and dismisses the toolbar.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Power Move</div>
+    Select an entire club using the group checkbox, then hit <strong>PRINT</strong> to generate all production sheets for that club in one go. Hand them straight to the production floor.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 8: KANBAN BOARD                             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">8</div>
+    <div>
+      <h2>Kanban Board</h2>
+      <span class="tab-badge">Kanban Tab</span>
+    </div>
+  </div>
+
+  <p>A visual pipeline view showing orders in four columns based on their current state:</p>
+
+  <table class="status-table">
+    <thead><tr><th>Column</th><th>Colour</th><th>What's Here</th></tr></thead>
+    <tbody>
+      <tr><td><strong>NEW</strong></td><td><span class="badge badge-red">Red</span></td><td>Orders with no Deco job linked — 0% complete.</td></tr>
+      <tr><td><strong>LINKED</strong></td><td><span class="badge badge-amber">Amber</span></td><td>Deco job assigned but production hasn't started — job ID exists, awaiting production.</td></tr>
+      <tr><td><strong>IN PRODUCTION</strong></td><td><span class="badge badge-blue">Blue</span></td><td>Active production — 1% to 99% complete.</td></tr>
+      <tr><td><strong>READY TO SHIP</strong></td><td><span class="badge badge-emerald">Emerald</span></td><td>100% production complete — ready for packing and dispatch.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Each card in the Kanban shows the order number, customer, club, and key status details. Use this view for a quick visual scan of your production pipeline.</p>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 9: UNDERSTANDING DECO JOB LINKING           -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">9</div>
+    <div>
+      <h2>Understanding Deco Job Linking</h2>
+    </div>
+  </div>
+
+  <p>The core purpose of Stash Shop Overview is to <strong>bridge Shopify orders with DecoNetwork production jobs</strong>. Here's how the linking lifecycle works:</p>
+
+  <h3>The Journey of an Order</h3>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Customer places order on Shopify</strong> — appears in the Dashboard as <span class="badge badge-red">Not Ordered</span> with no Deco Job #.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Production job created in DecoNetwork</strong> — a team member creates the job manually in Deco.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Job linked in the app</strong> — either via auto-scan, manual entry, or the LINKER tab. Status changes to <span class="badge badge-indigo">Linked</span>.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Items mapped</strong> — individual Shopify line items matched to specific Deco products. Completion % starts tracking.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Production progresses</strong> — status updates automatically from Deco: Awaiting Stock → In Production → Ready.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Order shipped</strong> — fulfilled via ShipStation in the FULFILL tab or directly in Shopify.</div></div>
+  </div>
+
+  <div class="callout callout-purple">
+    <div class="callout-title">🎯 MTO (Make-To-Order) Items</div>
+    Some items are bespoke — individually customised with names, numbers, etc. These can have their own <strong>per-item Deco job ID</strong> separate from the main order job. Look for the <span class="badge badge-purple">MTO</span> badge. You can assign individual job IDs in the expanded order view.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 10: AUTO-MATCH, SCAN & MANUAL LINK          -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">10</div>
+    <div>
+      <h2>Auto-Match, Scan &amp; Manual Link</h2>
+    </div>
+  </div>
+
+  <h3>Auto-Scan (Find Job)</h3>
+  <p>Click <span class="ui-label">Find Job</span> on any order row. The system searches DecoNetwork by customer name, order details, and learned patterns. Results appear with a <strong>confidence score</strong>:</p>
+
+  <table class="status-table no-break">
+    <thead><tr><th>Score</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge badge-emerald">80%+</span></td><td><strong>High confidence</strong> — very likely a correct match. Safe to confirm.</td></tr>
+      <tr><td><span class="badge badge-amber">60–79%</span></td><td><strong>Medium confidence</strong> — probable match but verify the details before confirming.</td></tr>
+      <tr><td><span class="badge badge-red">&lt;60%</span></td><td><strong>Low confidence</strong> — might not be correct. Check customer name, items, and dates carefully.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Bulk Scan</h3>
+  <p>Select multiple orders → click <span class="ui-label">SCAN</span> in the toolbar. The system searches for matches for all selected orders at once. Confirm or reject each suggestion.</p>
+
+  <h3>Manual Link</h3>
+  <p>If you know the Deco job number, click the pencil icon or <span class="ui-label">Enter Job ID</span> and type the 6-digit number directly.</p>
+
+  <h3>Learn Patterns</h3>
+  <p>Every time you confirm a match, the system <strong>learns the pattern</strong> (SKU mappings, vendor rules, naming conventions) and uses it to improve future suggestions.</p>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 11: ITEM MAPPING & COMPLETION %             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">11</div>
+    <div>
+      <h2>Item Mapping &amp; Completion %</h2>
+    </div>
+  </div>
+
+  <p>Once a Deco job is linked, the next step is <strong>item mapping</strong> — linking each Shopify line item to a specific product within the Deco job.</p>
+
+  <h3>Why Map Items?</h3>
+  <p>Without mapping, the system only knows the job exists but can't track <em>which items</em> are complete. Mapping enables:</p>
+  <ul>
+    <li>Per-item production tracking (workflow ticks)</li>
+    <li>Accurate completion percentages</li>
+    <li>Stock readiness calculations</li>
+    <li>Identification of stuck items</li>
+  </ul>
+
+  <h3>The Completion Bars</h3>
+  <p>In the <strong>Items Ready</strong> column, you'll see up to three progress bars:</p>
+
+  <table class="status-table no-break">
+    <thead><tr><th>Bar</th><th>Colour</th><th>What It Tracks</th></tr></thead>
+    <tbody>
+      <tr><td><strong>MAPPED</strong></td><td><span class="badge badge-indigo">Indigo</span></td><td>Percentage of items linked to Deco products. 100% = all items mapped.</td></tr>
+      <tr><td><strong>STOCK</strong></td><td><span class="badge badge-blue">Blue</span></td><td>Percentage of items with physical stock available in your warehouse.</td></tr>
+      <tr><td><strong>MTO</strong></td><td><span class="badge badge-purple">Purple</span></td><td>Percentage of make-to-order items that have completed production.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">⚠️ Mapping Gaps</div>
+    If the <strong>MAPPING GAPS</strong> summary card shows a number, those orders have a Deco job linked but items aren't mapped. Open each one and use the mapping feature to connect the line items. Until mapped, the completion % will show 0%.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 12: FULFILL TAB                             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">12</div>
+    <div>
+      <h2>FULFILL Tab — Batch Ship Dashboard</h2>
+      <span class="tab-badge">Fulfill Tab</span>
+    </div>
+  </div>
+
+  <p>The FULFILL tab is your shipping command centre for getting orders out the door.</p>
+
+  <h3>Ship-Ready Dashboard</h3>
+  <p>By default, this shows only orders where production is <strong>100% complete</strong>. Toggle to see all unfulfilled orders.</p>
+
+  <h3>Batch Shipping Workflow</h3>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Select orders</strong> — Tick checkboxes for orders you're about to ship. Use "Select All" for everything visible.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Print packing slips</strong> — Click <span class="ui-label">Print Packing Slips</span> to generate printable sheets for all selected orders with product images and QC checklists.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Print &amp; Ship All</strong> — Click this to create ShipStation shipping labels for all selected orders in one batch.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Choose carrier &amp; service</strong> — Select your carrier (e.g., Royal Mail, DPD, Hermes) and service level from the dropdown.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Set weight</strong> — Enter the package weight (defaults to 250g). Toggle between grams and kilograms.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Confirm &amp; create labels</strong> — The system creates labels in ShipStation, marks orders as fulfilled in Shopify, and sends tracking emails to customers.</div></div>
+  </div>
+
+  <h3>Batch Results</h3>
+  <p>After batch shipping, you'll see a result for each order:</p>
+  <ul>
+    <li><span class="badge badge-emerald">Success</span> — Label created, tracking number assigned</li>
+    <li><span class="badge badge-red">Failed</span> — Error message explains why (missing address, invalid weight, etc.)</li>
+  </ul>
+
+  <h3>Address Validation</h3>
+  <p>The system checks each order's shipping address before creating labels. If anything is missing (recipient name, street, city, postcode, country, phone), a <strong>yellow warning banner</strong> appears. The system will attempt to pull the address from ShipStation as a fallback.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">ℹ️ Retry Failed Labels</div>
+    If some labels fail (e.g., due to address issues), fix the address in Shopify or ShipStation, then use the <span class="ui-label">Retry Failed</span> button to re-attempt just the failed ones.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 13: PRINT ORDER SHEETS                      -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">13</div>
+    <div>
+      <h2>Print Order Sheets &amp; Packing Slips</h2>
+    </div>
+  </div>
+
+  <p>Order sheets are <strong>full-page printable production documents</strong> designed to travel with the order through your production floor.</p>
+
+  <h3>What's On an Order Sheet</h3>
+  <ul>
+    <li>Order number, customer name, date</li>
+    <li>Club/team name and tags</li>
+    <li>Product images (loaded from Shopify)</li>
+    <li>Item name, SKU, size, colour, quantity</li>
+    <li>Personalisation details (names, numbers, custom text)</li>
+    <li>Production method (Embroidery, Print, DTF, etc.)</li>
+    <li>Deco Job ID and production status</li>
+    <li>Shipping address</li>
+    <li>QC checklist boxes for production sign-off</li>
+  </ul>
+
+  <h3>Three Ways to Print</h3>
+  <table class="status-table no-break">
+    <thead><tr><th>Method</th><th>Where</th><th>How</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Single Order</strong></td>
+        <td>Expanded order sidebar</td>
+        <td>Click the <span class="ui-label">Print Order Sheet</span> button.</td>
+      </tr>
+      <tr>
+        <td><strong>Batch (Dashboard)</strong></td>
+        <td>Dashboard selection toolbar</td>
+        <td>Select orders → click <span class="ui-label">PRINT</span> in the bottom toolbar.</td>
+      </tr>
+      <tr>
+        <td><strong>Batch (Fulfill)</strong></td>
+        <td>FULFILL tab</td>
+        <td>Select orders → click <span class="ui-label">Print Packing Slips</span>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Tip</div>
+    Batch prints combine all selected orders into <strong>one print window</strong> with automatic page breaks between each order. The system waits for all product images to load before opening the print dialog.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 14: REPORTS TAB                             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">14</div>
+    <div>
+      <h2>Reports Tab Overview</h2>
+      <span class="tab-badge">Reports Tab</span>
+    </div>
+  </div>
+
+  <p>Scroll down the Reports tab to access all analytics. Each report auto-calculates from your live data.</p>
+
+  <table class="status-table">
+    <thead><tr><th>Report</th><th>What It Shows</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Profitability Report</strong></td>
+        <td>Revenue per order, profit margins, and order value breakdowns. Sort by margin, revenue, or order number. Summary cards show total revenue, average order value, and top-performing orders.</td>
+      </tr>
+      <tr>
+        <td><strong>Club Leaderboard</strong></td>
+        <td>Rankings of all clubs/teams by total orders, revenue, and fulfilment speed. Medal system (🥇🥈🥉) for top 3. Four sort modes for different perspectives.</td>
+      </tr>
+      <tr>
+        <td><strong>Late Order Report</strong></td>
+        <td>Orders that are overdue or at risk. Three issue types with severity levels (Critical/Warning). Exportable to CSV for management review.</td>
+      </tr>
+      <tr>
+        <td><strong>EAN Coverage Report</strong></td>
+        <td>Barcode assignment coverage across your product catalogue. Shows which products have EANs, which are missing, and coverage percentage by source (stock scan, reference, Deco).</td>
+      </tr>
+      <tr>
+        <td><strong>Carrier Performance</strong></td>
+        <td>Shipping carrier metrics: delivery times, cost analysis, volume by carrier. Compare Royal Mail vs DPD vs others.</td>
+      </tr>
+      <tr>
+        <td><strong>Bottleneck Analysis</strong></td>
+        <td>Identifies where orders are getting stuck in the production pipeline. Shows how long orders spend at each stage.</td>
+      </tr>
+      <tr>
+        <td><strong>Completion Tracker</strong></td>
+        <td>Order completion rates against due dates. Tracks on-time vs late delivery performance.</td>
+      </tr>
+      <tr>
+        <td><strong>Deco Notes Intelligence</strong></td>
+        <td>Analyses patterns in DecoNetwork order notes. Surfaces recurring issues and common instructions.</td>
+      </tr>
+      <tr>
+        <td><strong>Payment Status Sync</strong></td>
+        <td>Payment status visibility across Shopify and DecoNetwork. Flags any payment discrepancies.</td>
+      </tr>
+      <tr>
+        <td><strong>Capacity Forecast</strong></td>
+        <td>Forecasts production capacity based on current orders, historical velocity, and upcoming due dates.</td>
+      </tr>
+      <tr>
+        <td><strong>Seasonal Demand Calendar</strong></td>
+        <td>Three views: <strong>Heatmap</strong> (GitHub-style 52-week grid), <strong>Monthly</strong> (average orders per month with year-over-year comparison), and <strong>Day of Week</strong> (busiest days bar chart with revenue). Click any cell for detail.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 15: STOCK MANAGEMENT                        -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">15</div>
+    <div>
+      <h2>Stock Management</h2>
+      <span class="tab-badge">Stock Tab</span>
+    </div>
+  </div>
+
+  <p>The Stock tab manages your physical inventory — the blank garments and pre-printed items sitting in your warehouse.</p>
+
+  <h3>Key Features</h3>
+  <ul>
+    <li><strong>Physical Stock</strong> — Track quantities of items you hold. Add items manually or import via CSV.</li>
+    <li><strong>Return Stock</strong> — Items returned by customers, tracked separately for quality processing.</li>
+    <li><strong>Reference Products</strong> — Master product catalogue with SKUs, EANs, and vendor details.</li>
+    <li><strong>Reorder Points</strong> — Set minimum stock levels. Get alerted when quantities drop below threshold.</li>
+    <li><strong>EAN Barcodes</strong> — Barcode scanning support for stock intake and verification.</li>
+  </ul>
+
+  <p>Stock levels feed into the Dashboard's <strong>STOCK %</strong> completion bar, showing which order items have physical stock ready for picking.</p>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 16: NOTES, CHAT & NOTIFICATIONS             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">16</div>
+    <div>
+      <h2>Notes, Chat &amp; Notifications</h2>
+    </div>
+  </div>
+
+  <h3>Order Notes</h3>
+  <p>Every order has a notes panel (click the 💬 icon or "Notes" in the expanded view). Notes are synced to the cloud via Firebase so all team members see the same information.</p>
+
+  <h3>Features</h3>
+  <ul>
+    <li><strong>@Mentions</strong> — Type <kbd>@</kbd> to see a list of team members. Select someone to notify them about this order.</li>
+    <li><strong>Priority Levels</strong> — Tag notes as <span class="badge badge-red">Urgent</span>, <span class="badge badge-blue">Info</span>, or <span class="badge badge-amber">Action Needed</span>.</li>
+    <li><strong>Note Count Badge</strong> — Orders with notes show a count badge (e.g., "1 NOTE") in the table row.</li>
+    <li><strong>Cloud sync</strong> — All notes sync across devices in real-time.</li>
+  </ul>
+
+  <h3>Notification Bell 🔔</h3>
+  <p>The bell icon in the top navigation shows unread notifications. You receive notifications when:</p>
+  <ul>
+    <li>Someone <strong>@mentions</strong> you in an order note</li>
+    <li>A <strong>reply</strong> is posted on an order you've commented on</li>
+    <li><strong>Alert rules</strong> you've configured are triggered</li>
+  </ul>
+  <p>Click the bell to see your notifications. Click any notification to jump directly to that order.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">ℹ️ Sound Alert</div>
+    New notifications play a subtle sound alert. This works on desktop and mobile (if the PWA is installed).
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 17: SYNCING & DATA REFRESH                  -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">17</div>
+    <div>
+      <h2>Syncing &amp; Data Refresh</h2>
+    </div>
+  </div>
+
+  <p>The app pulls data from three sources: <strong>Shopify</strong>, <strong>DecoNetwork</strong>, and <strong>ShipStation</strong>. Here's how each sync type works:</p>
+
+  <table class="status-table">
+    <thead><tr><th>Button</th><th>What It Does</th><th>When To Use</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="ui-label">STATUS REFRESH</span></td>
+        <td>Updates Shopify fulfilment status and Deco production status for <strong>active orders only</strong>. Fast — just checks for status changes.</td>
+        <td>When you need the latest status but don't need new orders. Good for mid-day checks.</td>
+      </tr>
+      <tr>
+        <td><span class="ui-label">SYNC</span></td>
+        <td>Full sync: Pulls <strong>120 days of Shopify orders</strong> + <strong>600 latest Deco jobs</strong> + ShipStation shipments. Catches new orders and recent changes.</td>
+        <td>Start of day, or when new orders have been placed.</td>
+      </tr>
+      <tr>
+        <td><span class="ui-label">DEEP SCAN</span></td>
+        <td>Extended sync: <strong>365 days of Shopify orders</strong> + full Deco job history. Takes longer but catches everything.</td>
+        <td>When you suspect missing orders, or once a week for a thorough refresh. Requires confirmation before running.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">⚠️ Important</div>
+    While syncing, you'll see a <span class="badge badge-blue">Syncing...</span> indicator next to the tab buttons. The data may update in real-time as it comes in. <strong>Don't navigate away</strong> during a Deep Scan — it needs to complete fully.
+  </div>
+
+  <h3>Automatic Updates</h3>
+  <p>The "Awaiting Deco Data..." and "Awaiting Deco Detail..." statuses indicate the app is <strong>background-loading</strong> detailed production information. These resolve automatically — no action needed.</p>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 18: QUICK REFERENCE CHEAT SHEET             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">18</div>
+    <div>
+      <h2>Quick Reference — Status Cheat Sheet</h2>
+    </div>
+  </div>
+
+  <h3>Production Status at a Glance</h3>
+  <table class="status-table">
+    <thead><tr><th>I see this status...</th><th>It means...</th><th>I should...</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-red">Not Ordered</span></td>
+        <td>No Deco job exists</td>
+        <td>Create a job in DecoNetwork, then link it here</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-indigo" style="font-style:italic">Awaiting Deco Data...</span></td>
+        <td>App is syncing — temporary</td>
+        <td>Wait. If stuck, hit STATUS REFRESH</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-amber">Awaiting Stock</span></td>
+        <td>Blank garments not received by Deco</td>
+        <td>Check with supplier / chase stock delivery</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-blue">Awaiting Processing</span></td>
+        <td>Queued for production</td>
+        <td>Nothing — it's in the queue. Monitor timeline</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-blue">In Production</span></td>
+        <td>Being decorated right now</td>
+        <td>Nothing — in progress. Check workflow ticks for detail</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-emerald">Ready</span></td>
+        <td>Finished — ready to ship</td>
+        <td>Go to FULFILL tab, select it, and ship</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-emerald">Shipped</span></td>
+        <td>Dispatched by Deco</td>
+        <td>Verify tracking in ShipStation, mark fulfilled if needed</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-red">Cancelled</span></td>
+        <td>Order cancelled in Deco</td>
+        <td>Verify with customer, cancel in Shopify if needed</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-gray">Unknown</span></td>
+        <td>Can't determine status</td>
+        <td>Try STATUS REFRESH or check Deco directly</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Colour Key</h3>
+
+  <div class="card-grid">
+    <div class="mini-card" style="border-color: #fca5a5; border-left: 4px solid #dc2626;">
+      <h5 style="color: #dc2626;">Red</h5>
+      <p>Needs attention: errors, missing data, overdue, cancelled</p>
+    </div>
+    <div class="mini-card" style="border-color: #fcd34d; border-left: 4px solid #d97706;">
+      <h5 style="color: #d97706;">Amber / Orange</h5>
+      <p>Warning: urgent timeline, awaiting stock, pre-production stages</p>
+    </div>
+    <div class="mini-card" style="border-color: #93c5fd; border-left: 4px solid #2563eb;">
+      <h5 style="color: #2563eb;">Blue</h5>
+      <p>In progress: processing, in production, approaching deadline</p>
+    </div>
+    <div class="mini-card" style="border-color: #6ee7b7; border-left: 4px solid #059669;">
+      <h5 style="color: #059669;">Green / Emerald</h5>
+      <p>Complete: ready, shipped, fulfilled, on track</p>
+    </div>
+    <div class="mini-card" style="border-color: #a5b4fc; border-left: 4px solid #6366f1;">
+      <h5 style="color: #6366f1;">Indigo / Purple</h5>
+      <p>Linked, syncing, MTO items, selected state</p>
+    </div>
+    <div class="mini-card" style="border-color: #d1d5db; border-left: 4px solid #9ca3af;">
+      <h5 style="color: #6b7280;">Grey</h5>
+      <p>Neutral: unknown, not started, disabled</p>
+    </div>
+  </div>
+
+  <hr class="section-divider">
+
+  <h3>Daily Workflow Checklist</h3>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open the app → Click <span class="ui-label">SYNC</span> to pull latest data</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Check the <strong>NOT ON DECO</strong> card → Create Deco jobs for any new orders</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Check <strong>MAPPING GAPS</strong> → Map items for linked orders</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Check <strong>READY TO SHIP</strong> → Go to FULFILL tab → Print slips &amp; ship</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Check <strong>UNFULFILLED → LATE</strong> → Investigate any overdue orders</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text">Review <strong>REPORTS</strong> → Check late order report and bottlenecks</div></div>
+  </div>
+
+</div>
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- FOOTER                                              -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="doc-footer">
+  <p>STASH SHOP OVERVIEW &bull; INSTRUCTION MANUAL &bull; VERSION 4.0 &bull; APRIL 2026</p>
+  <p style="margin-top: 6px; opacity: 0.7;">stashoverview.co.uk &bull; Stash Sportswear</p>
+</div>
+
+</body>
+</html>
