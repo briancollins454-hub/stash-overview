@@ -1527,6 +1527,8 @@ const App: React.FC = () => {
                 excludedTags={excludedTags} 
                 groupingMode={groupingMode}
                 shopifyDomain={apiSettings.shopifyDomain} 
+                onOpenNotes={openNotes}
+                noteCounts={noteCounts} 
                 onConfirmMatch={(i, d) => handleBulkConfirmMatch([{itemKey: i, decoId: d}])} 
                 onRefreshJob={async (id) => { await handleRefreshJob(id); }} 
                 onSearchJob={async (id) => { 

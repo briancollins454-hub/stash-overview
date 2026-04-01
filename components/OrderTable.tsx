@@ -7,7 +7,7 @@ import {
     ChevronDown, ChevronUp, ShoppingBag, ArrowUpDown, ExternalLink, 
     Link as LinkIcon, Copy, Search, Loader2, Zap, Mail, Box, Cog, X, 
     HelpCircle, RefreshCw, Scissors, Filter, ArrowUp, ArrowDown, Check, Pencil, ClipboardList, Shirt, Hash, ShieldOff,
-    Download, Unlink, Calendar, Printer
+    Download, Unlink, Calendar, Printer, MessageSquare
 } from 'lucide-react';
 import OrderMappingModal from './OrderMappingModal';
 import JobIdBadge from './JobIdBadge';
@@ -49,6 +49,8 @@ export interface OrderTableProps {
     onSelectionChange: (ids: Set<string>) => void;
     productMappings?: Record<string, string>;
     confirmedMatches?: Record<string, string>;
+    onOpenNotes?: (orderId: string, orderNumber: string) => void;
+    noteCounts?: Record<string, number>;
 }
 
 // --- Helper Components ---
@@ -355,7 +357,7 @@ function printOrderSheet(order: UnifiedOrder): void {
 
 const OrderTable: React.FC<OrderTableProps> = ({ 
     orders, excludedTags, sortOption, onSortChange, shopifyDomain, onTimelineScan, onBulkScan, onPabblySync, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, onManualLink, onNavigateToJob, onItemJobLink, isBulkScanning, scanProgress, scanCount,
-    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches
+    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts
 }) => {
   const [mappingModalOpen, setMappingModalOpen] = useState(false);
   const [ordersForMapping, setOrdersForMapping] = useState<UnifiedOrder[]>([]);
@@ -971,6 +973,18 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                 <span className="text-sm font-bold text-gray-900 group-hover:text-indigo-600 group-hover:underline">#{order.shopify.orderNumber}</span>
                                 <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-indigo-500" />
                             </div>
+                            {onOpenNotes && (
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onOpenNotes(order.shopify.id, order.shopify.orderNumber); }}
+                                    className="inline-flex items-center gap-0.5 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                    title="Open Chat / Notes"
+                                >
+                                    <MessageSquare className="w-3 h-3" />
+                                    {(noteCounts?.[order.shopify.id] || 0) > 0 && (
+                                        <span className="text-indigo-500 font-black">{noteCounts[order.shopify.id]}</span>
+                                    )}
+                                </button>
+                            )}
                             <div className="text-[10px] text-gray-400 mt-0.5 font-bold uppercase tracking-widest">{new Date(order.shopify.date).toLocaleDateString()}</div>
                             <div className="text-xs text-gray-500 font-bold uppercase tracking-widest">{order.shopify.customerName}</div>
                             {order.hasEmailEnquiry && <span className="text-red-500 inline-flex items-center gap-1 mt-1 font-bold uppercase tracking-widest text-[9px]" title="Customer Emailed"><Mail className="w-3 h-3" /> Enquiry</span>}
