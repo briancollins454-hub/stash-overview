@@ -58,7 +58,6 @@ const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
 const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
 const CarrierPerformanceReport = lazyRetry(() => import('./components/CarrierPerformanceReport'));
 const BottleneckReport = lazyRetry(() => import('./components/BottleneckReport'));
-const TrueCostReport = lazyRetry(() => import('./components/TrueCostReport'));
 const DecorationSpecViewer = lazyRetry(() => import('./components/DecorationSpecViewer'));
 const StaffWorkloadDashboard = lazyRetry(() => import('./components/StaffWorkloadDashboard'));
 const CompletionTracker = lazyRetry(() => import('./components/CompletionTracker'));
@@ -1835,12 +1834,6 @@ const App: React.FC = () => {
                   </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Bottleneck Analysis Error">
                     <BottleneckReport
-                      orders={unifiedOrders}
-                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
-                    />
-                  </ErrorBoundary>
-                  <ErrorBoundary fallbackTitle="True Cost Error">
-                    <TrueCostReport
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
