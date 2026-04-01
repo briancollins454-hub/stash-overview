@@ -234,16 +234,36 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
 
       // Check address before attempting label
       const addrWarnings = getAddressWarnings(order);
-      const hasBlockingWarning = addrWarnings.some(w => w !== 'No phone number');
-      if (hasBlockingWarning) {
+      let hasBlockingWarning = addrWarnings.some(w => w !== 'No phone number');
+
+      // Look up order in ShipStation (needed for label creation anyway)
+      let ssOrd: ShipStationOrder | null = null;
+      try {
+        ssOrd = await fetchShipStationOrder(settings, order.shopify.orderNumber);
+      } catch { /* handled below */ }
+
+      // If Shopify address missing but ShipStation has it, re-check with SS address
+      if (hasBlockingWarning && !order.shopify.shippingAddress && ssOrd?.shipTo) {
+        const sa = ssOrd.shipTo;
+        const ssWarnings: string[] = [];
+        if (!sa.name || sa.name.trim().length < 2) ssWarnings.push('Missing recipient name');
+        if (!sa.street1 || sa.street1.trim().length < 3) ssWarnings.push('Missing street address');
+        if (!sa.city || sa.city.trim().length < 2) ssWarnings.push('Missing city');
+        if (!sa.postalCode || sa.postalCode.trim().length < 3) ssWarnings.push('Missing or short postcode');
+        if (!sa.country || sa.country.trim().length < 2) ssWarnings.push('Missing country');
+        hasBlockingWarning = ssWarnings.some(w => w !== 'No phone number');
+        if (hasBlockingWarning) {
+          results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Address issue: ' + ssWarnings.filter(w => w !== 'No phone number').join(', '), orderId: order.shopify.id });
+          setBatchResults([...results]);
+          continue;
+        }
+      } else if (hasBlockingWarning) {
         results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Address issue: ' + addrWarnings.filter(w => w !== 'No phone number').join(', '), orderId: order.shopify.id });
         setBatchResults([...results]);
         continue;
       }
 
       try {
-        // Look up order in ShipStation
-        const ssOrd = await fetchShipStationOrder(settings, order.shopify.orderNumber);
         if (!ssOrd) {
           results.push({ orderNumber: order.shopify.orderNumber, success: false, error: 'Not found in ShipStation', orderId: order.shopify.id });
           continue;
@@ -526,12 +546,35 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
         <div className="space-y-2">
           {readyOrders.map(o => {
             const isExpanded = expandedId === o.shopify.id;
-            const addr = o.shopify.shippingAddress;
+            // Use ShipStation's shipTo as fallback when Shopify address is missing
+            const shopifyAddr = o.shopify.shippingAddress;
+            const ssAddr = isExpanded && ssOrder?.shipTo ? {
+              name: ssOrder.shipTo.name || '',
+              address1: ssOrder.shipTo.street1 || '',
+              address2: ssOrder.shipTo.street2 || '',
+              city: ssOrder.shipTo.city || '',
+              province: ssOrder.shipTo.state || '',
+              zip: ssOrder.shipTo.postalCode || '',
+              country: ssOrder.shipTo.country || '',
+              phone: ssOrder.shipTo.phone || ''
+            } : undefined;
+            const addr = shopifyAddr || ssAddr;
+            const addrFromSS = !shopifyAddr && !!ssAddr;
             const itemCount = o.shopify.items.reduce((sum, i) => sum + i.quantity, 0);
             const hasTracking = !!o.shipStationTracking?.trackingNumber;
             const isPartial = o.shopify.fulfillmentStatus === 'partial';
             const isFullyShipped = hasTracking && !isPartial;
-            const addrWarnings = getAddressWarnings(o);
+            // Recalculate address warnings using fallback address if available
+            const addrWarnings = addr && addrFromSS ? (() => {
+              const w: string[] = [];
+              if (!addr.name || addr.name.trim().length < 2) w.push('Missing recipient name');
+              if (!addr.address1 || addr.address1.trim().length < 3) w.push('Missing street address');
+              if (!addr.city || addr.city.trim().length < 2) w.push('Missing city');
+              if (!addr.zip || addr.zip.trim().length < 3) w.push('Missing or short postcode');
+              if (!addr.country || addr.country.trim().length < 2) w.push('Missing country');
+              if (!addr.phone) w.push('No phone number');
+              return w;
+            })() : getAddressWarnings(o);
             const hasAddrWarning = addrWarnings.length > 0 && addrWarnings.some(w => w !== 'No phone number');
 
             return (
@@ -591,6 +634,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                         <h4 className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1.5"><MapPin className="w-3 h-3" /> Ship To</h4>
                         {addr ? (
                           <div className="text-[11px] text-white font-bold leading-relaxed">
+                            {addrFromSS && <p className="text-[9px] text-amber-400 font-black mb-1">via ShipStation (not in Shopify cache)</p>}
                             <p>{addr.name}</p>
                             <p>{addr.address1}</p>
                             {addr.address2 && <p>{addr.address2}</p>}
@@ -600,7 +644,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                             {addr.phone && <p className="flex items-center gap-1 mt-1 text-gray-400"><Phone className="w-3 h-3" /> {addr.phone}</p>}
                           </div>
                         ) : (
-                          <p className="text-[10px] text-red-400 font-bold">No shipping address on file</p>
+                          <p className="text-[10px] text-red-400 font-bold">{ssLoading ? 'Loading address from ShipStation...' : 'No shipping address on file'}</p>
                         )}
                         {addrWarnings.length > 0 && (
                           <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded p-2 space-y-0.5">
