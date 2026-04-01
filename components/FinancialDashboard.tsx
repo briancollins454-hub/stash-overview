@@ -1,15 +1,18 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   DollarSign, AlertTriangle, Clock, Download, ChevronDown, ChevronUp,
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
-  ChevronRight, X, StickerIcon, SortAsc, SortDesc
+  ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw
 } from 'lucide-react';
 import { DecoJob } from '../types';
+import { fetchDecoFinancials } from '../services/apiService';
+import { ApiSettings } from './SettingsModal';
 
 interface Props {
-  decoJobs: DecoJob[];
+  decoJobs: DecoJob[]; // fallback / cached jobs from main sync
   isDark: boolean;
+  settings: ApiSettings;
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
@@ -93,7 +96,7 @@ const paymentStatusColor = (ps: string | undefined): string => {
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
 };
 
-const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) => {
+const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('customers');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('balance');
@@ -109,10 +112,51 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [noteInput, setNoteInput] = useState('');
 
-  // Build customer accounts from Deco jobs
+  // Self-loading state for full financial data
+  const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Load all financial data on mount
+  useEffect(() => {
+    if (hasLoaded || isLoading || !settings.useLiveData) return;
+    loadFinancialData();
+    return () => { abortRef.current?.abort(); };
+  }, [settings.useLiveData]);
+
+  const loadFinancialData = useCallback(async () => {
+    if (isLoading) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsLoading(true); setLoadError(null); setLoadProgress({ current: 0, total: 0 });
+    try {
+      const jobs = await fetchDecoFinancials(
+        settings, 2020,
+        (current, total) => setLoadProgress({ current, total }),
+        controller.signal,
+      );
+      if (!controller.signal.aborted) {
+        setFinanceJobs(jobs);
+        setHasLoaded(true);
+      }
+    } catch (e: any) {
+      if (!controller.signal.aborted) setLoadError(e.message || 'Failed to load financial data');
+    } finally {
+      if (!controller.signal.aborted) setIsLoading(false);
+    }
+  }, [settings, isLoading]);
+
+  // Use finance-fetched jobs if available, otherwise fall back to cached decoJobs
+  const allJobs = hasLoaded ? financeJobs : decoJobs;
+
+  // Build customer accounts from ALL Deco jobs
   const customerAccounts = useMemo<CustomerAccount[]>(() => {
     const map = new Map<string, DecoJob[]>();
-    decoJobs.forEach(j => {
+    allJobs.forEach(j => {
       const key = j.customerName?.trim() || 'Unknown';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(j);
@@ -177,7 +221,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
     const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
     customersWithBalance.forEach(a => { aging[a.agingBucket] += a.totalOutstanding; });
 
-    return { total, totalBillable, totalPaid, customersWithBalance: customersWithBalance.length, overdue90: overdue90.length, overdue60: overdue60.length, aging };
+    return { total, totalBillable, totalPaid, customersWithBalance: customersWithBalance.length, overdue90: overdue90.length, overdue60: overdue60.length, aging, totalJobs: allJobs.length, totalCustomers: customerAccounts.length };
   }, [customerAccounts]);
 
   // Filtered & sorted data
@@ -222,7 +266,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
 
   // All individual orders (for order view)
   const filteredOrders = useMemo(() => {
-    let list = decoJobs.filter(j => (j.billableAmount || 0) > 0 || (j.outstandingBalance || 0) > 0);
+    let list = allJobs.filter(j => (j.billableAmount || 0) > 0 || (j.outstandingBalance || 0) > 0);
 
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
@@ -355,9 +399,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
           </h1>
           <p className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             Outstanding balances, aging analysis, and payment tracking from DecoNetwork
+            {isLoading && <span className="ml-2 text-indigo-500 font-bold">Loading {loadProgress.current.toLocaleString()}/{loadProgress.total.toLocaleString() || '...'} orders</span>}
+            {hasLoaded && <span className="ml-2 text-green-500">✓ {allJobs.length.toLocaleString()} orders loaded</span>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={loadFinancialData} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-gray-300 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} {isLoading ? 'Loading...' : 'Refresh'}
+          </button>
           <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700 dark:hover:bg-indigo-900/50 transition-colors">
             <Download className="w-3.5 h-3.5" /> Export Summary
           </button>
@@ -366,6 +415,35 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
           </button>
         </div>
       </div>
+
+      {/* Loading progress bar */}
+      {isLoading && (
+        <div className={`${card} p-4`}>
+          <div className="flex items-center gap-3 mb-2">
+            <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
+            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Loading all financial data from DecoNetwork...</span>
+          </div>
+          <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-gray-100'}`}>
+            <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${loadProgress.total > 0 ? (loadProgress.current / loadProgress.total) * 100 : 0}%` }} />
+          </div>
+          <div className="flex justify-between mt-1.5">
+            <span className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{loadProgress.current.toLocaleString()} of {loadProgress.total.toLocaleString()} orders</span>
+            <span className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{loadProgress.total > 0 ? ((loadProgress.current / loadProgress.total) * 100).toFixed(0) : 0}%</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {loadError && (
+        <div className={`${card} p-4 border-l-4 border-l-red-500`}>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+            <span className="text-sm font-bold text-red-600 dark:text-red-400">Failed to load financial data</span>
+          </div>
+          <p className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{loadError}</p>
+          <button onClick={loadFinancialData} className="mt-2 px-3 py-1.5 rounded text-[10px] font-bold bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300">Retry</button>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -773,7 +851,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
 
       {/* Footer stats */}
       <div className={`text-center text-[10px] ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
-        {decoJobs.length} Deco jobs loaded · {customerAccounts.length} unique customers · Data from synced Deco orders
+        {allJobs.length.toLocaleString()} Deco orders loaded · {customerAccounts.length} unique customers · {hasLoaded ? 'Full history from 2020' : 'Showing cached data (loading full history...)'}
       </div>
     </div>
   );

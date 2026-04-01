@@ -2077,6 +2077,7 @@ const App: React.FC = () => {
                   <FinancialDashboard
                     decoJobs={rawDecoJobs}
                     isDark={isDark}
+                    settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                   />
                 </ErrorBoundary>

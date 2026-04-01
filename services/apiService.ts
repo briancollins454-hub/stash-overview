@@ -305,6 +305,83 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     });
 };
 
+// Lightweight financial-only fetch — loads ALL Deco orders from a given year onward
+// Only extracts financial fields (no item parsing) for speed
+export const fetchDecoFinancials = async (
+    settings: ApiSettings,
+    sinceYear: number = 2020,
+    onProgress?: (current: number, total: number) => void,
+    signal?: AbortSignal,
+): Promise<DecoJob[]> => {
+    if (!settings.useLiveData) return [];
+    const dateStr = `${sinceYear}-01-01`;
+    const BATCH = 100; // API hard-caps at 100 per request
+    let allJobs: DecoJob[] = [];
+    let offset = 0;
+    let apiTotal = 0;
+
+    while (true) {
+        if (signal?.aborted) break;
+        const params: Record<string, string> = {
+            field: '1', condition: '4', date1: dateStr,
+            limit: BATCH.toString(), offset: offset.toString(),
+            skip_login_token: '1',
+        };
+        const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
+        const orders = data.orders || [];
+        if (!apiTotal) apiTotal = data.total || 0;
+        if (!orders.length) break;
+
+        for (const job of orders) {
+            const custName = job.billing_details?.company ||
+                `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
+            allJobs.push({
+                id: String(job.order_id), jobNumber: String(job.order_id),
+                poNumber: job.customer_po_number || '', jobName: job.job_name || '',
+                customerName: custName,
+                status: mapDecoStatus(job.order_status_name || job.order_status),
+                dateOrdered: job.date_ordered,
+                productionDueDate: job.date_scheduled || '',
+                dateDue: job.date_due,
+                dateShipped: job.date_shipped || job.date_completed,
+                itemsProduced: 0, totalItems: 0,
+                notes: '', productCode: '', items: [],
+                orderTotal: parseFloat(job.item_amount) || parseFloat(job.total) || undefined,
+                orderSubtotal: parseFloat(job.item_amount) || undefined,
+                orderTax: parseFloat(job.tax_amount) || parseFloat(job.tax) || undefined,
+                paymentStatus: job.payment_status?.toString(),
+                paymentMethod: job.payment_details?.payment_type_name || job.payment_method || undefined,
+                discount: parseFloat(job.discount_amount) || undefined,
+                couponCode: job.coupon_code || undefined,
+                outstandingBalance: parseFloat(job.outstanding_balance) || 0,
+                billableAmount: parseFloat(job.billable_amount) || 0,
+                creditUsed: parseFloat(job.credit_used) || 0,
+                accountTerms: job.account_terms || undefined,
+                dateInvoiced: job.date_invoiced || undefined,
+                payments: Array.isArray(job.payments) ? job.payments.map((p: any) => ({
+                    id: p.id || p.payment_id,
+                    datePaid: p.date_paid,
+                    method: p.payment_method || 'Unknown',
+                    amount: parseFloat(p.paid_amount) || 0,
+                    refundedAmount: parseFloat(p.refunded_amount) || 0,
+                })) : [],
+                refunds: Array.isArray(job.refunds) ? job.refunds.map((r: any) => ({
+                    id: r.id,
+                    amount: parseFloat(r.amount || r.refund_amount) || 0,
+                    date: r.date || r.date_refunded || '',
+                })) : [],
+            });
+        }
+
+        offset += orders.length;
+        onProgress?.(offset, apiTotal);
+
+        if (orders.length < BATCH || offset >= apiTotal) break;
+        await delay(50); // throttle
+    }
+    return allJobs;
+};
+
 export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): Promise<DecoJob | null> => {
     if (!settings.useLiveData) return MOCK_DECO_JOBS.find(j => j.jobNumber === jobId) || null;
     
