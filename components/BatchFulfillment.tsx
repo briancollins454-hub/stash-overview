@@ -10,6 +10,7 @@ import {
   getCarrierName, getTrackingUrl,
   ShipStationOrder, ShipStationLabelResult
 } from '../services/shipstationService';
+import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -175,64 +176,16 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
     else setSelectedIds(new Set(readyOrders.map(o => o.shopify.id)));
   }, [readyOrders, selectedIds]);
 
-  // Print order sheet — same format as BatchPrintSheets
-  const printOrderSheets = useCallback((ordersToPrint: UnifiedOrder[]) => {
-    if (ordersToPrint.length === 0) return;
-    const win = window.open('', '_blank');
-    if (!win) return;
-    win.document.write(`<!DOCTYPE html><html><head><title>Print Sheets - ${new Date().toLocaleDateString('en-GB')}</title>
-      <style>
-        body { font-family: 'Arial', sans-serif; font-size: 11px; margin: 20px; }
-        h2 { font-size: 14px; margin: 20px 0 8px; border-bottom: 2px solid #333; padding-bottom: 4px; page-break-after: avoid; }
-        .order-page { page-break-after: always; }
-        .order-page:last-child { page-break-after: auto; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; page-break-inside: auto; }
-        th { background: #f0f0f0; font-weight: bold; text-transform: uppercase; font-size: 9px; letter-spacing: 1px; }
-        th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
-        tr { page-break-inside: avoid; }
-        .addr { margin-bottom: 12px; line-height: 1.6; }
-        .total { font-weight: bold; text-align: right; padding-right: 16px; font-size: 12px; margin-top: 4px; }
-        @media print { body { margin: 10px; } }
-      </style></head><body>`);
-
-    ordersToPrint.forEach(o => {
-      const addr = o.shopify.shippingAddress;
-      const items = o.shopify.items;
-      const totalQty = items.reduce((s, i) => s + i.quantity, 0);
-
-      win.document.write(`<div class="order-page">`);
-      win.document.write(`<h2>Order #${o.shopify.orderNumber} — ${o.shopify.customerName}${o.clubName ? ' — ' + o.clubName : ''}</h2>`);
-
-      if (addr) {
-        win.document.write(`<div class="addr"><strong>Ship To:</strong> ${addr.name}, ${addr.address1}${addr.address2 ? ', ' + addr.address2 : ''}, ${addr.city}${addr.province ? ', ' + addr.province : ''}, ${addr.zip}, ${addr.country}${addr.phone ? ' | Tel: ' + addr.phone : ''}</div>`);
-      }
-
-      win.document.write(`<table><thead><tr><th>Item</th><th>SKU</th><th>Size</th><th>Qty</th><th>Price</th><th>Done ✓</th></tr></thead><tbody>`);
-      items.forEach(i => {
-        const size = i.properties?.find((p: any) => p.name.toLowerCase().includes('size'))?.value?.toString() || i.variantTitle || '';
-        win.document.write(`<tr><td>${i.title}${i.variantTitle && !size.includes(i.variantTitle) ? ' — ' + i.variantTitle : ''}</td><td>${i.sku || '-'}</td><td>${size || '-'}</td><td>${i.quantity}</td><td>£${parseFloat(i.price).toFixed(2)}</td><td style="width:40px"></td></tr>`);
-      });
-      win.document.write(`</tbody></table>`);
-      win.document.write(`<p class="total">${totalQty} items — Total: £${parseFloat(o.shopify.totalPrice).toFixed(2)}</p>`);
-      win.document.write(`<p style="font-size:9px;color:#999">Order date: ${new Date(o.shopify.date).toLocaleDateString('en-GB')}${o.decoJobId ? ' | Deco Job: ' + o.decoJobId : ''}</p>`);
-      win.document.write(`</div>`);
-    });
-
-    win.document.write(`<p style="color:#999;font-size:9px;margin-top:20px;">Generated ${new Date().toLocaleString('en-GB')} — Stash Shop Sync</p></body></html>`);
-    win.document.close();
-    win.print();
-  }, []);
-
   // Batch print selected orders
   const handleBatchPrint = useCallback(() => {
     const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id));
     printOrderSheets(selected);
-  }, [readyOrders, selectedIds, printOrderSheets]);
+  }, [readyOrders, selectedIds]);
 
   // Print single order
   const handlePrintPackingSlip = useCallback((o: UnifiedOrder) => {
-    printOrderSheets([o]);
-  }, [printOrderSheets]);
+    printOrderSheet(o);
+  }, []);
 
   return (
     <div className="space-y-4">
