@@ -57,6 +57,23 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [batchResults, setBatchResults] = useState<Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string; orderId?: string }>>([]);
   const [showBatchResults, setShowBatchResults] = useState(false);
 
+  // Enrich order with ShipStation address if Shopify address is missing
+  const enrichWithSSAddress = useCallback(async (o: UnifiedOrder): Promise<UnifiedOrder> => {
+    if (o.shopify.shippingAddress) return o;
+    try {
+      const ss = await fetchShipStationOrder(settings, o.shopify.orderNumber);
+      if (ss?.shipTo) {
+        return { ...o, shopify: { ...o.shopify, shippingAddress: {
+          name: ss.shipTo.name || '', address1: ss.shipTo.street1 || '',
+          address2: ss.shipTo.street2 || '', city: ss.shipTo.city || '',
+          province: ss.shipTo.state || '', zip: ss.shipTo.postalCode || '',
+          country: ss.shipTo.country || '', phone: ss.shipTo.phone || ''
+        }}};
+      }
+    } catch { /* fallback to original */ }
+    return o;
+  }, [settings]);
+
   // Address warnings — computed from order data, no API call needed for basic checks
   const getAddressWarnings = useCallback((o: UnifiedOrder): string[] => {
     const warnings: string[] = [];
@@ -201,15 +218,28 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   }, [readyOrders, selectedIds]);
 
   // Batch print selected orders
-  const handleBatchPrint = useCallback(() => {
+  const handleBatchPrint = useCallback(async () => {
     const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id));
-    printOrderSheets(selected);
-  }, [readyOrders, selectedIds]);
+    const enriched = await Promise.all(selected.map(enrichWithSSAddress));
+    printOrderSheets(enriched);
+  }, [readyOrders, selectedIds, enrichWithSSAddress]);
 
-  // Print single order
-  const handlePrintPackingSlip = useCallback((o: UnifiedOrder) => {
-    printOrderSheet(o);
-  }, []);
+  // Print single order — enrich with ShipStation address if Shopify address is missing
+  const handlePrintPackingSlip = useCallback(async (o: UnifiedOrder) => {
+    // If we already have ssOrder loaded for this expanded order, use it
+    if (!o.shopify.shippingAddress && ssOrder?.shipTo) {
+      const enriched = { ...o, shopify: { ...o.shopify, shippingAddress: {
+        name: ssOrder.shipTo.name || '', address1: ssOrder.shipTo.street1 || '',
+        address2: ssOrder.shipTo.street2 || '', city: ssOrder.shipTo.city || '',
+        province: ssOrder.shipTo.state || '', zip: ssOrder.shipTo.postalCode || '',
+        country: ssOrder.shipTo.country || '', phone: ssOrder.shipTo.phone || ''
+      }}};
+      printOrderSheet(enriched);
+      return;
+    }
+    const enriched = await enrichWithSSAddress(o);
+    printOrderSheet(enriched);
+  }, [ssOrder, enrichWithSSAddress]);
 
   // Batch Print + Ship: print packing slips, create labels for all selected, auto-fulfill via ShipStation
   const handleBatchShip = useCallback(async () => {
@@ -221,9 +251,10 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
     setBatchResults([]);
     setShowBatchResults(true);
 
-    // Step 1: Print all packing slips
-    setBatchProgress({ current: 0, total: selected.length, orderNumber: '', status: 'Printing packing slips...' });
-    printOrderSheets(selected);
+    // Step 1: Print all packing slips (enrich with ShipStation addresses first)
+    setBatchProgress({ current: 0, total: selected.length, orderNumber: '', status: 'Preparing packing slips...' });
+    const enrichedForPrint = await Promise.all(selected.map(enrichWithSSAddress));
+    printOrderSheets(enrichedForPrint);
 
     // Step 2: Create labels one by one
     const results: Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string; orderId?: string }> = [];
