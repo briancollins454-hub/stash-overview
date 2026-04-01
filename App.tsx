@@ -62,6 +62,7 @@ const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
 const AutoJobLinker = lazyRetry(() => import('./components/AutoJobLinker'));
 const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment'));
+const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import OrderWidget from './components/OrderWidget';
@@ -91,11 +92,152 @@ const isDateInHolidaySet = (date: Date, holidaySet: Set<string>) => {
     return holidaySet.has(date.toISOString().split('T')[0]);
 };
 
+// ─── Login Screen (supports Google + Username/Password) ──────────────────────
+const LoginScreen: React.FC<{
+  signIn: () => void;
+  loginWithPassword: (u: string, p: string) => Promise<void>;
+  authError: string | null;
+}> = ({ signIn, loginWithPassword, authError }) => {
+  const [showPasswordLogin, setShowPasswordLogin] = React.useState(false);
+  const [loginUsername, setLoginUsername] = React.useState('');
+  const [loginPassword, setLoginPassword] = React.useState('');
+  const [loginLoading, setLoginLoading] = React.useState(false);
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    await loginWithPassword(loginUsername, loginPassword);
+    setLoginLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-slate-900 rounded-3xl shadow-2xl border-b-8 border-indigo-600 p-10 text-center animate-in zoom-in-95 duration-500">
+        <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 rotate-3 shadow-lg">
+          <ShieldCheck className="w-10 h-10 text-white" />
+        </div>
+        <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Secure Access</h1>
+        <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-8 leading-relaxed">
+          Stash Shop Sync is restricted to authorized personnel only.
+        </p>
+
+        {authError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-[10px] font-black uppercase leading-relaxed">
+            <AlertTriangle className="w-4 h-4 inline-block mr-2 mb-0.5" />
+            {authError}
+          </div>
+        )}
+
+        {/* Google Sign-In */}
+        <button
+          onClick={() => signIn()}
+          className="w-full bg-white text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-indigo-50 transition-all active:scale-95 shadow-xl"
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+          Sign in with Google
+        </button>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-6">
+          <div className="flex-1 h-px bg-slate-700" />
+          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">or</span>
+          <div className="flex-1 h-px bg-slate-700" />
+        </div>
+
+        {/* Username/Password Toggle */}
+        {!showPasswordLogin ? (
+          <button
+            onClick={() => setShowPasswordLogin(true)}
+            className="w-full bg-slate-800 text-slate-300 py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-700 transition-all active:scale-95 border border-slate-700"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Sign in with Username
+          </button>
+        ) : (
+          <form onSubmit={handlePasswordLogin} className="space-y-3 text-left">
+            <div>
+              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Username</label>
+              <input
+                type="text"
+                value={loginUsername}
+                onChange={e => setLoginUsername(e.target.value)}
+                required
+                autoFocus
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                placeholder="Enter your username"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Password</label>
+              <input
+                type="password"
+                value={loginPassword}
+                onChange={e => setLoginPassword(e.target.value)}
+                required
+                className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                placeholder="Enter your password"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50 shadow-lg"
+            >
+              {loginLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4 rotate-180" />}
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPasswordLogin(false)}
+              className="w-full text-[10px] text-slate-500 font-bold uppercase tracking-widest hover:text-slate-300 transition-all py-2"
+            >
+              Back to options
+            </button>
+          </form>
+        )}
+
+        <div className="mt-10 pt-8 border-t border-slate-800">
+          <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.2em]">
+            Authorized Domains: marxcorporate.com | stashshop.co.uk
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── Google User Management Wrapper ──────────────────────────────────────────
+// Gets a Firebase ID token and passes it to UserManagement so Google-authed admins can manage users
+const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
+  const [firebaseIdToken, setFirebaseIdToken] = React.useState<string | null>(null);
+  const [tokenError, setTokenError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (user?.getIdToken) {
+      user.getIdToken().then((t: string) => setFirebaseIdToken(t)).catch((e: any) => setTokenError(e.message));
+    }
+  }, [user]);
+
+  if (tokenError) return <div className="text-center py-20 text-red-400 text-xs font-bold uppercase">{tokenError}</div>;
+  if (!firebaseIdToken) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>;
+
+  const googleUser = {
+    id: `google:${user.email}`,
+    firstName: (user.displayName || '').split(' ')[0] || 'Admin',
+    lastName: (user.displayName || '').split(' ').slice(1).join(' ') || '',
+    username: user.email || '',
+    role: 'superuser',
+    displayName: user.displayName || user.email || 'Admin',
+  };
+
+  return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
+};
+
 const App: React.FC = () => {
-  const { user, isAuthLoading, authError, loginWithGoogle: signIn, logout: signOut } = useAuth();
+  const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill'];
+  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'users'];
   const activeTab = validTabs.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'dashboard';
   const setActiveTab = useCallback((tab: string) => {
     setSearchParams(prev => {
@@ -1181,40 +1323,7 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-900 rounded-3xl shadow-2xl border-b-8 border-indigo-600 p-10 text-center animate-in zoom-in-95 duration-500">
-          <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 rotate-3 shadow-lg">
-            <ShieldCheck className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Secure Access</h1>
-          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-8 leading-relaxed">
-            Stash Shop Sync is restricted to authorized personnel only.
-          </p>
-          
-          {authError && (
-            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-[10px] font-black uppercase leading-relaxed">
-              <AlertTriangle className="w-4 h-4 inline-block mr-2 mb-0.5" />
-              {authError}
-            </div>
-          )}
-
-          <button 
-            onClick={() => signIn()}
-            className="w-full bg-white text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-indigo-50 transition-all active:scale-95 shadow-xl"
-          >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-            Sign in with Google
-          </button>
-          
-          <div className="mt-10 pt-8 border-t border-slate-800">
-            <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.2em]">
-              Authorized Domains: marxcorporate.com | stashshop.co.uk
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <LoginScreen signIn={signIn} loginWithPassword={loginWithPassword} authError={authError} />;
   }
 
   if (isWidgetView && widgetOrderId) {
@@ -1295,7 +1404,7 @@ const App: React.FC = () => {
             
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-1">
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
@@ -1343,7 +1452,7 @@ const App: React.FC = () => {
         {mobileMenuOpen && (
             <div className="md:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-2" onClick={e => e.stopPropagation()}>
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
@@ -1813,9 +1922,20 @@ const App: React.FC = () => {
                 </ErrorBoundary>
               </Suspense>
             )}
-        </main>
 
-        {/* Alert Manager Modal */}
+            {/* User Management Tab */}
+            {activeTab === 'users' && user && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="User Management Error">
+                  {isCustomUser && customUserData && customToken ? (
+                    <UserManagement currentUser={customUserData} token={customToken} />
+                  ) : (
+                    <GoogleUserManagement user={user} />
+                  )}
+                </ErrorBoundary>
+              </Suspense>
+            )}
+        </main>
         <Suspense fallback={null}>
           <AlertManager isOpen={showAlertManager} onClose={() => setShowAlertManager(false)} />
         </Suspense>
