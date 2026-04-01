@@ -13,7 +13,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiSecret = process.env.SHIPSTATION_API_SECRET;
 
   // Fall back to client-provided auth if env vars not set
-  const { url, auth: clientAuth } = req.body || {};
+  const { url, auth: clientAuth, method: reqMethod, body: reqBody } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'URL is required' });
@@ -39,19 +39,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'ShipStation credentials not configured' });
   }
 
+  const fetchMethod = (reqMethod || 'GET').toUpperCase();
+  const allowedMethods = ['GET', 'POST', 'PUT'];
+  if (!allowedMethods.includes(fetchMethod)) {
+    return res.status(400).json({ error: `Method ${fetchMethod} not allowed` });
+  }
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 55000);
 
-    const response = await fetch(url, {
-      method: 'GET',
+    const fetchOptions: RequestInit = {
+      method: fetchMethod,
       headers: {
         'Authorization': `Basic ${authHeader}`,
         'Content-Type': 'application/json',
       },
       signal: controller.signal,
-    });
+    };
+
+    if (fetchMethod !== 'GET' && reqBody) {
+      fetchOptions.body = JSON.stringify(reqBody);
+    }
+
+    const response = await fetch(url, fetchOptions);
     clearTimeout(timeoutId);
+
+    const contentType = response.headers.get('content-type') || '';
+
+    // Label endpoints return PDF binary
+    if (contentType.includes('application/pdf') || url.includes('label')) {
+      const buffer = await response.arrayBuffer();
+      res.status(response.status);
+      res.setHeader('Content-Type', contentType || 'application/pdf');
+      return res.send(Buffer.from(buffer));
+    }
 
     const data = await response.text();
     res.status(response.status);

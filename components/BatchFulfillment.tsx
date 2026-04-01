@@ -1,7 +1,15 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { UnifiedOrder, ShopifyOrder } from '../types';
-import { Package, CheckCircle2, Loader2, Truck, X, AlertTriangle, ChevronDown } from 'lucide-react';
-import { fulfillShopifyOrder } from '../services/fulfillmentService';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { UnifiedOrder } from '../types';
+import {
+  Package, CheckCircle2, Loader2, Truck, X, AlertTriangle, ChevronDown,
+  ChevronUp, Printer, MapPin, Phone, Mail, ExternalLink, Tag, ShoppingBag,
+  PackageCheck, Search
+} from 'lucide-react';
+import {
+  fetchShipStationOrder, createShipStationLabel, fetchShipStationCarriers,
+  getCarrierName, getTrackingUrl,
+  ShipStationOrder, ShipStationLabelResult
+} from '../services/shipstationService';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -11,237 +19,445 @@ interface Props {
   onNavigateToOrder: (orderNumber: string) => void;
 }
 
-interface FulfillmentResult {
-  orderId: string;
-  orderNumber: string;
-  success: boolean;
-  error?: string;
+interface CarrierOption {
+  code: string;
+  name: string;
+  services: Array<{ code: string; name: string }>;
 }
 
 const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNavigateToOrder }) => {
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isFulfilling, setIsFulfilling] = useState(false);
-  const [results, setResults] = useState<FulfillmentResult[]>([]);
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [trackingCompany, setTrackingCompany] = useState('');
-  const [showResults, setShowResults] = useState(false);
   const [filter, setFilter] = useState<'ready' | 'all'>('ready');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Orders that are ready to fulfill: unfulfilled with all stock ready or production complete
+  // ShipStation state per expanded order
+  const [ssOrder, setSsOrder] = useState<ShipStationOrder | null>(null);
+  const [ssLoading, setSsLoading] = useState(false);
+  const [ssError, setSsError] = useState<string | null>(null);
+
+  // Label creation
+  const [carriers, setCarriers] = useState<CarrierOption[]>([]);
+  const [carriersLoaded, setCarriersLoaded] = useState(false);
+  const [selectedCarrier, setSelectedCarrier] = useState('');
+  const [selectedService, setSelectedService] = useState('');
+  const [weight, setWeight] = useState({ value: 250, units: 'grams' as const });
+  const [isCreatingLabel, setIsCreatingLabel] = useState(false);
+  const [labelResult, setLabelResult] = useState<ShipStationLabelResult | null>(null);
+  const [labelError, setLabelError] = useState<string | null>(null);
+
+  // Confirmation modal
+  const [showConfirmation, setShowConfirmation] = useState(false);
+
+  // Ready orders
   const readyOrders = useMemo(() => {
-    return orders.filter(o => {
+    let filtered = orders.filter(o => {
       if (o.shopify.fulfillmentStatus === 'fulfilled' || o.shopify.fulfillmentStatus === 'restocked') return false;
       if (filter === 'ready') {
-        // Ready = all MTO items produced OR all stock items ready
         return o.isStockDispatchReady || o.completionPercentage >= 100;
       }
       return o.shopify.fulfillmentStatus === 'unfulfilled' || o.shopify.fulfillmentStatus === 'partial';
-    }).sort((a, b) => {
-      // Sort by completion % desc, then by date asc
+    });
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(o =>
+        o.shopify.orderNumber.toLowerCase().includes(term) ||
+        o.shopify.customerName.toLowerCase().includes(term) ||
+        (o.clubName && o.clubName.toLowerCase().includes(term))
+      );
+    }
+
+    return filtered.sort((a, b) => {
       if (b.completionPercentage !== a.completionPercentage) return b.completionPercentage - a.completionPercentage;
       return new Date(a.shopify.date).getTime() - new Date(b.shopify.date).getTime();
     });
-  }, [orders, filter]);
+  }, [orders, filter, searchTerm]);
 
-  const toggleSelect = useCallback((id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleSelectAll = useCallback(() => {
-    if (selectedIds.size === readyOrders.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(readyOrders.map(o => o.shopify.id)));
-    }
-  }, [readyOrders, selectedIds]);
-
-  const handleBatchFulfill = useCallback(async () => {
-    if (selectedIds.size === 0) return;
-    setIsFulfilling(true);
-    setResults([]);
-    setShowResults(true);
-    const batchResults: FulfillmentResult[] = [];
-
-    for (const orderId of Array.from(selectedIds)) {
-      const order = readyOrders.find(o => o.shopify.id === orderId);
-      if (!order) continue;
-
-      try {
-        const result = await fulfillShopifyOrder(
-          settings,
-          orderId,
-          trackingNumber || undefined,
-          trackingCompany || undefined
-        );
-        batchResults.push({
-          orderId,
-          orderNumber: order.shopify.orderNumber,
-          success: result.success,
-          error: result.error
-        });
-        if (result.success) {
-          onFulfilled(orderId);
-        }
-      } catch (e: any) {
-        batchResults.push({
-          orderId,
-          orderNumber: order.shopify.orderNumber,
-          success: false,
-          error: e.message
-        });
+  // Load carriers once
+  useEffect(() => {
+    if (carriersLoaded) return;
+    fetchShipStationCarriers(settings).then(c => {
+      setCarriers(c);
+      setCarriersLoaded(true);
+      // Default to first carrier/service
+      if (c.length > 0) {
+        setSelectedCarrier(c[0].code);
+        if (c[0].services.length > 0) setSelectedService(c[0].services[0].code);
       }
-      setResults([...batchResults]);
+    }).catch(() => setCarriersLoaded(true));
+  }, [settings, carriersLoaded]);
+
+  // When expanding an order, look it up in ShipStation
+  const handleExpand = useCallback(async (orderId: string, orderNumber: string) => {
+    if (expandedId === orderId) {
+      setExpandedId(null);
+      setSsOrder(null);
+      setSsError(null);
+      setLabelResult(null);
+      setLabelError(null);
+      return;
     }
 
-    setIsFulfilling(false);
-    setSelectedIds(new Set());
-  }, [selectedIds, readyOrders, settings, trackingNumber, trackingCompany, onFulfilled]);
+    setExpandedId(orderId);
+    setSsOrder(null);
+    setSsError(null);
+    setLabelResult(null);
+    setLabelError(null);
+    setSsLoading(true);
 
-  const successCount = results.filter(r => r.success).length;
-  const failCount = results.filter(r => !r.success).length;
+    try {
+      const order = await fetchShipStationOrder(settings, orderNumber);
+      setSsOrder(order);
+      if (!order) setSsError('Order not found in ShipStation — it may not have imported yet');
+      else {
+        // Pre-fill carrier/service from ShipStation order if set
+        if (order.carrierCode) setSelectedCarrier(order.carrierCode);
+        if (order.serviceCode) setSelectedService(order.serviceCode);
+        if (order.weight) setWeight(order.weight);
+      }
+    } catch (e: any) {
+      setSsError(e.message);
+    } finally {
+      setSsLoading(false);
+    }
+  }, [expandedId, settings]);
+
+  // Create label
+  const handleCreateLabel = useCallback(async () => {
+    if (!ssOrder || !selectedCarrier || !selectedService) return;
+    setShowConfirmation(false);
+    setIsCreatingLabel(true);
+    setLabelError(null);
+
+    try {
+      const result = await createShipStationLabel(
+        settings,
+        ssOrder.orderId,
+        selectedCarrier,
+        selectedService,
+        weight
+      );
+      setLabelResult(result);
+      // Open label PDF in new tab for printing
+      if (result.labelData) {
+        const byteChars = atob(result.labelData);
+        const byteNums = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([new Uint8Array(byteNums)], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      }
+      // Refresh order in parent (ShipStation will push fulfillment to Shopify)
+      if (expandedId) onFulfilled(expandedId);
+    } catch (e: any) {
+      setLabelError(e.message);
+    } finally {
+      setIsCreatingLabel(false);
+    }
+  }, [ssOrder, selectedCarrier, selectedService, weight, settings, expandedId, onFulfilled]);
+
+  const currentCarrier = carriers.find(c => c.code === selectedCarrier);
+  const currentServices = currentCarrier?.services || [];
+
+  // Print packing slip
+  const handlePrintPackingSlip = useCallback((o: UnifiedOrder) => {
+    const addr = o.shopify.shippingAddress;
+    const items = o.shopify.items;
+    const html = `<!DOCTYPE html><html><head><title>Packing Slip #${o.shopify.orderNumber}</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:700px;margin:20px auto;font-size:12px;color:#333}
+h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:16px}
+.header{display:flex;justify-content:space-between;margin-bottom:20px}
+.addr{line-height:1.6}
+table{width:100%;border-collapse:collapse;margin-top:16px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+th{background:#f5f5f5;font-weight:bold;text-transform:uppercase;font-size:10px;letter-spacing:1px}
+.total{font-weight:bold;text-align:right}
+.footer{margin-top:24px;padding-top:12px;border-top:1px solid #ddd;font-size:10px;color:#999}
+@media print{body{margin:0}button{display:none!important}}
+</style></head><body>
+<h1>STASH SHOP — Order #${o.shopify.orderNumber}</h1>
+<div class="header">
+<div class="addr"><strong>Ship To:</strong><br>
+${addr ? `${addr.name}<br>${addr.address1}<br>${addr.address2 ? addr.address2 + '<br>' : ''}${addr.city}${addr.province ? ', ' + addr.province : ''}<br>${addr.zip}<br>${addr.country}${addr.phone ? '<br>📞 ' + addr.phone : ''}` : 'No address on file'}</div>
+<div style="text-align:right"><strong>Order Date:</strong><br>${new Date(o.shopify.date).toLocaleDateString('en-GB')}<br><br>
+<strong>Customer:</strong><br>${o.shopify.customerName}<br>${o.shopify.customerEmail || ''}</div></div>
+<table><thead><tr><th>Item</th><th>SKU</th><th>Qty</th><th>Price</th></tr></thead><tbody>
+${items.map(i => `<tr><td>${i.title}${i.variantTitle ? ' — ' + i.variantTitle : ''}</td><td>${i.sku || '—'}</td><td>${i.quantity}</td><td>£${parseFloat(i.price).toFixed(2)}</td></tr>`).join('')}
+</tbody></table>
+<p class="total" style="margin-top:12px">Total: £${parseFloat(o.shopify.totalPrice).toFixed(2)}</p>
+${o.clubName ? `<p><strong>Club/Tag:</strong> ${o.clubName}</p>` : ''}
+<div class="footer">Printed ${new Date().toLocaleString('en-GB')}</div>
+<script>window.onload=()=>window.print()</script>
+</body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  }, []);
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Package className="w-5 h-5 text-blue-400" />
-          <h2 className="text-sm font-black uppercase tracking-widest text-white">Batch Fulfillment</h2>
+          <Truck className="w-5 h-5 text-blue-400" />
+          <h2 className="text-sm font-black uppercase tracking-widest text-white">Ready to Ship</h2>
           <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-black text-gray-300">
             {readyOrders.length} orders
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative flex-1 sm:flex-initial">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-500" />
+            <input
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="Search orders..."
+              className="w-full sm:w-44 bg-white/5 border border-white/10 rounded-lg pl-7 pr-2 py-1.5 text-[10px] font-bold text-white placeholder:text-gray-500 focus:border-blue-500/50 outline-none"
+            />
+          </div>
           <div className="flex bg-white/5 rounded border border-white/10">
-            <button onClick={() => setFilter('ready')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider transition-all ${filter === 'ready' ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:text-white'}`}>Ready Only</button>
-            <button onClick={() => setFilter('all')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider transition-all ${filter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:text-white'}`}>All Unfulfilled</button>
+            <button onClick={() => setFilter('ready')} className={`px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all ${filter === 'ready' ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:text-white'}`}>Ready Only</button>
+            <button onClick={() => setFilter('all')} className={`px-2.5 py-1.5 text-[9px] font-black uppercase tracking-wider transition-all ${filter === 'all' ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:text-white'}`}>All Unfulfilled</button>
           </div>
         </div>
       </div>
 
-      {/* Tracking Info (optional) */}
-      <div className="bg-white/5 rounded-xl border border-white/10 p-3 flex items-center gap-3">
-        <Truck className="w-4 h-4 text-gray-400 shrink-0" />
-        <div className="flex-1 flex gap-2">
-          <input
-            value={trackingNumber}
-            onChange={e => setTrackingNumber(e.target.value)}
-            placeholder="Tracking number (optional — applies to all)"
-            className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white placeholder:text-gray-500 focus:border-blue-500/50 outline-none"
-          />
-          <input
-            value={trackingCompany}
-            onChange={e => setTrackingCompany(e.target.value)}
-            placeholder="Carrier (e.g. Royal Mail)"
-            className="w-40 bg-transparent border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white placeholder:text-gray-500 focus:border-blue-500/50 outline-none"
-          />
-        </div>
+      {/* Info Banner */}
+      <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 flex items-start gap-2">
+        <PackageCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <p className="text-[10px] text-blue-300 font-bold leading-relaxed">
+          Click an order to view details and print a packing slip. Use <strong>Create + Print Label</strong> to generate a ShipStation shipping label — this will automatically mark the order as fulfilled in Shopify.
+        </p>
       </div>
-
-      {/* Action Bar */}
-      <div className="flex items-center justify-between bg-white/5 rounded-xl border border-white/10 p-3">
-        <div className="flex items-center gap-3">
-          <button onClick={toggleSelectAll} className="text-[9px] font-black uppercase tracking-wider text-gray-400 hover:text-white transition-colors">
-            {selectedIds.size === readyOrders.length && readyOrders.length > 0 ? 'Deselect All' : 'Select All'}
-          </button>
-          <span className="text-[10px] font-bold text-gray-500">{selectedIds.size} selected</span>
-        </div>
-        <button
-          onClick={handleBatchFulfill}
-          disabled={selectedIds.size === 0 || isFulfilling}
-          className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
-        >
-          {isFulfilling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-          Fulfill {selectedIds.size} Order{selectedIds.size !== 1 ? 's' : ''}
-        </button>
-      </div>
-
-      {/* Results */}
-      {showResults && results.length > 0 && (
-        <div className="bg-white/5 rounded-xl border border-white/10 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Results</span>
-              {successCount > 0 && <span className="text-[9px] font-black text-emerald-400">{successCount} succeeded</span>}
-              {failCount > 0 && <span className="text-[9px] font-black text-red-400">{failCount} failed</span>}
-            </div>
-            <button onClick={() => { setShowResults(false); setResults([]); }} className="p-1 hover:bg-white/10 rounded"><X className="w-3 h-3 text-gray-400" /></button>
-          </div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {results.map(r => (
-              <div key={r.orderId} className="flex items-center gap-2 text-[10px]">
-                {r.success ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <AlertTriangle className="w-3 h-3 text-red-400" />}
-                <button onClick={() => onNavigateToOrder(r.orderNumber)} className="font-black text-indigo-300 hover:text-indigo-200">#{r.orderNumber}</button>
-                {r.error && <span className="text-red-400 font-bold truncate">{r.error}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Order List */}
       {readyOrders.length === 0 ? (
         <div className="bg-white/5 rounded-xl border border-white/10 p-8 text-center">
           <Package className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-          <p className="text-sm font-bold text-gray-400">No orders ready to fulfill</p>
-          <p className="text-[10px] text-gray-500 mt-1">Orders will appear here when production is complete</p>
+          <p className="text-sm font-bold text-gray-400">No orders ready to ship</p>
+          <p className="text-[10px] text-gray-500 mt-1">Orders appear here when production is complete</p>
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-2">
           {readyOrders.map(o => {
-            const isSelected = selectedIds.has(o.shopify.id);
+            const isExpanded = expandedId === o.shopify.id;
+            const addr = o.shopify.shippingAddress;
             const itemCount = o.shopify.items.reduce((sum, i) => sum + i.quantity, 0);
+            const hasTracking = !!o.shipStationTracking?.trackingNumber;
+
             return (
-              <div
-                key={o.shopify.id}
-                onClick={() => toggleSelect(o.shopify.id)}
-                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                  isSelected
-                    ? 'bg-blue-500/10 border-blue-500/30'
-                    : 'bg-white/5 border-white/10 hover:border-white/20'
-                }`}
-              >
-                {/* Checkbox */}
-                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
-                  isSelected ? 'bg-blue-500 border-blue-500' : 'border-gray-600'
-                }`}>
-                  {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+              <div key={o.shopify.id} className={`rounded-xl border transition-all ${isExpanded ? 'bg-white/[0.07] border-blue-500/30' : 'bg-white/5 border-white/10 hover:border-white/20'}`}>
+                {/* Order Row */}
+                <div
+                  onClick={() => handleExpand(o.shopify.id, o.shopify.orderNumber)}
+                  className="flex items-center gap-3 p-3 cursor-pointer"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={e => { e.stopPropagation(); onNavigateToOrder(o.shopify.orderNumber); }} className="text-[11px] font-black text-indigo-300 hover:text-indigo-200">
+                        #{o.shopify.orderNumber}
+                      </button>
+                      <span className="text-[10px] font-bold text-gray-400">{o.shopify.customerName}</span>
+                      {o.clubName && <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-[8px] font-black text-indigo-300">{o.clubName}</span>}
+                      {hasTracking && <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[8px] font-black text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /> Shipped</span>}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <span className="text-[9px] text-gray-500 font-bold">{itemCount} items</span>
+                      <span className="text-[9px] text-gray-500 font-bold">£{parseFloat(o.shopify.totalPrice).toFixed(2)}</span>
+                      <span className="text-[9px] text-gray-500 font-bold">{new Date(o.shopify.date).toLocaleDateString('en-GB')}</span>
+                      {addr && <span className="text-[9px] text-gray-500 font-bold hidden sm:inline">{addr.city}, {addr.zip}</span>}
+                    </div>
+                  </div>
+
+                  {/* Status + Expand */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                      o.completionPercentage >= 100
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : o.completionPercentage >= 50
+                          ? 'bg-amber-500/20 text-amber-400'
+                          : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {o.completionPercentage >= 100 ? 'Ready' : `${Math.round(o.completionPercentage)}%`}
+                    </div>
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                  </div>
                 </div>
 
-                {/* Order Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <button onClick={e => { e.stopPropagation(); onNavigateToOrder(o.shopify.orderNumber); }} className="text-[11px] font-black text-indigo-300 hover:text-indigo-200">
-                      #{o.shopify.orderNumber}
-                    </button>
-                    <span className="text-[10px] font-bold text-gray-400">{o.shopify.customerName}</span>
-                    {o.clubName && <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-[8px] font-black text-indigo-300">{o.clubName}</span>}
-                  </div>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    <span className="text-[9px] text-gray-500 font-bold">{itemCount} items</span>
-                    <span className="text-[9px] text-gray-500 font-bold">£{parseFloat(o.shopify.totalPrice).toFixed(2)}</span>
-                    <span className="text-[9px] text-gray-500 font-bold">{new Date(o.shopify.date).toLocaleDateString('en-GB')}</span>
-                  </div>
-                </div>
+                {/* Expanded Detail */}
+                {isExpanded && (
+                  <div className="border-t border-white/10 p-4 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Shipping Address */}
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <h4 className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1.5"><MapPin className="w-3 h-3" /> Ship To</h4>
+                        {addr ? (
+                          <div className="text-[11px] text-white font-bold leading-relaxed">
+                            <p>{addr.name}</p>
+                            <p>{addr.address1}</p>
+                            {addr.address2 && <p>{addr.address2}</p>}
+                            <p>{addr.city}{addr.province ? `, ${addr.province}` : ''}</p>
+                            <p>{addr.zip}</p>
+                            <p className="text-gray-400">{addr.country}</p>
+                            {addr.phone && <p className="flex items-center gap-1 mt-1 text-gray-400"><Phone className="w-3 h-3" /> {addr.phone}</p>}
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-red-400 font-bold">No shipping address on file</p>
+                        )}
+                      </div>
 
-                {/* Status */}
-                <div className="text-right shrink-0">
-                  <div className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
-                    o.completionPercentage >= 100
-                      ? 'bg-emerald-500/20 text-emerald-400'
-                      : o.completionPercentage >= 50
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-red-500/20 text-red-400'
-                  }`}>
-                    {o.completionPercentage >= 100 ? 'Ready' : `${Math.round(o.completionPercentage)}% complete`}
+                      {/* Order Items */}
+                      <div className="bg-white/5 rounded-lg p-3">
+                        <h4 className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2 flex items-center gap-1.5"><ShoppingBag className="w-3 h-3" /> Items ({itemCount})</h4>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {o.shopify.items.map((item, idx) => (
+                            <div key={idx} className="flex items-center justify-between">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-bold text-white truncate">{item.title}</p>
+                                {item.variantTitle && <p className="text-[9px] text-gray-500">{item.variantTitle}</p>}
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className="text-[9px] font-black text-gray-400">×{item.quantity}</span>
+                                <span className="text-[10px] font-bold text-gray-300">£{parseFloat(item.price).toFixed(2)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="border-t border-white/10 mt-2 pt-2 flex justify-between">
+                          <span className="text-[9px] font-black uppercase text-gray-400">Total</span>
+                          <span className="text-[11px] font-black text-white">£{parseFloat(o.shopify.totalPrice).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handlePrintPackingSlip(o)}
+                        className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-white transition-all flex items-center gap-1.5"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print Packing Slip
+                      </button>
+                      <a
+                        href={`https://ship8.shipstation.com/orders/all-orders-search-result?quickSearch=${o.shopify.orderNumber}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-white/10 hover:bg-white/15 text-white transition-all flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Open in ShipStation
+                      </a>
+                      {o.shipStationTracking?.trackingNumber && (
+                        <a
+                          href={getTrackingUrl(o.shipStationTracking.carrier, o.shipStationTracking.trackingNumber) || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-all flex items-center gap-1.5"
+                        >
+                          <Package className="w-3.5 h-3.5" /> Track: {o.shipStationTracking.trackingNumber}
+                        </a>
+                      )}
+                    </div>
+
+                    {/* ShipStation Label Section */}
+                    {!hasTracking && (
+                      <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 space-y-3">
+                        <h4 className="text-[9px] font-black uppercase tracking-widest text-blue-300 flex items-center gap-1.5"><Tag className="w-3 h-3" /> Create Shipping Label</h4>
+
+                        {ssLoading ? (
+                          <div className="flex items-center gap-2 text-[10px] text-gray-400"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Looking up in ShipStation...</div>
+                        ) : ssError ? (
+                          <div className="flex items-center gap-2 text-[10px] text-amber-400"><AlertTriangle className="w-3.5 h-3.5" /> {ssError}</div>
+                        ) : ssOrder ? (
+                          <>
+                            <div className="flex flex-wrap gap-2">
+                              {/* Carrier select */}
+                              <div className="flex-1 min-w-[140px]">
+                                <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Carrier</label>
+                                <select
+                                  value={selectedCarrier}
+                                  onChange={e => {
+                                    setSelectedCarrier(e.target.value);
+                                    const c = carriers.find(c => c.code === e.target.value);
+                                    if (c?.services.length) setSelectedService(c.services[0].code);
+                                  }}
+                                  className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+                                >
+                                  {carriers.map(c => <option key={c.code} value={c.code} className="bg-gray-800">{c.name}</option>)}
+                                </select>
+                              </div>
+                              {/* Service select */}
+                              <div className="flex-1 min-w-[160px]">
+                                <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Service</label>
+                                <select
+                                  value={selectedService}
+                                  onChange={e => setSelectedService(e.target.value)}
+                                  className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+                                >
+                                  {currentServices.map(s => <option key={s.code} value={s.code} className="bg-gray-800">{s.name}</option>)}
+                                </select>
+                              </div>
+                              {/* Weight */}
+                              <div className="w-24">
+                                <label className="text-[8px] font-black uppercase text-gray-500 block mb-1">Weight (g)</label>
+                                <input
+                                  type="number"
+                                  value={weight.value}
+                                  onChange={e => setWeight({ value: Number(e.target.value), units: 'grams' })}
+                                  className="w-full bg-white/10 border border-white/10 rounded px-2 py-1.5 text-[10px] font-bold text-white outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Confirmation */}
+                            {showConfirmation ? (
+                              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                                <p className="text-[10px] text-amber-300 font-bold mb-2">
+                                  <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
+                                  This will create a shipping label, charge your ShipStation account, and mark order #{o.shopify.orderNumber} as fulfilled on Shopify. Continue?
+                                </p>
+                                <div className="flex gap-2">
+                                  <button onClick={handleCreateLabel} disabled={isCreatingLabel} className="px-3 py-1.5 rounded text-[10px] font-black uppercase bg-blue-500 hover:bg-blue-600 text-white transition-all flex items-center gap-1.5 disabled:opacity-50">
+                                    {isCreatingLabel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
+                                    Yes, Create + Print Label
+                                  </button>
+                                  <button onClick={() => setShowConfirmation(false)} className="px-3 py-1.5 rounded text-[10px] font-black uppercase bg-white/10 hover:bg-white/15 text-gray-300 transition-all">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setShowConfirmation(true)}
+                                disabled={!selectedCarrier || !selectedService || isCreatingLabel}
+                                className="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+                              >
+                                <Printer className="w-3.5 h-3.5" /> Create + Print Label
+                              </button>
+                            )}
+                          </>
+                        ) : null}
+
+                        {/* Label Result */}
+                        {labelResult && (
+                          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                              <span className="text-[10px] font-black text-emerald-400 uppercase">Label Created</span>
+                            </div>
+                            <p className="text-[10px] text-gray-300 font-bold">Tracking: {labelResult.trackingNumber}</p>
+                            <p className="text-[10px] text-gray-300 font-bold">Cost: £{labelResult.shipmentCost?.toFixed(2)}</p>
+                            <p className="text-[9px] text-gray-500 mt-1">Label PDF opened in new tab. ShipStation will update Shopify automatically.</p>
+                          </div>
+                        )}
+
+                        {labelError && (
+                          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2 flex items-start gap-2">
+                            <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                            <p className="text-[10px] text-red-400 font-bold">{labelError}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  {o.decoJobId && <div className="text-[8px] text-gray-500 font-bold mt-0.5">Deco #{o.decoJobId}</div>}
-                </div>
+                )}
               </div>
             );
           })}

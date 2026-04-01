@@ -5,7 +5,6 @@ import { useDebounce } from './hooks/useDebounce';
 import { useNotifications } from './hooks/useNotifications';
 import { useDarkMode } from './hooks/useDarkMode';
 import { exportOrdersToCSV } from './services/exportService';
-import { fulfillShopifyOrder } from './services/fulfillmentService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
@@ -522,24 +521,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAutoFulfill = async (orderId: string, trackingNumber?: string) => {
-    const result = await fulfillShopifyOrder(apiSettings, orderId, trackingNumber);
-    if (result.success) {
-      setToastMsg({ text: 'Order fulfilled successfully!', type: 'success' });
-      // Refresh the order
-      const numericId = orderId.includes('/') ? orderId : `gid://shopify/Order/${orderId}`;
-      const updated = await fetchSingleShopifyOrder(apiSettings, numericId);
-      if (updated) {
-        setRawShopifyOrders(prev => {
-          const map = new Map(prev.map(o => [o.id, o]));
-          map.set(updated.id, updated);
-          return Array.from(map.values());
-        });
-      }
-    } else {
-      setToastMsg({ text: `Fulfillment failed: ${result.error}`, type: 'error' });
-    }
-  };
+
 
   const handleReorderPointsSave = (points: ReorderPoint[]) => {
     setReorderPoints(points);

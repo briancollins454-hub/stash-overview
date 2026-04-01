@@ -122,3 +122,143 @@ export const fetchShipStationShipments = async (settings: ApiSettings): Promise<
 
   return Array.from(trackingMap.values());
 };
+
+// ── ShipStation Order Lookup ──
+
+export interface ShipStationOrder {
+  orderId: number;
+  orderNumber: string;
+  orderStatus: string;
+  shipTo: {
+    name: string;
+    street1: string;
+    street2?: string;
+    city: string;
+    state?: string;
+    postalCode: string;
+    country: string;
+    phone?: string;
+  };
+  carrierCode?: string;
+  serviceCode?: string;
+  weight?: { value: number; units: string };
+  dimensions?: { length: number; width: number; height: number; units: string };
+}
+
+export interface ShipStationLabelResult {
+  shipmentId: number;
+  trackingNumber: string;
+  labelData: string; // base64 PDF
+  shipmentCost: number;
+}
+
+/** Look up a ShipStation order by Shopify order number */
+export const fetchShipStationOrder = async (
+  settings: ApiSettings,
+  orderNumber: string
+): Promise<ShipStationOrder | null> => {
+  const auth = settings.shipStationApiKey && settings.shipStationApiSecret
+    ? btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`)
+    : undefined;
+
+  const url = `https://ssapi.shipstation.com/orders?orderNumber=${encodeURIComponent(orderNumber)}&pageSize=50`;
+
+  const response = await fetch('/api/shipstation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, auth }),
+  });
+
+  if (!response.ok) return null;
+
+  const data = await response.json();
+  const orders: ShipStationOrder[] = data.orders || [];
+  // Find awaiting_shipment first, fallback to any match
+  return orders.find(o => o.orderStatus === 'awaiting_shipment') || orders[0] || null;
+};
+
+/** Create a label for a ShipStation order (creates shipment + marks shipped) */
+export const createShipStationLabel = async (
+  settings: ApiSettings,
+  ssOrderId: number,
+  carrierCode: string,
+  serviceCode: string,
+  weight: { value: number; units: string },
+  dimensions?: { length: number; width: number; height: number; units: string }
+): Promise<ShipStationLabelResult> => {
+  const auth = settings.shipStationApiKey && settings.shipStationApiSecret
+    ? btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`)
+    : undefined;
+
+  const url = 'https://ssapi.shipstation.com/orders/createlabel';
+
+  const body: any = {
+    orderId: ssOrderId,
+    carrierCode,
+    serviceCode,
+    confirmation: 'none',
+    shipDate: new Date().toISOString().split('T')[0],
+    weight,
+    testLabel: false,
+  };
+
+  if (dimensions) {
+    body.dimensions = dimensions;
+  }
+
+  const response = await fetch('/api/shipstation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, auth, method: 'POST', body }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.ExceptionMessage || err.Message || err.error || `Label creation failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return {
+    shipmentId: data.shipmentId,
+    trackingNumber: data.trackingNumber,
+    labelData: data.labelData,
+    shipmentCost: data.shipmentCost,
+  };
+};
+
+/** Fetch available carriers for the ShipStation account */
+export const fetchShipStationCarriers = async (
+  settings: ApiSettings
+): Promise<Array<{ code: string; name: string; services: Array<{ code: string; name: string }> }>> => {
+  const auth = settings.shipStationApiKey && settings.shipStationApiSecret
+    ? btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`)
+    : undefined;
+
+  const response = await fetch('/api/shipstation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: 'https://ssapi.shipstation.com/carriers', auth }),
+  });
+
+  if (!response.ok) return [];
+
+  const carriers = await response.json();
+  // Fetch services for each carrier in parallel
+  const carriersWithServices = await Promise.all(
+    carriers.map(async (c: any) => {
+      const svcRes = await fetch('/api/shipstation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `https://ssapi.shipstation.com/carriers/listservices?carrierCode=${c.code}`, auth }),
+      });
+      const services = svcRes.ok ? await svcRes.json() : [];
+      return {
+        code: c.code,
+        name: c.name,
+        services: services.map((s: any) => ({ code: s.code, name: s.name })),
+      };
+    })
+  );
+
+  return carriersWithServices;
+};
