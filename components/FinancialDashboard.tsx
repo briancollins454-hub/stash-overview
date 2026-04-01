@@ -3,10 +3,11 @@ import {
   DollarSign, AlertTriangle, Clock, Download, ChevronDown, ChevronUp,
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
-  ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw
+  ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap
 } from 'lucide-react';
 import { DecoJob } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
+import { getItem, setItem } from '../services/localStore';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -112,37 +113,108 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [editingNote, setEditingNote] = useState<string | null>(null);
   const [noteInput, setNoteInput] = useState('');
 
-  // Self-loading state for full financial data
+  // Self-loading state for full financial data — cache-first with incremental sync
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ current: 0, total: 0 });
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [syncMode, setSyncMode] = useState<'cache' | 'incremental' | 'full'>('cache');
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load all financial data on mount
-  useEffect(() => {
-    if (hasLoaded || isLoading || !settings.useLiveData) return;
-    loadFinancialData();
-    return () => { abortRef.current?.abort(); };
-  }, [settings.useLiveData]);
+  const CACHE_KEY = 'stash_finance_jobs';
+  const CACHE_TS_KEY = 'stash_finance_synced';
 
-  const loadFinancialData = useCallback(async () => {
+  // Load cached data on mount, then incremental sync in background
+  useEffect(() => {
+    if (hasLoaded || isLoading) return;
+    loadCachedThenSync();
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
+  const loadCachedThenSync = useCallback(async () => {
+    // Step 1: Load from IndexedDB cache instantly
+    try {
+      const [cached, cachedTs] = await Promise.all([
+        getItem<DecoJob[]>(CACHE_KEY),
+        getItem<string>(CACHE_TS_KEY),
+      ]);
+      if (cached && cached.length > 0) {
+        setFinanceJobs(cached);
+        setHasLoaded(true);
+        setLastSynced(cachedTs || null);
+        // Step 2: Incremental sync (last 60 days) in background to pick up changes
+        if (settings.useLiveData) {
+          incrementalSync(cached, cachedTs);
+        }
+        return;
+      }
+    } catch { /* cache miss, do full load */ }
+
+    // No cache — do full load
+    if (settings.useLiveData) {
+      fullSync();
+    }
+  }, [settings]);
+
+  const incrementalSync = useCallback(async (cachedJobs: DecoJob[], _cachedTs: string | null) => {
     if (isLoading) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setIsLoading(true); setLoadError(null); setLoadProgress({ current: 0, total: 0 });
+    setIsLoading(true); setSyncMode('incremental'); setLoadError(null);
+    try {
+      // Only fetch orders from the last 60 days
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 60);
+      const sinceYear = sinceDate.getFullYear();
+      const jobs = await fetchDecoFinancials(
+        settings, sinceYear,
+        (current, total) => setLoadProgress({ current, total }),
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+
+      // Merge: recent data overwrites, older cached data stays
+      const recentMap = new Map(jobs.map(j => [j.jobNumber, j]));
+      const merged = cachedJobs.map(j => recentMap.get(j.jobNumber) || j);
+      // Add any brand new orders not in cache
+      jobs.forEach(j => {
+        if (!cachedJobs.some(c => c.jobNumber === j.jobNumber)) merged.push(j);
+      });
+
+      setFinanceJobs(merged);
+      setHasLoaded(true);
+      const now = new Date().toISOString();
+      setLastSynced(now);
+      // Persist to IndexedDB
+      await Promise.all([setItem(CACHE_KEY, merged), setItem(CACHE_TS_KEY, now)]);
+    } catch (e: any) {
+      if (!controller.signal.aborted) setLoadError(e.message || 'Incremental sync failed');
+    } finally {
+      if (!controller.signal.aborted) setIsLoading(false);
+    }
+  }, [settings, isLoading]);
+
+  const fullSync = useCallback(async () => {
+    if (isLoading) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setIsLoading(true); setSyncMode('full'); setLoadError(null); setLoadProgress({ current: 0, total: 0 });
     try {
       const jobs = await fetchDecoFinancials(
         settings, 2020,
         (current, total) => setLoadProgress({ current, total }),
         controller.signal,
       );
-      if (!controller.signal.aborted) {
-        setFinanceJobs(jobs);
-        setHasLoaded(true);
-      }
+      if (controller.signal.aborted) return;
+      setFinanceJobs(jobs);
+      setHasLoaded(true);
+      const now = new Date().toISOString();
+      setLastSynced(now);
+      await Promise.all([setItem(CACHE_KEY, jobs), setItem(CACHE_TS_KEY, now)]);
     } catch (e: any) {
       if (!controller.signal.aborted) setLoadError(e.message || 'Failed to load financial data');
     } finally {
@@ -206,7 +278,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         lastPaymentDate,
       };
     });
-  }, [decoJobs]);
+  }, [allJobs]);
 
   // Global summary stats
   const summary = useMemo(() => {
@@ -399,13 +471,17 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           </h1>
           <p className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
             Outstanding balances, aging analysis, and payment tracking from DecoNetwork
-            {isLoading && <span className="ml-2 text-indigo-500 font-bold">Loading {loadProgress.current.toLocaleString()}/{loadProgress.total.toLocaleString() || '...'} orders</span>}
-            {hasLoaded && <span className="ml-2 text-green-500">✓ {allJobs.length.toLocaleString()} orders loaded</span>}
+            {isLoading && syncMode === 'incremental' && <span className="ml-2 text-indigo-500 font-bold">Syncing recent changes...</span>}
+            {isLoading && syncMode === 'full' && <span className="ml-2 text-indigo-500 font-bold">Full reload {loadProgress.current.toLocaleString()}/{loadProgress.total.toLocaleString() || '...'} orders</span>}
+            {!isLoading && hasLoaded && <span className="ml-2 text-green-500">\u2713 {allJobs.length.toLocaleString()} orders{lastSynced ? ` \u2022 Synced ${new Date(lastSynced).toLocaleDateString('en-GB')} ${new Date(lastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : ''}</span>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={loadFinancialData} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-gray-300 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
-            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} {isLoading ? 'Loading...' : 'Refresh'}
+          <button onClick={() => incrementalSync(financeJobs, lastSynced)} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-gray-300 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}>
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} {isLoading ? 'Syncing...' : 'Sync Recent'}
+          </button>
+          <button onClick={fullSync} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-amber-300 border-slate-600 hover:bg-slate-600' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+            <DatabaseZap className="w-3.5 h-3.5" /> Full Reload
           </button>
           <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300 dark:border-indigo-700 dark:hover:bg-indigo-900/50 transition-colors">
             <Download className="w-3.5 h-3.5" /> Export Summary
@@ -417,11 +493,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       </div>
 
       {/* Loading progress bar */}
-      {isLoading && (
+      {isLoading && syncMode === 'full' && (
         <div className={`${card} p-4`}>
           <div className="flex items-center gap-3 mb-2">
             <Loader2 className="w-5 h-5 text-indigo-500 animate-spin" />
-            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Loading all financial data from DecoNetwork...</span>
+            <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Full reload — fetching all orders from DecoNetwork...</span>
           </div>
           <div className={`h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-gray-100'}`}>
             <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${loadProgress.total > 0 ? (loadProgress.current / loadProgress.total) * 100 : 0}%` }} />
