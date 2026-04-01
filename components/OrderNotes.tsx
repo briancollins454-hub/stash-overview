@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { OrderNote, getNotesForOrder, saveNote, deleteNote, syncNotesToCloud, fetchNotesFromCloud, deleteNoteFromCloud, mergeNotes, fetchMentionUsers, MentionUser } from '../services/notesService';
+import { OrderNote, getNotesForOrder, saveNote, deleteNote, syncNoteToCloud, fetchNotesFromCloud, deleteNoteFromCloud, mergeNotes, fetchMentionUsers, fetchChatParticipants, MentionUser } from '../services/notesService';
 import { createMentionNotifications } from '../services/notificationService';
 import { ApiSettings } from './SettingsModal';
 import { MessageSquare, Send, Trash2, X, Edit3, Pin, Maximize2, Minimize2, Loader2, Bell } from 'lucide-react';
@@ -103,19 +103,30 @@ const OrderNotes: React.FC<Props> = ({ orderId, orderNumber, authorEmail, author
     setNewText('');
     setPriority('normal');
     setShowMentionPicker(false);
-    syncNotesToCloud(settings, [note]).catch(console.error);
+    syncNoteToCloud(note).catch(console.error);
 
-    // Create server-side notifications for mentioned users
-    if (mentions.length > 0) {
-      createMentionNotifications({
-        mentions,
-        senderName: authorName,
-        orderId,
-        orderNumber,
-        noteId: note.id,
-        messageText: newText.trim(),
-      }).catch(console.error);
-    }
+    // Notify all other participants in this chat + any @mentioned users
+    const notifyUsers = async () => {
+      try {
+        const participants = await fetchChatParticipants(orderId);
+        // Combine participants + @mentioned users, exclude sender
+        const allTargets = new Set([...participants, ...mentions]);
+        allTargets.delete(authorEmail);
+        if (allTargets.size > 0) {
+          createMentionNotifications({
+            mentions: [...allTargets],
+            senderName: authorName,
+            orderId,
+            orderNumber,
+            noteId: note.id,
+            messageText: newText.trim(),
+          });
+        }
+      } catch (e) {
+        console.error('Failed to notify participants:', e);
+      }
+    };
+    notifyUsers();
   };
 
   const handleDelete = async (noteId: string) => {
@@ -132,14 +143,14 @@ const OrderNotes: React.FC<Props> = ({ orderId, orderNumber, authorEmail, author
     setNotes(prev => prev.map(n => n.id === note.id ? updated : n));
     setEditingId(null);
     setEditText('');
-    syncNotesToCloud(settings, [updated]).catch(console.error);
+    syncNoteToCloud(updated).catch(console.error);
   };
 
   const handleTogglePin = (note: OrderNote) => {
     const updated = { ...note, pinned: !note.pinned, updatedAt: Date.now() };
     saveNote(updated);
     setNotes(prev => prev.map(n => n.id === note.id ? updated : n));
-    syncNotesToCloud(settings, [updated]).catch(console.error);
+    syncNoteToCloud(updated).catch(console.error);
   };
 
   // Handle @mention typing

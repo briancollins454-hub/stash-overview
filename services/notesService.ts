@@ -15,7 +15,7 @@ export interface OrderNote {
 
 const STORAGE_KEY = 'stash_order_notes';
 
-// ─── Local Storage ─────────────────────────────────────────────────────────
+// ─── Local Storage (cache only) ────────────────────────────────────────────
 export function loadNotes(): Record<string, OrderNote[]> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -64,69 +64,66 @@ export function getNoteCounts(): Record<string, number> {
   return counts;
 }
 
-// ─── Cloud Sync (Supabase) ─────────────────────────────────────────────────
+// ─── Cloud Sync (Firebase) ─────────────────────────────────────────────────
 
-function noteToRow(n: OrderNote) {
+function noteToFirebase(n: OrderNote): Record<string, any> {
   return {
-    id: n.id,
+    note_id: n.id,
     order_id: n.orderId,
     order_number: n.orderNumber,
     text: n.text,
     author: n.author,
-    created_at: new Date(n.createdAt).toISOString(),
-    updated_at: new Date(n.updatedAt).toISOString(),
-    priority: n.priority || null,
+    created_at: n.createdAt,
+    updated_at: n.updatedAt,
+    priority: n.priority || '',
     pinned: n.pinned || false,
-    mentions: n.mentions ? JSON.stringify(n.mentions) : null,
+    mentions: n.mentions ? n.mentions.join(',') : '',
   };
 }
 
-function rowToNote(r: any): OrderNote {
+function firebaseToNote(r: any): OrderNote {
   return {
-    id: r.id,
-    orderId: r.order_id,
-    orderNumber: r.order_number,
-    text: r.text,
-    author: r.author,
-    createdAt: new Date(r.created_at).getTime(),
-    updatedAt: new Date(r.updated_at).getTime(),
+    id: r.note_id || r.id,
+    orderId: r.order_id || '',
+    orderNumber: r.order_number || '',
+    text: r.text || '',
+    author: r.author || '',
+    createdAt: typeof r.created_at === 'number' ? r.created_at : new Date(r.created_at).getTime(),
+    updatedAt: typeof r.updated_at === 'number' ? r.updated_at : new Date(r.updated_at).getTime(),
     priority: r.priority || undefined,
     pinned: r.pinned || false,
-    mentions: r.mentions ? (typeof r.mentions === 'string' ? JSON.parse(r.mentions) : r.mentions) : undefined,
+    mentions: r.mentions ? (typeof r.mentions === 'string' ? (r.mentions ? r.mentions.split(',') : undefined) : r.mentions) : undefined,
   };
 }
 
-export async function syncNotesToCloud(settings: ApiSettings, notes: OrderNote[]): Promise<void> {
+export async function syncNoteToCloud(note: OrderNote): Promise<void> {
   try {
-    await fetch('/api/supabase-data', {
+    await fetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: 'order_notes',
-        method: 'POST',
-        body: notes.map(noteToRow),
-        prefer: 'resolution=merge-duplicates, return=minimal',
-      }),
+      body: JSON.stringify({ action: 'save', note: noteToFirebase(note) }),
     });
   } catch (e) {
-    console.error('Failed to sync notes to cloud:', e);
+    console.error('Failed to sync note to cloud:', e);
   }
+}
+
+// Keep old function name for backward compat
+export async function syncNotesToCloud(_settings: ApiSettings, notes: OrderNote[]): Promise<void> {
+  await Promise.allSettled(notes.map(n => syncNoteToCloud(n)));
 }
 
 export async function fetchNotesFromCloud(orderId: string): Promise<OrderNote[]> {
   try {
-    const resp = await fetch('/api/supabase-data', {
+    const resp = await fetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `order_notes?order_id=eq.${encodeURIComponent(orderId)}&order=created_at.desc`,
-        method: 'GET',
-      }),
+      body: JSON.stringify({ action: 'list', order_id: orderId }),
     });
     if (!resp.ok) return [];
     const rows = await resp.json();
     if (!Array.isArray(rows)) return [];
-    return rows.map(rowToNote);
+    return rows.map(firebaseToNote);
   } catch {
     return [];
   }
@@ -134,16 +131,29 @@ export async function fetchNotesFromCloud(orderId: string): Promise<OrderNote[]>
 
 export async function deleteNoteFromCloud(noteId: string): Promise<void> {
   try {
-    await fetch('/api/supabase-data', {
+    await fetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `order_notes?id=eq.${encodeURIComponent(noteId)}`,
-        method: 'DELETE',
-      }),
+      body: JSON.stringify({ action: 'delete', note_id: noteId }),
     });
   } catch (e) {
     console.error('Failed to delete note from cloud:', e);
+  }
+}
+
+/** Get all unique authors who have posted in this order's chat */
+export async function fetchChatParticipants(orderId: string): Promise<string[]> {
+  try {
+    const resp = await fetch('/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'participants', order_id: orderId }),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
   }
 }
 
@@ -191,25 +201,4 @@ export async function fetchMentionUsers(): Promise<MentionUser[]> {
 
 export function clearMentionUsersCache() {
   cachedUsers = null;
-}
-
-// ─── Notifications ─────────────────────────────────────────────────────────
-
-export async function fetchUnreadMentions(username: string): Promise<OrderNote[]> {
-  try {
-    const resp = await fetch('/api/supabase-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `order_notes?mentions=cs.["${username}"]&order=created_at.desc&limit=50`,
-        method: 'GET',
-      }),
-    });
-    if (!resp.ok) return [];
-    const rows = await resp.json();
-    if (!Array.isArray(rows)) return [];
-    return rows.map(rowToNote);
-  } catch {
-    return [];
-  }
 }
