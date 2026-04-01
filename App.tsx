@@ -62,6 +62,7 @@ const CompletionTracker = lazyRetry(() => import('./components/CompletionTracker
 const DecoNotesIntelligence = lazyRetry(() => import('./components/DecoNotesIntelligence'));
 const PaymentStatusSync = lazyRetry(() => import('./components/PaymentStatusSync'));
 const CapacityForecast = lazyRetry(() => import('./components/CapacityForecast'));
+const SeasonalDemandCalendar = lazyRetry(() => import('./components/SeasonalDemandCalendar'));
 const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
 const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
@@ -1854,6 +1855,12 @@ const App: React.FC = () => {
                   </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Capacity Forecast Error">
                     <CapacityForecast
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Seasonal Demand Error">
+                    <SeasonalDemandCalendar
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
