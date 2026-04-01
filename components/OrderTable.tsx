@@ -976,12 +976,18 @@ const OrderTable: React.FC<OrderTableProps> = ({
                             {onOpenNotes && (
                                 <button
                                     onClick={(e) => { e.stopPropagation(); onOpenNotes(order.shopify.id, order.shopify.orderNumber); }}
-                                    className="inline-flex items-center gap-0.5 mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                    className={`inline-flex items-center gap-1 mt-1 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest border transition-all ${
+                                      (noteCounts?.[order.shopify.id] || 0) > 0
+                                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700 hover:bg-indigo-200'
+                                        : 'bg-gray-100 border-gray-200 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-300'
+                                    }`}
                                     title="Open Chat / Notes"
                                 >
-                                    <MessageSquare className="w-3 h-3" />
-                                    {(noteCounts?.[order.shopify.id] || 0) > 0 && (
-                                        <span className="text-indigo-500 font-black">{noteCounts[order.shopify.id]}</span>
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    {(noteCounts?.[order.shopify.id] || 0) > 0 ? (
+                                        <span>{noteCounts[order.shopify.id]} Note{noteCounts[order.shopify.id] !== 1 ? 's' : ''}</span>
+                                    ) : (
+                                        <span>Chat</span>
                                     )}
                                 </button>
                             )}
