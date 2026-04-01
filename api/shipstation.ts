@@ -9,7 +9,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).end();
   }
 
-  const { url, auth } = req.body || {};
+  const apiKey = process.env.SHIPSTATION_API_KEY;
+  const apiSecret = process.env.SHIPSTATION_API_SECRET;
+
+  // Fall back to client-provided auth if env vars not set
+  const { url, auth: clientAuth } = req.body || {};
 
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ error: 'URL is required' });
@@ -25,8 +29,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  if (!auth || typeof auth !== 'string') {
-    return res.status(400).json({ error: 'Auth is required' });
+  // Use server-side credentials if available, otherwise client-provided
+  let authHeader: string;
+  if (apiKey && apiSecret) {
+    authHeader = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+  } else if (clientAuth && typeof clientAuth === 'string') {
+    authHeader = clientAuth;
+  } else {
+    return res.status(500).json({ error: 'ShipStation credentials not configured' });
   }
 
   try {
@@ -36,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        'Authorization': `Basic ${auth}`,
+        'Authorization': `Basic ${authHeader}`,
         'Content-Type': 'application/json',
       },
       signal: controller.signal,

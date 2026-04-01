@@ -105,19 +105,19 @@ const App: React.FC = () => {
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
       const defaults: ApiSettings = {
           useLiveData: true,
-          shopifyDomain: import.meta.env.VITE_SHOPIFY_DOMAIN || '',
-          shopifyAccessToken: import.meta.env.VITE_SHOPIFY_ACCESS_TOKEN || '',
-          decoDomain: import.meta.env.VITE_DECO_DOMAIN || '',
-          decoUsername: import.meta.env.VITE_DECO_USERNAME || '',
-          decoPassword: import.meta.env.VITE_DECO_PASSWORD || '',
+          shopifyDomain: '',
+          shopifyAccessToken: '',
+          decoDomain: '',
+          decoUsername: '',
+          decoPassword: '',
           syncLookbackDays: 365,
           connectionMethod: 'proxy',
           autoRefreshInterval: 5,
           holidayRanges: [
               { id: 'xmas-2025', start: '2025-12-22', end: '2026-01-04', label: 'Christmas Closure' }
           ],
-          supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
-          supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+          supabaseUrl: '',
+          supabaseAnonKey: ''
       };
       const saved = localStorage.getItem('stash_api_settings');
       if (saved) {
@@ -197,7 +197,7 @@ const App: React.FC = () => {
   const trackOrderNumber = searchParams.get('track');
 
   useEffect(() => {
-    if (user && widgetOrderId && apiSettings.shopifyAccessToken) {
+    if (user && widgetOrderId) {
       const loadWidgetOrder = async () => {
         setLoading(true);
         try {
@@ -230,9 +230,9 @@ const App: React.FC = () => {
       };
       loadWidgetOrder();
     }
-  }, [user, widgetOrderId, apiSettings.shopifyAccessToken]);
+  }, [user, widgetOrderId]);
 
-  const isConfigMissing = !apiSettings.shopifyAccessToken || !apiSettings.decoPassword;
+  const isConfigMissing = false; // Credentials are now server-side
 
   const loadData = async (isDeepSync: boolean = false, baseOrdersOverride?: ShopifyOrder[]) => {
     if (loading) return;
@@ -268,9 +268,7 @@ const App: React.FC = () => {
             const [shopifyResult, decoResult, ssResult] = await Promise.allSettled([
                 fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync, currentBaseOrders.length),
                 fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync),
-                apiSettings.shipStationApiKey && apiSettings.shipStationApiSecret
-                    ? fetchShipStationShipments(apiSettings)
-                    : Promise.resolve([] as ShipStationTracking[])
+                fetchShipStationShipments(apiSettings)
             ]);
 
             if (shopifyResult.status === 'fulfilled') {
@@ -373,7 +371,7 @@ const App: React.FC = () => {
                 }
             }
 
-            if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey && sOrders.length > 0) {
+            if (sOrders.length > 0) {
                 saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
         } else {
@@ -553,8 +551,10 @@ const App: React.FC = () => {
                     const settingsDoc = await getDoc(doc(db, 'user_settings', user.uid));
                     if (settingsDoc.exists()) {
                         const cloudSettings = settingsDoc.data().settings as Partial<ApiSettings>;
-                        if (cloudSettings && cloudSettings.shopifyDomain) {
-                            const merged = { ...apiSettings, ...cloudSettings };
+                        if (cloudSettings) {
+                            // Only merge non-credential settings from Firestore
+                            const { shopifyAccessToken, decoPassword, supabaseAnonKey, shipStationApiSecret, ...safeSettings } = cloudSettings as any;
+                            const merged = { ...apiSettings, ...safeSettings };
                             setApiSettings(merged);
                             localStorage.setItem('stash_api_settings', JSON.stringify(merged));
                         }
@@ -564,36 +564,34 @@ const App: React.FC = () => {
                 }
             }
 
-            if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-                setSyncStatusMsg('Loading Cloud State...');
-                const cloudData = await fetchCloudData(apiSettings);
-                if (cloudData) {
-                    setConfirmedMatches(cloudData.mappings || {});
-                    setProductMappings(cloudData.productMappings || {});
-                    setItemJobLinks(cloudData.links || {});
-                    setPhysicalStock(cloudData.physicalStock || []);
-                    setReturnStock(cloudData.returnStock || []);
-                    setReferenceProducts(cloudData.referenceProducts || []);
-                    setMissingCloudTables(cloudData.missingTables || []);
-                    if (cloudData.orders && cloudData.orders.length > 0) {
-                        // Merge cloud orders with local cache, preferring whichever has more complete data
-                        const orderMap = new Map<string, ShopifyOrder>();
-                        initialOrders.forEach(o => orderMap.set(o.id, o));
-                        cloudData.orders.forEach(o => {
-                            const existing = orderMap.get(o.id);
-                            if (!existing) {
-                                orderMap.set(o.id, o);
-                            } else if (!existing.shippingAddress && o.shippingAddress) {
-                                orderMap.set(o.id, o);
-                            } else if (existing.shippingAddress && !o.shippingAddress) {
-                                // keep existing — it has address data
-                            } else if (new Date(o.updatedAt) > new Date(existing.updatedAt)) {
-                                orderMap.set(o.id, o);
-                            }
-                        });
-                        initialOrders = Array.from(orderMap.values());
-                        setRawShopifyOrders(initialOrders);
-                    }
+            setSyncStatusMsg('Loading Cloud State...');
+            const cloudData = await fetchCloudData(apiSettings);
+            if (cloudData) {
+                setConfirmedMatches(cloudData.mappings || {});
+                setProductMappings(cloudData.productMappings || {});
+                setItemJobLinks(cloudData.links || {});
+                setPhysicalStock(cloudData.physicalStock || []);
+                setReturnStock(cloudData.returnStock || []);
+                setReferenceProducts(cloudData.referenceProducts || []);
+                setMissingCloudTables(cloudData.missingTables || []);
+                if (cloudData.orders && cloudData.orders.length > 0) {
+                    // Merge cloud orders with local cache, preferring whichever has more complete data
+                    const orderMap = new Map<string, ShopifyOrder>();
+                    initialOrders.forEach(o => orderMap.set(o.id, o));
+                    cloudData.orders.forEach(o => {
+                        const existing = orderMap.get(o.id);
+                        if (!existing) {
+                            orderMap.set(o.id, o);
+                        } else if (!existing.shippingAddress && o.shippingAddress) {
+                            orderMap.set(o.id, o);
+                        } else if (existing.shippingAddress && !o.shippingAddress) {
+                            // keep existing — it has address data
+                        } else if (new Date(o.updatedAt) > new Date(existing.updatedAt)) {
+                            orderMap.set(o.id, o);
+                        }
+                    });
+                    initialOrders = Array.from(orderMap.values());
+                    setRawShopifyOrders(initialOrders);
                 }
             }
         } catch (e: any) {
@@ -609,10 +607,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
       localStorage.setItem('stash_api_settings', JSON.stringify(apiSettings));
-      // Save settings to Firestore so they load on any device
-      if (user?.uid && apiSettings.shopifyDomain) {
+      // Save non-credential settings to Firestore so they load on any device
+      if (user?.uid) {
+          const { shopifyAccessToken, decoPassword, supabaseAnonKey, shipStationApiSecret, ...safeSettings } = apiSettings as any;
           setDoc(doc(db, 'user_settings', user.uid), {
-              settings: apiSettings,
+              settings: safeSettings,
               updatedAt: new Date().toISOString(),
               email: user.email
           }, { merge: true }).catch(console.error);
@@ -622,7 +621,7 @@ const App: React.FC = () => {
   const updatePhysicalStock = (updater: (prev: PhysicalStockItem[]) => PhysicalStockItem[]) => {
       setPhysicalStock(prev => {
           const next = updater(prev);
-          if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
+          {
              const removed = prev.filter(p => !next.find(n => n.id === p.id));
              const addedOrEdited = next.filter(n => {
                  const old = prev.find(p => p.id === n.id);
@@ -641,7 +640,7 @@ const App: React.FC = () => {
   const updateReturnStock = (updater: (prev: ReturnStockItem[]) => ReturnStockItem[]) => {
       setReturnStock(prev => {
           const next = updater(prev);
-          if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
+          {
              const removed = prev.filter(p => !next.find(n => n.id === p.id));
              const added = next.filter(n => !prev.find(p => p.id === n.id));
              removed.forEach(r => deleteReturnStockItem(apiSettings, r.id).catch(console.error));
@@ -653,11 +652,9 @@ const App: React.FC = () => {
 
   const updateReferenceProducts = (products: ReferenceProduct[]) => {
       setReferenceProducts(products);
-      if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-          saveReferenceProducts(apiSettings, products).then(() => {
-              setToastMsg({ text: "Master Database Updated", type: 'success' });
-          }).catch(console.error);
-      }
+      saveReferenceProducts(apiSettings, products).then(() => {
+          setToastMsg({ text: "Master Database Updated", type: 'success' });
+      }).catch(console.error);
   };
 
   const holidaySet = useMemo(() => getHolidayDateSet(apiSettings.holidayRanges), [apiSettings.holidayRanges]);
@@ -982,9 +979,7 @@ const App: React.FC = () => {
           ids.forEach((id: string) => { next[id] = jobId; });
           return next;
       });
-      if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-          ids.forEach((id: string) => saveCloudJobLink(apiSettings, id, jobId).catch(console.error));
-      }
+      ids.forEach((id: string) => saveCloudJobLink(apiSettings, id, jobId).catch(console.error));
       handleRefreshJob(jobId);
   };
 
@@ -1001,9 +996,7 @@ const App: React.FC = () => {
               Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => { next[sPattern] = dPattern; });
               return next;
           });
-          if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-              Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => saveProductMapping(apiSettings, sPattern, dPattern).catch(console.error));
-          }
+          Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => saveProductMapping(apiSettings, sPattern, dPattern).catch(console.error));
       }
 
       if (jobId) {
@@ -1012,12 +1005,10 @@ const App: React.FC = () => {
               mappings.forEach(m => { next[m.itemKey] = jobId; });
               return next;
           });
-          if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) {
-             mappings.forEach(m => saveCloudJobLink(apiSettings, m.itemKey, jobId).catch(console.error));
-          }
+          mappings.forEach(m => saveCloudJobLink(apiSettings, m.itemKey, jobId).catch(console.error));
           handleRefreshJob(jobId);
       }
-      if (apiSettings.supabaseUrl && apiSettings.supabaseAnonKey && mappings.length > 0) {
+      if (mappings.length > 0) {
           saveCloudMappingBatch(apiSettings, mappings.map(m => ({ item_id: m.itemKey, deco_id: m.decoId }))).catch(console.error);
       }
   };
@@ -1290,7 +1281,7 @@ const App: React.FC = () => {
             }}
             onItemJobLink={async (orderNumber, itemId, jobId) => { 
               setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-              if(apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) saveCloudJobLink(apiSettings, itemId, jobId); 
+              saveCloudJobLink(apiSettings, itemId, jobId); 
               handleRefreshJob(jobId); 
             }}
         />
@@ -1575,7 +1566,7 @@ const App: React.FC = () => {
                 onManualLink={handleManualJobLink} 
                 onItemJobLink={async (orderNumber, itemId, jobId) => { 
                   setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-                  if(apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) saveCloudJobLink(apiSettings, itemId, jobId); 
+                  saveCloudJobLink(apiSettings, itemId, jobId); 
                   handleRefreshJob(jobId); 
                 }} 
                 onNavigateToJob={(id) => {setSearchTerm(id); setActiveTab('deco');}} 
@@ -1590,7 +1581,7 @@ const App: React.FC = () => {
             )}
             {activeTab === 'stock' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Stock Manager Error"><StockManager physicalStock={physicalStock} setPhysicalStock={updatePhysicalStock} returnStock={returnStock} setReturnStock={updateReturnStock} referenceProducts={referenceProducts} setReferenceProducts={updateReferenceProducts} orders={unifiedOrders} availableTags={allAvailableTags} /></ErrorBoundary></Suspense>}
             {activeTab === 'efficiency' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Dashboard Error"><EfficiencyDashboard orders={unifiedOrders} excludedTags={excludedTags} /></ErrorBoundary></Suspense>}
-            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); if(apiSettings.supabaseUrl && apiSettings.supabaseAnonKey) saveCloudJobLink(apiSettings, itemId, jobId); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
+            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); saveCloudJobLink(apiSettings, itemId, jobId); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
             {activeTab === 'deco' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
               <DecoDashboard 

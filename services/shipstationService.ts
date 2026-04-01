@@ -59,11 +59,10 @@ export const getTrackingUrl = (carrier: string, trackingNumber: string): string 
 };
 
 export const fetchShipStationShipments = async (settings: ApiSettings): Promise<ShipStationTracking[]> => {
-  if (!settings.shipStationApiKey || !settings.shipStationApiSecret) {
-    return [];
-  }
-
-  const auth = btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`);
+  // Build auth from client settings if available (server will use env vars as primary)
+  const auth = settings.shipStationApiKey && settings.shipStationApiSecret
+    ? btoa(`${settings.shipStationApiKey}:${settings.shipStationApiSecret}`)
+    : undefined;
   
   // Fetch recent shipments (last N days matching sync lookback)
   const lookbackDays = settings.syncLookbackDays || 90;

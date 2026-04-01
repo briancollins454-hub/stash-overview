@@ -57,39 +57,27 @@ export function getNoteCounts(): Record<string, number> {
 }
 
 /**
- * Syncs notes to Supabase if configured.
+ * Syncs notes to Supabase via server-side route.
  * Uses the `order_notes` table.
  */
 export async function syncNotesToCloud(settings: ApiSettings, notes: OrderNote[]): Promise<void> {
-  if (!settings.supabaseUrl || !settings.supabaseAnonKey) return;
-
-  const anonKey = settings.supabaseAnonKey.trim();
-  const baseUrl = settings.supabaseUrl.replace(/\/$/, '');
-
   try {
-    await fetch('/api/proxy', {
+    await fetch('/api/supabase-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        url: `${baseUrl}/rest/v1/order_notes`,
+        path: 'order_notes',
         method: 'POST',
-        headers: {
-          'apikey': anonKey,
-          'Authorization': `Bearer ${anonKey}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates, return=minimal',
-        },
-        body: JSON.stringify(
-          notes.map(n => ({
-            id: n.id,
-            order_id: n.orderId,
-            order_number: n.orderNumber,
-            text: n.text,
-            author: n.author,
-            created_at: new Date(n.createdAt).toISOString(),
-            updated_at: new Date(n.updatedAt).toISOString(),
-          }))
-        ),
+        body: notes.map(n => ({
+          id: n.id,
+          order_id: n.orderId,
+          order_number: n.orderNumber,
+          text: n.text,
+          author: n.author,
+          created_at: new Date(n.createdAt).toISOString(),
+          updated_at: new Date(n.updatedAt).toISOString(),
+        })),
+        prefer: 'resolution=merge-duplicates, return=minimal',
       }),
     });
   } catch (e) {

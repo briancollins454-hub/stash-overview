@@ -10,25 +10,16 @@ export async function fulfillShopifyOrder(
   trackingNumber?: string,
   trackingCompany?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const domain = settings.shopifyDomain;
-  const token = settings.shopifyAccessToken;
-
-  if (!domain || !token) {
-    return { success: false, error: 'Shopify credentials not configured' };
-  }
-
   const numericId = orderId.includes('/') ? orderId.split('/').pop() : orderId;
 
   try {
     // Step 1: Get fulfillment orders for this order
-    const foUrl = `https://${domain}/admin/api/2024-01/orders/${numericId}/fulfillment_orders.json`;
-    const foResponse = await fetch('/api/proxy', {
+    const foResponse = await fetch('/api/shopify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        url: foUrl,
-        method: 'GET',
-        headers: { 'X-Shopify-Access-Token': token },
+        action: 'rest',
+        restPath: `/admin/api/2024-01/orders/${numericId}/fulfillment_orders.json`,
       }),
     });
 
@@ -71,18 +62,14 @@ export async function fulfillShopifyOrder(
       };
     }
 
-    const fulfillUrl = `https://${domain}/admin/api/2024-01/fulfillments.json`;
-    const fulfillResponse = await fetch('/api/proxy', {
+    const fulfillResponse = await fetch('/api/shopify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        url: fulfillUrl,
-        method: 'POST',
-        headers: {
-          'X-Shopify-Access-Token': token,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(fulfillmentPayload),
+        action: 'rest',
+        restPath: `/admin/api/2024-01/fulfillments.json`,
+        restMethod: 'POST',
+        restBody: fulfillmentPayload,
       }),
     });
 

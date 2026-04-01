@@ -100,22 +100,17 @@ const parseDecoItems = (job: any): DecoItem[] => {
     return items;
 };
 
-const fetchWithProxyFallback = async (targetUrl: string, options: RequestInit, retries = 2): Promise<Response> => {
+const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
     const now = Date.now();
     const wait = PROXY_THROTTLE_MS - (now - lastRequestTime);
     if (wait > 0) await delay(wait);
     lastRequestTime = Date.now();
 
     try {
-        const response = await fetch('/api/proxy', {
+        const response = await fetch(route, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                url: targetUrl,
-                method: options.method || 'GET',
-                headers: options.headers,
-                body: options.body
-            })
+            body: JSON.stringify(body)
         });
 
         if (!response.ok) {
@@ -124,9 +119,9 @@ const fetchWithProxyFallback = async (targetUrl: string, options: RequestInit, r
             
             // If it's a 504 (Gateway Timeout) or 429 (Too Many Requests), we should retry
             if ((response.status === 504 || response.status === 429) && retries > 0) {
-                console.warn(`Proxy ${response.status} - Retrying... (${retries} left)`);
+                console.warn(`Server ${response.status} - Retrying... (${retries} left)`);
                 await delay(2000);
-                return fetchWithProxyFallback(targetUrl, options, retries - 1);
+                return fetchServerRoute(route, body, retries - 1);
             }
             
             // Create a custom error object that includes the status
@@ -141,12 +136,12 @@ const fetchWithProxyFallback = async (targetUrl: string, options: RequestInit, r
         if (e.message.includes('Failed to fetch') && retries > 0) {
             console.warn(`Network Error (Failed to fetch) - Retrying... (${retries} left)`);
             await delay(1500);
-            return fetchWithProxyFallback(targetUrl, options, retries - 1);
+            return fetchServerRoute(route, body, retries - 1);
         }
 
         // Only log as error if it's NOT a 404 (which is often just a missing resource)
         if (e.status !== 404) {
-            console.error("Backend Proxy Error:", e.message);
+            console.error("Server Route Error:", e.message);
         }
         
         if (e.message.includes('Failed to fetch')) {
@@ -157,11 +152,6 @@ const fetchWithProxyFallback = async (targetUrl: string, options: RequestInit, r
 };
 
 const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, isDelta: boolean = false, onProgress?: (msg: string) => void): Promise<ShopifyOrder[]> => {
-    if (!settings.shopifyDomain || !settings.shopifyAccessToken) throw new Error("Shopify Credentials Missing");
-    const cleanDomain = settings.shopifyDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
-    const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
-    
     let allRawOrders: any[] = [];
     let hasNextPage = true; 
     let endCursor: string | null = null; 
@@ -174,7 +164,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
         const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
         if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (${pct}%) — Page ${pageCount + 1}...`);
         const variables = { cursor: endCursor, query: `${filterField}:>=${dateFilter} status:any` };
-        const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
+        const res = await fetchServerRoute('/api/shopify', { query, variables });
         if (res.status === 401) throw new Error("Shopify Token Invalid.");
         const json = await res.json();
         if (json.errors) throw new Error(`Shopify API: ${json.errors[0]?.message}`);
@@ -225,15 +215,7 @@ export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: stri
 };
 
 const robustDecoFetch = async (settings: ApiSettings, endpoint: string, params: Record<string, string>) => {
-    if (!settings.decoDomain || !settings.decoUsername || !settings.decoPassword) throw new Error("Deco Credentials Missing");
-    const domain = settings.decoDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const baseUrl = `https://${domain}/${endpoint}`;
-    const queryParams = new URLSearchParams();
-    queryParams.append('username', settings.decoUsername.trim());
-    queryParams.append('password', settings.decoPassword.trim());
-    Object.keys(params).forEach(key => queryParams.append(key, params[key]));
-    const finalUrl = `${baseUrl}?${queryParams.toString()}`;
-    const response = await fetchWithProxyFallback(finalUrl, { method: 'GET' });
+    const response = await fetchServerRoute('/api/deco', { endpoint, params });
     
     let data;
     const text = await response.text();
@@ -305,16 +287,11 @@ export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): 
 
 export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: string): Promise<ShopifyOrder | null> => {
     if (!settings.useLiveData) return MOCK_SHOPIFY_ORDERS.find(o => o.id === orderId) || null;
-    if (!settings.shopifyDomain || !settings.shopifyAccessToken) throw new Error("Shopify Credentials Missing");
-    
-    const cleanDomain = settings.shopifyDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
-    const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
     
     const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } }`;
     
     try {
-        const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, variables: { id: orderId } }) });
+        const res = await fetchServerRoute('/api/shopify', { query, variables: { id: orderId } });
         const json = await res.json();
         const o = json.data?.order;
         if (!o) return null;
@@ -343,29 +320,22 @@ export const fetchOrderTimeline = async (settings: ApiSettings, orderId: string)
     if (!settings.useLiveData) return { comments: [] };
     const numericId = orderId.replace(/\D/g, ''); 
     if (!numericId) return { comments: [] };
-    const domain = settings.shopifyDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const url = `https://${domain}/admin/api/2025-01/orders/${numericId}/events.json`;
     try {
-        const res = await fetchWithProxyFallback(url, { headers: { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim() } });
+        const res = await fetchServerRoute('/api/shopify', { action: 'rest', restPath: `/admin/api/2025-01/orders/${numericId}/events.json` });
         const json = await res.json();
         return { comments: (json.events || []).map((e: any) => e.body || e.message || '').filter((s: string) => s.trim().length > 0) };
     } catch (e) { return { comments: [] }; }
 };
 
 export const updateShopifyVariantBarcode = async (settings: ApiSettings, variantId: string, barcode: string): Promise<{ success: boolean; error?: string }> => {
-    if (!settings.shopifyDomain || !settings.shopifyAccessToken) return { success: false, error: 'Shopify credentials missing' };
     if (!variantId || !variantId.startsWith('gid://')) return { success: false, error: 'Invalid variant ID' };
     if (!barcode || barcode.trim().length === 0) return { success: false, error: 'Empty barcode' };
-
-    const cleanDomain = settings.shopifyDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const endpoint = `https://${cleanDomain}/admin/api/2025-01/graphql.json`;
-    const headers = { 'X-Shopify-Access-Token': settings.shopifyAccessToken.trim(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
 
     const mutation = `mutation productVariantUpdate($input: ProductVariantInput!) { productVariantUpdate(input: $input) { productVariant { id barcode } userErrors { field message } } }`;
     const variables = { input: { id: variantId, barcode: barcode.trim() } };
 
     try {
-        const res = await fetchWithProxyFallback(endpoint, { method: 'POST', headers, body: JSON.stringify({ query: mutation, variables }) });
+        const res = await fetchServerRoute('/api/shopify', { query: mutation, variables });
         const json = await res.json();
         const errors = json.data?.productVariantUpdate?.userErrors;
         if (errors?.length > 0) return { success: false, error: errors.map((e: any) => e.message).join(', ') };

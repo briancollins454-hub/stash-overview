@@ -4,7 +4,7 @@ import { ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } fr
 
 /**
  * SyncService handles the persistence of user-defined data (mappings/links),
- * cached Shopify order data, and physical inventory to an external Supabase database.
+ * cached Shopify order data, and physical inventory to Supabase via server-side routes.
  */
 
 export interface CloudMapping {
@@ -19,54 +19,19 @@ export interface CloudJobLink {
     updated_at: string;
 }
 
-const getHeaders = (settings: ApiSettings, extraPrefer?: string) => {
-    const anonKey = (settings.supabaseAnonKey || '').trim();
-    const headers: Record<string, string> = {
-        'apikey': anonKey,
-        'Authorization': `Bearer ${anonKey}`,
-        'Content-Type': 'application/json'
-    };
-
-    // PostgREST Prefer headers should be comma-separated
-    const preferValues = ['return=minimal'];
-    if (extraPrefer) preferValues.push(extraPrefer);
-    headers['Prefer'] = preferValues.join(', ');
-
-    return headers;
-};
-
-const getBaseUrl = (settings: ApiSettings) => {
-    let url = (settings.supabaseUrl || '').trim();
-    if (!url) return '';
-    
-    // Ensure protocol
-    if (!url.startsWith('http')) {
-        url = `https://${url}`;
-    }
-    
-    // Clean trailing slash and whitespace
-    url = url.replace(/\/$/, '');
-    
-    // Validate it's a working URL structure
+const fetchWithProxy = async (path: string, method: string, body?: any, prefer?: string): Promise<Response> => {
     try {
-        new URL(url);
-        return url;
-    } catch (e) {
-        console.error("Invalid Supabase URL provided:", url);
-        return '';
-    }
-};
+        const preferValues = ['return=minimal'];
+        if (prefer) preferValues.push(prefer);
 
-const fetchWithProxy = async (targetUrl: string, options: RequestInit): Promise<Response> => {
-    try {
-        const response = await fetch('/api/proxy', {
+        const response = await fetch('/api/supabase-data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                url: targetUrl,
-                method: options.method || 'GET',
-                headers: options.headers,
-                body: options.body
+                path,
+                method,
+                body,
+                prefer: preferValues.join(', ')
             })
         });
 
@@ -90,17 +55,17 @@ const fetchWithProxy = async (targetUrl: string, options: RequestInit): Promise<
     }
 };
 
-const fetchAllFromCloud = async <T>(baseUrl: string, table: string, headers: any, select = '*', offset = 0, limit = 5000): Promise<T[] | null> => {
+const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 5000): Promise<T[] | null> => {
     try {
-        const url = `${baseUrl}/rest/v1/${table}?select=${select}&limit=${limit}&offset=${offset}`;
-        const res = await fetchWithProxy(url, { headers, method: 'GET' });
+        const path = `${table}?select=${select}&limit=${limit}&offset=${offset}`;
+        const res = await fetchWithProxy(path, 'GET');
         
         const data = await res.json();
         if (!Array.isArray(data)) return [];
         
         // Recursive pagination if we hit the limit
         if (data.length === limit && offset + limit < 100000) {
-            const nextBatch = await fetchAllFromCloud<T>(baseUrl, table, headers, select, offset + limit, limit);
+            const nextBatch = await fetchAllFromCloud<T>(table, select, offset + limit, limit);
             return [...data, ...(nextBatch || [])];
         }
         
@@ -126,22 +91,18 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
     referenceProducts: ReferenceProduct[];
     missingTables: string[];
 } | null> => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return null;
-
     try {
-        const headers = getHeaders(settings);
         const missingTables: string[] = [];
         
         // Parallel fetch for speed with full pagination support
         const [mappings, links, productMappings, physicalStock, returnStock, referenceProducts, rawOrders] = await Promise.all([
-            fetchAllFromCloud<CloudMapping>(baseUrl, 'stash_mappings', headers),
-            fetchAllFromCloud<CloudJobLink>(baseUrl, 'stash_job_links', headers),
-            fetchAllFromCloud<any>(baseUrl, 'stash_product_patterns', headers),
-            fetchAllFromCloud<PhysicalStockItem>(baseUrl, 'stash_stock', headers),
-            fetchAllFromCloud<ReturnStockItem>(baseUrl, 'stash_returns', headers),
-            fetchAllFromCloud<ReferenceProduct>(baseUrl, 'stash_reference_products', headers),
-            fetchAllFromCloud<any>(baseUrl, 'stash_orders', headers, 'order_data')
+            fetchAllFromCloud<CloudMapping>('stash_mappings'),
+            fetchAllFromCloud<CloudJobLink>('stash_job_links'),
+            fetchAllFromCloud<any>('stash_product_patterns'),
+            fetchAllFromCloud<PhysicalStockItem>('stash_stock'),
+            fetchAllFromCloud<ReturnStockItem>('stash_returns'),
+            fetchAllFromCloud<ReferenceProduct>('stash_reference_products'),
+            fetchAllFromCloud<any>('stash_orders', 'order_data')
         ]);
 
         if (mappings === null) missingTables.push('stash_mappings');
@@ -186,15 +147,13 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
 };
 
 export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrder[]) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey || orders.length === 0) return;
+    if (orders.length === 0) return;
 
     try {
         // Dedup by order ID to prevent Postgres error 21000 in batch operations
         const uniqueOrders = Array.from(new Map(orders.map(o => [o.id, o])).values());
         
         const batchSize = 20;
-        const headers = getHeaders(settings, 'resolution=merge-duplicates');
         
         for (let i = 0; i < uniqueOrders.length; i += batchSize) {
             const batch = uniqueOrders.slice(i, i + batchSize);
@@ -205,11 +164,7 @@ export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrde
                 updated_at: new Date().toISOString()
             }));
 
-            const res = await fetchWithProxy(`${baseUrl}/rest/v1/stash_orders`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(payload)
-            });
+            const res = await fetchWithProxy('stash_orders', 'POST', payload, 'resolution=merge-duplicates');
 
             if (!res.ok) {
                 const error = await res.text();
@@ -227,71 +182,41 @@ export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrde
 };
 
 export const savePhysicalStockItem = async (settings: ApiSettings, item: PhysicalStockItem) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_stock`, {
-            method: 'POST',
-            headers: getHeaders(settings, 'resolution=merge-duplicates'),
-            body: JSON.stringify(item)
-        });
+        await fetchWithProxy('stash_stock', 'POST', item, 'resolution=merge-duplicates');
     } catch (e) {}
 };
 
 export const deletePhysicalStockItem = async (settings: ApiSettings, id: string) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_stock?id=eq.${id}`, {
-            method: 'DELETE',
-            headers: getHeaders(settings)
-        });
+        await fetchWithProxy(`stash_stock?id=eq.${id}`, 'DELETE');
     } catch (e) {}
 };
 
 export const saveReturnStockItem = async (settings: ApiSettings, item: ReturnStockItem) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_returns`, {
-            method: 'POST',
-            headers: getHeaders(settings, 'resolution=merge-duplicates'),
-            body: JSON.stringify(item)
-        });
+        await fetchWithProxy('stash_returns', 'POST', item, 'resolution=merge-duplicates');
     } catch (e) {}
 };
 
 export const deleteReturnStockItem = async (settings: ApiSettings, id: string) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_returns?id=eq.${id}`, {
-            method: 'DELETE',
-            headers: getHeaders(settings)
-        });
+        await fetchWithProxy(`stash_returns?id=eq.${id}`, 'DELETE');
     } catch (e) {}
 };
 
 export const saveReferenceProducts = async (settings: ApiSettings, products: ReferenceProduct[]) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey || products.length === 0) return;
+    if (products.length === 0) return;
     try {
         // Fix: Deduplicate by EAN (Primary Key) to prevent Postgres error 21000
-        // (ON CONFLICT DO UPDATE command cannot affect row a second time)
         const uniqueProducts = Array.from(
             new Map(products.map(p => [p.ean.trim(), p])).values()
         );
 
-        // Optimized batching for reference products
         const batchSize = 100;
-        const headers = getHeaders(settings, 'resolution=merge-duplicates');
         for (let i = 0; i < uniqueProducts.length; i += batchSize) {
             const batch = uniqueProducts.slice(i, i + batchSize);
-            const res = await fetchWithProxy(`${baseUrl}/rest/v1/stash_reference_products`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(batch)
-            });
+            const res = await fetchWithProxy('stash_reference_products', 'POST', batch, 'resolution=merge-duplicates');
             if (!res.ok) {
                 const err = await res.text();
                 throw new Error(`Master Data Batch Error: ${err}`);
@@ -304,26 +229,18 @@ export const saveReferenceProducts = async (settings: ApiSettings, products: Ref
 };
 
 export const saveCloudJobLink = async (settings: ApiSettings, order_id: string, job_id: string) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_job_links`, {
-            method: 'POST',
-            headers: getHeaders(settings, 'resolution=merge-duplicates'),
-            body: JSON.stringify({ order_id, job_id, updated_at: new Date().toISOString() })
-        });
+        await fetchWithProxy('stash_job_links', 'POST', { order_id, job_id, updated_at: new Date().toISOString() }, 'resolution=merge-duplicates');
     } catch (e) {}
 };
 
 export const saveCloudMappingBatch = async (settings: ApiSettings, mappings: { item_id: string, deco_id: string }[]) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey || mappings.length === 0) return;
+    if (mappings.length === 0) return;
     try {
         // Dedup by item ID to prevent Postgres error 21000
         const uniqueMappings = Array.from(new Map(mappings.map(m => [m.item_id, m])).values());
         
         const batchSize = 100;
-        const headers = getHeaders(settings, 'resolution=merge-duplicates');
         
         for (let i = 0; i < uniqueMappings.length; i += batchSize) {
             const batch = uniqueMappings.slice(i, i + batchSize);
@@ -333,11 +250,7 @@ export const saveCloudMappingBatch = async (settings: ApiSettings, mappings: { i
                 updated_at: new Date().toISOString()
             }));
 
-            const res = await fetchWithProxy(`${baseUrl}/rest/v1/stash_mappings`, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(payload)
-            });
+            const res = await fetchWithProxy('stash_mappings', 'POST', payload, 'resolution=merge-duplicates');
 
             if (!res.ok) {
                 const err = await res.text();
@@ -354,17 +267,11 @@ export const saveCloudMappingBatch = async (settings: ApiSettings, mappings: { i
 };
 
 export const saveProductMapping = async (settings: ApiSettings, shopify_pattern: string, deco_pattern: string) => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_product_patterns`, {
-            method: 'POST',
-            headers: getHeaders(settings, 'resolution=merge-duplicates'),
-            body: JSON.stringify({ shopify_pattern, deco_pattern, updated_at: new Date().toISOString() })
-        });
+        await fetchWithProxy('stash_product_patterns', 'POST', { shopify_pattern, deco_pattern, updated_at: new Date().toISOString() }, 'resolution=merge-duplicates');
     } catch (e: any) {
         if (e.status === 404 || e.message.includes('404')) {
-            console.warn(`Cloud Product Pattern Save Failed: Table "stash_product_patterns" not found. Please run the Supabase setup SQL in the Integration Guide.`);
+            console.warn(`Cloud Product Pattern Save Failed: Table "stash_product_patterns" not found.`);
         } else {
             console.error("Cloud Product Pattern Save Failed:", e.message || e);
         }
@@ -373,27 +280,11 @@ export const saveProductMapping = async (settings: ApiSettings, shopify_pattern:
 
 /**
  * Fetch API settings from Supabase cloud (stash_settings table).
- * Returns the saved settings or null if not found / table missing.
+ * Now uses the server-side route — no credentials needed.
  */
-export const fetchCloudSettings = async (supabaseUrl: string, supabaseAnonKey: string): Promise<Partial<ApiSettings> | null> => {
-    const anonKey = supabaseAnonKey.trim();
-    let url = supabaseUrl.trim();
-    if (!url || !anonKey) return null;
-    if (!url.startsWith('http')) url = `https://${url}`;
-    url = url.replace(/\/$/, '');
-
-    const headers: Record<string, string> = {
-        'apikey': anonKey,
-        'Authorization': `Bearer ${anonKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-    };
-
+export const fetchCloudSettings = async (): Promise<Partial<ApiSettings> | null> => {
     try {
-        const res = await fetchWithProxy(`${url}/rest/v1/stash_settings?select=settings_data&id=eq.main&limit=1`, {
-            method: 'GET',
-            headers
-        });
+        const res = await fetchWithProxy('stash_settings?select=settings_data&id=eq.main&limit=1', 'GET');
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0 && data[0].settings_data) {
             return data[0].settings_data as Partial<ApiSettings>;
@@ -410,24 +301,22 @@ export const fetchCloudSettings = async (supabaseUrl: string, supabaseAnonKey: s
  * Upserts a single row with id='main'.
  */
 export const saveCloudSettings = async (settings: ApiSettings): Promise<void> => {
-    const baseUrl = getBaseUrl(settings);
-    if (!baseUrl || !settings.supabaseAnonKey) return;
-
-    const headers = getHeaders(settings, 'resolution=merge-duplicates');
-
     try {
-        await fetchWithProxy(`${baseUrl}/rest/v1/stash_settings`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-                id: 'main',
-                settings_data: settings,
-                updated_at: new Date().toISOString()
-            })
-        });
+        // Strip sensitive credentials before saving to cloud
+        const safeSettings = { ...settings };
+        delete (safeSettings as any).shopifyAccessToken;
+        delete (safeSettings as any).decoPassword;
+        delete (safeSettings as any).supabaseAnonKey;
+        delete (safeSettings as any).shipStationApiSecret;
+
+        await fetchWithProxy('stash_settings', 'POST', {
+            id: 'main',
+            settings_data: safeSettings,
+            updated_at: new Date().toISOString()
+        }, 'resolution=merge-duplicates');
     } catch (e: any) {
         if (e.status === 404 || e.message.includes('404')) {
-            console.warn('Cloud Settings Save: Table "stash_settings" not found. Create it in Supabase.');
+            console.warn('Cloud Settings Save: Table "stash_settings" not found.');
         } else {
             console.error('Cloud Settings Save Failed:', e.message || e);
         }
