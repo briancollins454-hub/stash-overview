@@ -12,11 +12,11 @@ const POLL_INTERVAL = 30_000; // 30 seconds
 const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [open, setOpen] = useState(false);
-  const [seenIds, setSeenIds] = useState<Set<string>>(() => {
+  const seenIdsRef = useRef<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('stash_seen_notif_ids');
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+      return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
+    } catch { return new Set<string>(); }
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -27,6 +27,7 @@ const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
     setNotifications(notifs);
 
     // Browser notification for truly new ones
+    const seenIds = seenIdsRef.current instanceof Set ? seenIdsRef.current : new Set<string>();
     const newOnes = notifs.filter(n => !seenIds.has(n.id));
     if (newOnes.length > 0 && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       for (const n of newOnes.slice(0, 3)) {
@@ -36,14 +37,14 @@ const NotificationBell: React.FC<Props> = ({ username, onOpenOrder }) => {
           icon: '/icon-192.png',
         });
       }
-      setSeenIds(prev => {
-        const next = new Set(prev);
-        newOnes.forEach(n => next.add(n.id));
-        localStorage.setItem('stash_seen_notif_ids', JSON.stringify([...next].slice(-200)));
-        return next;
-      });
+      const next = new Set(seenIds);
+      newOnes.forEach(n => next.add(n.id));
+      // Keep only last 200 seen IDs
+      const arr = [...next].slice(-200);
+      seenIdsRef.current = new Set(arr);
+      localStorage.setItem('stash_seen_notif_ids', JSON.stringify(arr));
     }
-  }, [username, seenIds]);
+  }, [username]);
 
   useEffect(() => {
     poll();

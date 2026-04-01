@@ -87,21 +87,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { username } = req.body;
         if (!username) return res.status(400).json({ error: 'username required' });
 
-        // Firestore REST structured query: filter by recipient + unread
+        // Single-field filter (auto-indexed), then filter is_read + sort in code
         const query = {
           structuredQuery: {
             from: [{ collectionId: COLLECTION }],
             where: {
-              compositeFilter: {
-                op: 'AND',
-                filters: [
-                  { fieldFilter: { field: { fieldPath: 'recipient_username' }, op: 'EQUAL', value: { stringValue: username } } },
-                  { fieldFilter: { field: { fieldPath: 'is_read' }, op: 'EQUAL', value: { booleanValue: false } } },
-                ],
-              },
+              fieldFilter: { field: { fieldPath: 'recipient_username' }, op: 'EQUAL', value: { stringValue: username } },
             },
-            orderBy: [{ field: { fieldPath: 'created_at' }, direction: 'DESCENDING' }],
-            limit: 50,
+            limit: 200,
           },
         };
 
@@ -113,7 +106,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const results = await resp.json();
         const notifs = results
           .filter((r: any) => r.document)
-          .map((r: any) => fromDoc(r.document));
+          .map((r: any) => fromDoc(r.document))
+          .filter((n: any) => n.is_read === false)
+          .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
+          .slice(0, 50);
         return res.json(notifs);
       }
 
@@ -137,18 +133,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { username: user } = req.body;
         if (!user) return res.status(400).json({ error: 'username required' });
 
-        // First query unread docs for this user
+        // Query all docs for this user, filter is_read in code
         const query = {
           structuredQuery: {
             from: [{ collectionId: COLLECTION }],
             where: {
-              compositeFilter: {
-                op: 'AND',
-                filters: [
-                  { fieldFilter: { field: { fieldPath: 'recipient_username' }, op: 'EQUAL', value: { stringValue: user } } },
-                  { fieldFilter: { field: { fieldPath: 'is_read' }, op: 'EQUAL', value: { booleanValue: false } } },
-                ],
-              },
+              fieldFilter: { field: { fieldPath: 'recipient_username' }, op: 'EQUAL', value: { stringValue: user } },
             },
             limit: 200,
           },
@@ -158,7 +148,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           { method: 'POST', headers: fsHeaders(authToken), body: JSON.stringify(query) }
         );
         if (!qResp.ok) return res.status(500).json({ error: 'Query failed' });
-        const docs = (await qResp.json()).filter((r: any) => r.document);
+        const docs = (await qResp.json())
+          .filter((r: any) => r.document)
+          .filter((r: any) => fromDoc(r.document).is_read === false);
 
         // Batch update each to is_read=true
         await Promise.allSettled(
