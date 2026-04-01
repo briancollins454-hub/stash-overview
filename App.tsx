@@ -56,6 +56,8 @@ const ProfitabilityReport = lazyRetry(() => import('./components/ProfitabilityRe
 const ClubLeaderboard = lazyRetry(() => import('./components/ClubLeaderboard'));
 const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
 const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
+const CarrierPerformanceReport = lazyRetry(() => import('./components/CarrierPerformanceReport'));
+const BottleneckReport = lazyRetry(() => import('./components/BottleneckReport'));
 const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
 const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
@@ -1813,6 +1815,18 @@ const App: React.FC = () => {
                       settings={apiSettings}
                       physicalStock={physicalStock}
                       referenceProducts={referenceProducts}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Carrier Performance Error">
+                    <CarrierPerformanceReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Bottleneck Analysis Error">
+                    <BottleneckReport
+                      orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
                   </ErrorBoundary>
