@@ -58,6 +58,15 @@ const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
 const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
 const CarrierPerformanceReport = lazyRetry(() => import('./components/CarrierPerformanceReport'));
 const BottleneckReport = lazyRetry(() => import('./components/BottleneckReport'));
+const TrueCostReport = lazyRetry(() => import('./components/TrueCostReport'));
+const DecorationSpecViewer = lazyRetry(() => import('./components/DecorationSpecViewer'));
+const StaffWorkloadDashboard = lazyRetry(() => import('./components/StaffWorkloadDashboard'));
+const CompletionTracker = lazyRetry(() => import('./components/CompletionTracker'));
+const SupplierLeadTimeReport = lazyRetry(() => import('./components/SupplierLeadTimeReport'));
+const ProductionVelocityReport = lazyRetry(() => import('./components/ProductionVelocityReport'));
+const DecoNotesIntelligence = lazyRetry(() => import('./components/DecoNotesIntelligence'));
+const PaymentStatusSync = lazyRetry(() => import('./components/PaymentStatusSync'));
+const CapacityForecast = lazyRetry(() => import('./components/CapacityForecast'));
 const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
 const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
 const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
@@ -1826,6 +1835,60 @@ const App: React.FC = () => {
                   </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Bottleneck Analysis Error">
                     <BottleneckReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="True Cost Error">
+                    <TrueCostReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Decoration Specs Error">
+                    <DecorationSpecViewer
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Staff Workload Error">
+                    <StaffWorkloadDashboard
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Completion Tracker Error">
+                    <CompletionTracker
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Supplier Lead Time Error">
+                    <SupplierLeadTimeReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Production Velocity Error">
+                    <ProductionVelocityReport
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Deco Notes Error">
+                    <DecoNotesIntelligence
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Payment Sync Error">
+                    <PaymentStatusSync
+                      orders={unifiedOrders}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary fallbackTitle="Capacity Forecast Error">
+                    <CapacityForecast
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />

@@ -74,7 +74,14 @@ const parseDecoItems = (job: any): DecoItem[] => {
                     procurementStatus: wf.procurement_status || 0,
                     productionStatus: wf.production_status || 0,
                     shippingStatus: wf.shipping_status || 0,
-                    status: wf.shipping_status >= 80 ? 'Shipped' : (wf.production_status >= 80 ? 'Produced' : (wf.procurement_status >= 60 ? 'Awaiting Production' : 'Awaiting Stock'))
+                    status: wf.shipping_status >= 80 ? 'Shipped' : (wf.production_status >= 80 ? 'Produced' : (wf.procurement_status >= 60 ? 'Awaiting Production' : 'Awaiting Stock')),
+                    unitPrice: parseFloat(line.unit_price) || undefined,
+                    totalPrice: parseFloat(line.total_price) || undefined,
+                    decorationDetails: line.decoration_details || line.decorations || undefined,
+                    assignedTo: wf.assigned_to || wf.assigned_user || line.assigned_to || undefined,
+                    estimatedCompletion: wf.estimated_completion || wf.date_estimated || undefined,
+                    supplierId: line.vendor_id?.toString() || line.supplier_id?.toString() || undefined,
+                    supplierName: line.vendor_name || line.supplier_name || line.supplier || undefined,
                 });
             });
         } else {
@@ -90,11 +97,38 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 isShipped: (line.production_status || 0) >= 3,
                 procurementStatus: 60,
                 productionStatus: line.production_status >= 2 ? 80 : 20,
-                shippingStatus: line.production_status === 3 ? 80 : 0
+                shippingStatus: line.production_status === 3 ? 80 : 0,
+                unitPrice: parseFloat(line.unit_price) || undefined,
+                totalPrice: parseFloat(line.total_price) || undefined,
+                decorationDetails: line.decoration_details || line.decorations || undefined,
+                assignedTo: line.assigned_to || undefined,
+                supplierId: line.vendor_id?.toString() || line.supplier_id?.toString() || undefined,
+                supplierName: line.vendor_name || line.supplier_name || line.supplier || undefined,
             });
         }
     });
     return items;
+};
+
+const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
+    const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
+    return {
+        id: job.order_id.toString(), jobNumber: job.order_id.toString(),
+        poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job',
+        customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status),
+        dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled,
+        dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed,
+        itemsProduced: items.filter(i => i.isProduced).length, totalItems: items.length,
+        notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content || '').join(' | ') : '',
+        productCode: items[0]?.productCode || '', items,
+        orderTotal: parseFloat(job.total) || parseFloat(job.order_total) || undefined,
+        orderSubtotal: parseFloat(job.subtotal) || parseFloat(job.order_subtotal) || undefined,
+        orderTax: parseFloat(job.tax) || parseFloat(job.order_tax) || undefined,
+        paymentStatus: job.payment_status_name || job.payment_status?.toString() || undefined,
+        paymentMethod: job.payment_method || job.payment_type || undefined,
+        discount: parseFloat(job.discount) || parseFloat(job.discount_amount) || undefined,
+        couponCode: job.coupon_code || job.promo_code || undefined,
+    };
 };
 
 const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
@@ -250,8 +284,7 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
-        const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
-        return { id: job.order_id.toString(), jobNumber: job.order_id.toString(), poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job', customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status), dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled, dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed, itemsProduced: items.filter(i => i.isProduced).length, totalItems: items.length, notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content || '').join(' | ') : '', productCode: items[0]?.productCode || '', items };
+        return buildDecoJob(job, items);
     });
 };
 
@@ -268,8 +301,7 @@ export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): 
             const job = data.orders?.[0];
             if (job) {
                 const items = parseDecoItems(job);
-                const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
-                return { id: job.order_id.toString(), jobNumber: job.order_id.toString(), poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job', customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status), dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled, dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed, itemsProduced: items.filter(i => i.isProduced).length, totalItems: items.length, notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content).join(' | ') : '', productCode: items[0]?.productCode || '', items };
+                return buildDecoJob(job, items);
             }
         } catch (e) { }
     }
@@ -286,8 +318,7 @@ export const fetchBulkDecoJobs = async (settings: ApiSettings, jobIds: string[])
         return results.filter((r: any) => r.order).map((r: any) => {
             const job = r.order;
             const items = parseDecoItems(job);
-            const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
-            return { id: job.order_id.toString(), jobNumber: job.order_id.toString(), poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job', customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status), dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled, dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed, itemsProduced: items.filter((i: DecoItem) => i.isProduced).length, totalItems: items.length, notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content).join(' | ') : '', productCode: items[0]?.productCode || '', items };
+            return buildDecoJob(job, items);
         });
     } catch (e: any) {
         console.error('Bulk Deco fetch failed, falling back to individual:', e.message);

@@ -104,7 +104,7 @@ export interface DecoItem {
   vendorSku?: string;
   name: string;
   quantity: number;
-  ean?: string; // Added for GTIN/Barcode visibility
+  ean?: string;
   status?: string;
   isReceived: boolean;
   isProduced: boolean;
@@ -112,6 +112,14 @@ export interface DecoItem {
   procurementStatus: number;
   productionStatus: number;
   shippingStatus: number;
+  // Extended fields
+  unitPrice?: number;
+  totalPrice?: number;
+  decorationDetails?: string;
+  assignedTo?: string;
+  estimatedCompletion?: string;
+  supplierId?: string;
+  supplierName?: string;
 }
 
 export interface DecoJob {
@@ -120,7 +128,7 @@ export interface DecoJob {
   poNumber: string; 
   jobName: string;
   customerName: string;
-  status: string; // Changed to string for full API fidelity
+  status: string;
   dateOrdered?: string;
   productionDueDate: string;
   dateDue?: string;
@@ -130,6 +138,14 @@ export interface DecoJob {
   notes: string;
   productCode: string;
   items: DecoItem[];
+  // Extended fields
+  orderTotal?: number;
+  orderSubtotal?: number;
+  orderTax?: number;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  discount?: number;
+  couponCode?: string;
 }
 
 export type ProductionStatus = string;
