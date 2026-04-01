@@ -9,8 +9,8 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + i.sku + '</small>' : '';
   const eanHtml = i.ean && i.ean !== '-' ? '<br><small style="color:#888;font-size:8px;">EAN: ' + i.ean + '</small>' : '';
   const imgHtml = i.imageUrl
-    ? '<img src="' + i.imageUrl + '" style="width:32px;height:32px;object-fit:cover;" />'
-    : '';
+    ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:32px;height:32px;object-fit:cover;" /><div style="display:none;width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>'
+    : '<div style="width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>';
   const unitPrice = i.price ? parseFloat(i.price) : 0;
   const lineTotal = unitPrice * (i.quantity || 0);
   const qty = i.quantity || 0;
@@ -74,6 +74,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   const addrLines = addr
     ? [addr.name, addr.address1, addr.address2, [addr.city, addr.zip].filter(Boolean).join(' '), addr.country].filter(Boolean)
     : [];
+  const noAddressWarning = addrLines.length === 0
+    ? '<div style="background:#fef2f2;border:2px solid #dc2626;color:#dc2626;padding:6px 10px;font-weight:bold;font-size:12px;text-align:center;margin:4px 0;">\u26A0 NO SHIPPING ADDRESS ON FILE \u2014 Check Shopify / ShipStation</div>'
+    : '';
 
   const headerHtml =
     '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
@@ -193,6 +196,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
 
   const bodyHtml =
     (isRush ? '<div class="rush">\u26A1 RUSH ORDER \u26A1</div>' : '') +
+    noAddressWarning +
     headerHtml +
     orderHeadingHtml +
     countdownHtml +
