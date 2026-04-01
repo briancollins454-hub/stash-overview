@@ -308,6 +308,21 @@ export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): 
     return null;
 };
 
+// Search Deco jobs by customer name (billing name contains)
+export const searchDecoByName = async (settings: ApiSettings, name: string): Promise<DecoJob[]> => {
+    if (!settings.useLiveData || !name.trim()) return [];
+    // DecoNetwork manage_orders/find: field 5 = billing name, condition 2 = contains
+    try {
+        const params = { 'field': '5', 'condition': '2', 'string': name.trim(), 'criteria': name.trim(), 'limit': '10', 'include_workflow_data': '1', 'skip_login_token': '1' };
+        const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
+        const list = data.orders || [];
+        return list.map((job: any) => {
+            const items = parseDecoItems(job);
+            return buildDecoJob(job, items);
+        });
+    } catch (e) { return []; }
+};
+
 // Bulk fetch multiple Deco jobs by ID in a single server call
 export const fetchBulkDecoJobs = async (settings: ApiSettings, jobIds: string[]): Promise<DecoJob[]> => {
     if (!settings.useLiveData || jobIds.length === 0) return [];

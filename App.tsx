@@ -8,7 +8,7 @@ import { exportOrdersToCSV } from './services/exportService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
@@ -1159,6 +1159,138 @@ const App: React.FC = () => {
     setIsScanning(false);
   };
 
+  // Auto-link "Not On Deco" orders by matching customer names against cached Deco jobs + API search
+  const handleAutoLinkNotOnDeco = async () => {
+    if (isScanning) return;
+    const notOnDeco = unifiedOrders.filter(o => !o.decoJobId && o.shopify.fulfillmentStatus !== 'fulfilled');
+    if (notOnDeco.length === 0) return;
+
+    setIsScanning(true); setScanProgress(0); setScanLog([]); setShowScanConsole(true); stopScanRef.current = false;
+    setScanCount({ current: 0, total: notOnDeco.length });
+    setScanLog([{ id: 'start', message: `Auto-Link: Scanning ${notOnDeco.length} orders against ${rawDecoJobs.length} cached Deco jobs...`, type: 'info', timestamp: new Date().toLocaleTimeString() }]);
+
+    // Build name index from cached Deco jobs for fast lookup
+    const nameNorm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+    const decoByName = new Map<string, DecoJob[]>();
+    rawDecoJobs.forEach(j => {
+      const key = nameNorm(j.customerName);
+      if (key && key !== 'unknown') {
+        if (!decoByName.has(key)) decoByName.set(key, []);
+        decoByName.get(key)!.push(j);
+      }
+    });
+
+    let linked = 0;
+    let cacheHits = 0;
+    let apiHits = 0;
+    const needsApiSearch: typeof notOnDeco = [];
+
+    // Phase 1: Match against cached Deco jobs by customer name
+    for (let i = 0; i < notOnDeco.length; i++) {
+      if (stopScanRef.current) break;
+      const order = notOnDeco[i];
+      const shopifyName = nameNorm(order.shopify.customerName);
+      if (!shopifyName || shopifyName === 'guest') { needsApiSearch.push(order); continue; }
+
+      // Exact name match in cache
+      const cachedMatches = decoByName.get(shopifyName);
+      if (cachedMatches && cachedMatches.length > 0) {
+        // Pick the most recent unlinked job
+        const alreadyLinkedJobIds = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
+        const bestMatch = cachedMatches.find(j => !alreadyLinkedJobIds.has(j.jobNumber)) || cachedMatches[0];
+        handleManualJobLink(order.shopify.id, bestMatch.jobNumber);
+        linked++; cacheHits++;
+        setScanLog(prev => [...prev, { id: `cache-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${order.shopify.customerName} → Job #${bestMatch.jobNumber} (cache match)`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
+      } else {
+        // Also try partial / surname matching
+        const nameParts = shopifyName.split(' ');
+        const surname = nameParts[nameParts.length - 1];
+        let partialMatch: DecoJob | undefined;
+        if (surname.length >= 3) {
+          for (const [decoName, jobs] of decoByName.entries()) {
+            if (decoName.includes(surname) && decoName.includes(nameParts[0])) {
+              const alreadyLinkedJobIds = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
+              partialMatch = jobs.find(j => !alreadyLinkedJobIds.has(j.jobNumber)) || jobs[0];
+              break;
+            }
+          }
+        }
+        if (partialMatch) {
+          handleManualJobLink(order.shopify.id, partialMatch.jobNumber);
+          linked++; cacheHits++;
+          setScanLog(prev => [...prev, { id: `partial-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${order.shopify.customerName} → Job #${partialMatch!.jobNumber} (name match)`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
+        } else {
+          needsApiSearch.push(order);
+        }
+      }
+
+      setScanCount({ current: i + 1, total: notOnDeco.length });
+      setScanProgress(Math.round(((i + 1) / notOnDeco.length) * 100));
+    }
+
+    setScanLog(prev => [...prev, { id: 'phase1-done', message: `Phase 1 done: ${cacheHits} linked from cache. ${needsApiSearch.length} need Deco API search...`, type: 'info', timestamp: new Date().toLocaleTimeString() }]);
+
+    // Phase 2: Search Deco API by customer name for remaining unmatched orders
+    const alreadyLinked = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
+    const searchedNames = new Set<string>();
+
+    for (let i = 0; i < needsApiSearch.length; i += 3) {
+      if (stopScanRef.current) break;
+      const batch = needsApiSearch.slice(i, i + 3);
+
+      await Promise.all(batch.map(async (order) => {
+        const custName = order.shopify.customerName;
+        const normName = nameNorm(custName);
+        if (!normName || normName === 'guest' || searchedNames.has(normName)) return;
+        searchedNames.add(normName);
+
+        // Search by surname (more specific, fewer false positives)
+        const parts = custName.trim().split(/\s+/);
+        const searchTerm = parts.length > 1 ? parts[parts.length - 1] : custName;
+
+        try {
+          const results = await searchDecoByName(apiSettings, searchTerm);
+          if (results.length > 0) {
+            // Find best match by comparing full name
+            const exactMatch = results.find(j => nameNorm(j.customerName) === normName && !alreadyLinked.has(j.jobNumber));
+            const partialMatch = results.find(j => {
+              const dn = nameNorm(j.customerName);
+              return (dn.includes(normName) || normName.includes(dn)) && !alreadyLinked.has(j.jobNumber);
+            });
+            const match = exactMatch || partialMatch;
+            if (match) {
+              handleManualJobLink(order.shopify.id, match.jobNumber);
+              alreadyLinked.add(match.jobNumber);
+              // Also add to cache for future fast lookups
+              setRawDecoJobs(prev => {
+                const exists = prev.some(j => j.jobNumber === match.jobNumber);
+                if (exists) return prev;
+                return [...prev, match];
+              });
+              linked++; apiHits++;
+              setScanLog(prev => [...prev, { id: `api-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${custName} → Job #${match.jobNumber} (API match)`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
+            } else {
+              setScanLog(prev => [...prev, { id: `nomatch-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${custName} — ${results.length} Deco results, no name match`, type: 'warning', timestamp: new Date().toLocaleTimeString() }]);
+            }
+          } else {
+            setScanLog(prev => [...prev, { id: `none-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${custName} — No Deco jobs found`, type: 'warning', timestamp: new Date().toLocaleTimeString() }]);
+          }
+        } catch {
+          setScanLog(prev => [...prev, { id: `err-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${custName} — API error`, type: 'error', timestamp: new Date().toLocaleTimeString() }]);
+        }
+      }));
+
+      const done = notOnDeco.length - needsApiSearch.length + Math.min(i + 3, needsApiSearch.length);
+      setScanCount({ current: done, total: notOnDeco.length });
+      setScanProgress(Math.round((done / notOnDeco.length) * 100));
+
+      if (i + 3 < needsApiSearch.length) await new Promise(r => setTimeout(r, 1500)); // API throttle
+    }
+
+    setScanLog(prev => [...prev, { id: 'done', message: `✅ Auto-Link complete: ${linked} linked (${cacheHits} cache, ${apiHits} API). ${notOnDeco.length - linked} remain unlinked.`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
+    setIsScanning(false);
+  };
+
   const stats = useMemo(() => {
       let baseSet = unifiedOrders;
       if (!includeMto) baseSet = baseSet.filter(o => !o.isMto || o.hasStockItems);
@@ -1546,6 +1678,15 @@ const App: React.FC = () => {
                             </div>
                             <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'overdue10' ? null : 'overdue10'); }} className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:text-red-700 cursor-pointer transition-colors ${activeQuickFilter === 'overdue10' ? 'text-red-700 font-black' : 'text-gray-400'}`}>
                                 <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'overdue10' ? 'fill-red-700 text-red-700' : ''}`} /> 10+ DAYS ({stats.notOnDeco10Plus})
+                            </div>
+                            <div className="pt-1 border-t border-red-100 mt-1">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleAutoLinkNotOnDeco(); }}
+                                    disabled={isScanning || stats.notOnDeco === 0}
+                                    className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800 cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed w-full"
+                                >
+                                    {isScanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} Auto-Link All
+                                </button>
                             </div>
                         </div>
                     </StatsCard>
