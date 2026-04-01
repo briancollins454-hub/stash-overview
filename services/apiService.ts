@@ -107,10 +107,10 @@ const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<
 
         if (!response.ok) {
             const errData = await response.json().catch(() => ({}));
-            const msg = errData.message || errData.details || `Proxy failed with status ${response.status}`;
+            const msg = errData.error || errData.message || errData.details || `Proxy failed with status ${response.status}`;
             
-            // If it's a 504 (Gateway Timeout) or 429 (Too Many Requests), we should retry
-            if ((response.status === 504 || response.status === 429) && retries > 0) {
+            // If it's a 504 (Gateway Timeout), 500 (Server Error) or 429 (Too Many Requests), we should retry
+            if ((response.status === 504 || response.status === 500 || response.status === 429) && retries > 0) {
                 console.warn(`Server ${response.status} - Retrying... (${retries} left)`);
                 await delay(2000);
                 return fetchServerRoute(route, body, retries - 1);
@@ -150,7 +150,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     let pageCount = 0;
     
     const filterField = isDelta ? 'updated_at' : 'created_at';
-    const query = `query getOrders($cursor: String, $query: String) { orders(first: 250, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
         const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
