@@ -78,7 +78,7 @@ import {
     AlertTriangle, X, Calendar as CalendarIcon, Square, Package, ShoppingBag, 
     Boxes, CheckCircle2, Loader2, TrendingUp, Link2, ChevronDown, ArrowDownToLine, Percent,
     Zap, Store, LogOut, ShieldCheck, Download, Menu, Moon, Sun, Monitor,
-    Bell, BellRing, Kanban, MessageSquare, Truck
+    Bell, BellRing, Kanban, MessageSquare, Truck, BookOpen
 } from 'lucide-react';
 
 const getHolidayDateSet = (ranges: HolidayRange[] = []) => {
@@ -244,7 +244,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'users'];
+  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'users', 'manual'];
   const activeTab = validTabs.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'dashboard';
   const setActiveTab = useCallback((tab: string) => {
     setSearchParams(prev => {
@@ -1403,6 +1403,7 @@ const App: React.FC = () => {
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
                 <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); }} />
                 <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>
+                <button onClick={() => setActiveTab('manual')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'manual' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Instruction Manual"><BookOpen className="w-4 h-4" /></button>
                 <button onClick={() => setShowSettings(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Settings (⌘,)"><Settings className="w-4 h-4" /></button>
                 <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Toggle Dark Mode">
                   {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -1451,6 +1452,7 @@ const App: React.FC = () => {
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
+                        <button onClick={() => { setActiveTab('manual'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-4 h-4" /> Manual</button>
                         <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>
                         <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); setMobileMenuOpen(false); }} />
                         <button onClick={() => { signOut(); setMobileMenuOpen(false); }} className="text-red-300 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button>
@@ -1699,6 +1701,21 @@ const App: React.FC = () => {
             </Suspense>)}
             {activeTab === 'analyst' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Analyst Error"><ProcessAnalyst orders={unifiedOrders} /></ErrorBoundary></Suspense>}
             {activeTab === 'guide' && <ErrorBoundary fallbackTitle="Guide Error"><IntegrationGuide onComplete={() => setActiveTab('dashboard')} /></ErrorBoundary>}
+            {activeTab === 'manual' && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
+                <div className="flex items-center justify-between bg-gray-50 border-b border-gray-200 px-6 py-3">
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="w-5 h-5 text-indigo-600" />
+                    <h2 className="text-sm font-black uppercase tracking-widest text-gray-800">Instruction Manual</h2>
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-200">v4.0</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <a href="/INSTRUCTION_MANUAL.html" target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"><Download className="w-3.5 h-3.5" /> Open in New Tab</a>
+                  </div>
+                </div>
+                <iframe src="/INSTRUCTION_MANUAL.html" className="w-full border-0" style={{ height: 'calc(100% - 52px)' }} title="Instruction Manual" />
+              </div>
+            )}
 
             {/* Kanban Board */}
             {activeTab === 'kanban' && (
