@@ -19,7 +19,7 @@ const StatsCard: React.FC<StatsCardProps> = ({ title, value, trend, trendLabel, 
   return (
     <div 
         onClick={onClick}
-        className={`bg-white rounded-xl shadow-sm p-6 border transition-all duration-200 flex flex-col justify-between ${
+        className={`bg-white rounded-xl shadow-sm p-4 sm:p-5 lg:p-6 border transition-all duration-200 flex flex-col justify-between ${
             isActive 
             ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md' 
             : 'border-gray-100 hover:border-indigo-200'
@@ -35,7 +35,7 @@ const StatsCard: React.FC<StatsCardProps> = ({ title, value, trend, trendLabel, 
             }
           </div>
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-1">{value}</h3>
+        <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-1">{value}</h3>
       </div>
       
       <div className="space-y-3">

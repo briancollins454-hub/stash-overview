@@ -888,8 +888,8 @@ const OrderTable: React.FC<OrderTableProps> = ({
       )}
 
       {groupedOrders.length === 0 && (
-          <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-visible">
-            <div className="px-6 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center rounded-t-xl">
+          <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-3 sm:px-6 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center rounded-t-xl">
                <div className="flex items-center gap-2">
                    <h3 className="font-bold text-gray-800 uppercase tracking-widest">No Orders Found</h3>
                </div>
@@ -900,7 +900,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                    <RefreshCw className="w-3 h-3" /> Clear Filters
                </button>
             </div>
-            <div className="overflow-visible">
+            <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-white">
                     {renderHeaderRow('placeholder')}
@@ -921,14 +921,14 @@ const OrderTable: React.FC<OrderTableProps> = ({
          const isGroupSelected = ordersInGroup.length > 0 && ordersInGroup.every(o => selectedOrderIds.has(o.shopify.id));
          
          return (
-        <div key={groupName} className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-visible">
-          <div className="px-6 py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center rounded-t-xl">
+        <div key={groupName} className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-3 sm:px-6 py-3 sm:py-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center rounded-t-xl">
              <div className="flex items-center gap-2">
                  <h3 className="font-bold text-gray-800 uppercase tracking-widest">{groupName}</h3>
                  <span className="text-xs font-bold bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full uppercase tracking-widest">{ordersInGroup.length} Instances</span>
              </div>
           </div>
-          <div className="overflow-visible">
+          <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-white">
                 {renderHeaderRow(groupName, isGroupSelected, (e) => handleSelectGroup(ordersInGroup, e.target.checked))}

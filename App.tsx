@@ -1396,14 +1396,14 @@ const App: React.FC = () => {
         />
         <ScanConsoleModal isOpen={showScanConsole} onClose={() => setShowScanConsole(false)} isScanning={isScanning || isBulkRefreshing} progress={scanProgress} current={scanCount.current} total={scanCount.total} logs={scanLogs} onStop={() => stopScanRef.current = true} />
         
-        <nav className="bg-[#2d2d5f] text-white px-4 md:px-6 h-14 md:h-16 flex items-center justify-between sticky top-0 z-50 shadow-md">
-            <div className="flex items-center gap-2"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1></div>
+        <nav className="bg-[#2d2d5f] text-white px-3 sm:px-4 md:px-6 h-14 md:h-16 flex items-center justify-between sticky top-0 z-50 shadow-md">
+            <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1></div>
             
             {/* Mobile hamburger */}
-            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>
+            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>
             
             {/* Desktop nav */}
-            <div className="hidden md:flex items-center gap-1">
+            <div className="hidden lg:flex items-center gap-1 overflow-x-auto scrollbar-hide">
                 {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
@@ -1450,10 +1450,10 @@ const App: React.FC = () => {
         
         {/* Mobile menu overlay */}
         {mobileMenuOpen && (
-            <div className="md:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
-                <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-2" onClick={e => e.stopPropagation()}>
+            <div className="lg:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
+                <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-1 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                     {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
-                        <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
+                        <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
                         <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>
@@ -1464,8 +1464,8 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'dashboard' && (
-            <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-4 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-3 sm:py-4 shadow-sm space-y-3 sm:space-y-4">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                     <MultiSelectFilter 
                         title={groupingMode === 'club' ? "Filter Tags" : "Filter Vendors"} 
                         options={groupOptions} 
@@ -1474,18 +1474,18 @@ const App: React.FC = () => {
                         showZeroByDefault={true}
                     />
                     
-                    <div className="flex items-center border border-gray-300 rounded-lg bg-white overflow-hidden shadow-sm">
+                    <div className="flex items-center border border-gray-300 rounded-lg bg-white overflow-hidden shadow-sm flex-wrap sm:flex-nowrap">
                         <div className="px-3 py-2 border-r border-gray-200 bg-gray-50 flex items-center gap-2 cursor-pointer hover:bg-gray-100 transition-colors">
                             <span className="text-[10px] font-bold uppercase tracking-widest text-gray-600">Order Date</span>
                             <ChevronDown className="w-3 h-3 text-gray-400" />
                         </div>
-                        <div className="flex items-center px-3 gap-2">
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
-                            <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
+                        <div className="flex items-center px-2 sm:px-3 gap-1 sm:gap-2 flex-wrap sm:flex-nowrap">
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-[120px] sm:w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
+                            <CalendarIcon className="w-3.5 h-3.5 text-gray-400 hidden sm:block" />
                             <span className="text-gray-300 font-light">—</span>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
-                            <CalendarIcon className="w-3.5 h-3.5 text-gray-400" />
-                            {(startDate || endDate) && <button onClick={() => {setStartDate(''); setEndDate('')}} className="ml-2 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-red-500"><X className="w-3 h-3"/></button>}
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-[120px] sm:w-32 text-[11px] font-bold border-none focus:ring-0 p-0 bg-transparent uppercase text-gray-900" />
+                            <CalendarIcon className="w-3.5 h-3.5 text-gray-400 hidden sm:block" />
+                            {(startDate || endDate) && <button onClick={() => {setStartDate(''); setEndDate('')}} className="ml-1 sm:ml-2 p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-red-500"><X className="w-3 h-3"/></button>}
                         </div>
                     </div>
 
@@ -1501,15 +1501,15 @@ const App: React.FC = () => {
                         <Store className="w-3.5 h-3.5" /> 
                         {groupingMode === 'club' ? 'Group by Vendor' : 'Group by Club'}
                     </button>
-                    <div className="flex-1 min-w-[300px] relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" /><input type="text" placeholder="Search Orders, Job IDs, Customers..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold uppercase tracking-widest text-gray-900 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none" /></div>
-                    <div className="flex items-center gap-2">
-                        {loading && !isDeepSyncRunning && <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100 text-[10px] font-bold text-indigo-600 uppercase tracking-widest shadow-sm"><span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>{syncStatusMsg || 'SYNCING...'}</div>}
-                        {isDeepSyncRunning && <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] font-bold text-amber-700 uppercase tracking-widest shadow-sm"><Loader2 className="w-3.5 h-3.5 animate-spin" />{syncStatusMsg || 'DEEP SCANNING...'}</div>}
-                        {!loading && <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px] font-bold text-emerald-600 uppercase tracking-widest shadow-sm"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>{rawShopifyOrders.length} ARCHIVED</div>}
+                    <div className="flex-1 min-w-0 sm:min-w-[200px] relative"><Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" /><input type="text" placeholder="Search Orders, Job IDs, Customers..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold uppercase tracking-widest text-gray-900 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white outline-none" /></div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {loading && !isDeepSyncRunning && <div className="flex items-center gap-2 px-2 sm:px-3 py-2 bg-indigo-50 rounded-lg border border-indigo-100 text-[10px] font-bold text-indigo-600 uppercase tracking-widest shadow-sm"><span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>{syncStatusMsg || 'SYNCING...'}</div>}
+                        {isDeepSyncRunning && <div className="flex items-center gap-2 px-2 sm:px-3 py-2 bg-amber-50 rounded-lg border border-amber-200 text-[10px] font-bold text-amber-700 uppercase tracking-widest shadow-sm"><Loader2 className="w-3.5 h-3.5 animate-spin" />{syncStatusMsg || 'DEEP SCANNING...'}</div>}
+                        {!loading && <div className="flex items-center gap-2 px-2 sm:px-3 py-2 bg-emerald-50 rounded-lg border border-emerald-100 text-[10px] font-bold text-emerald-600 uppercase tracking-widest shadow-sm"><span className="w-2 h-2 rounded-full bg-emerald-500"></span>{rawShopifyOrders.length} ARCHIVED</div>}
                         
                         <div className="flex border border-gray-200 rounded-lg overflow-hidden shadow-sm bg-white">
-                            <button onClick={() => handleBulkStatusSync()} disabled={loading || isBulkRefreshing} className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest border-r border-gray-100 ${isBulkRefreshing ? 'bg-emerald-100 text-emerald-800' : 'text-emerald-600 hover:bg-emerald-50'}`}>
-                                <Zap className={`w-3.5 h-3.5 ${isBulkRefreshing ? 'animate-pulse' : ''}`} /> Status Refresh
+                            <button onClick={() => handleBulkStatusSync()} disabled={loading || isBulkRefreshing} className={`flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest border-r border-gray-100 ${isBulkRefreshing ? 'bg-emerald-100 text-emerald-800' : 'text-emerald-600 hover:bg-emerald-50'}`}>
+                                <Zap className={`w-3.5 h-3.5 ${isBulkRefreshing ? 'animate-pulse' : ''}`} /> <span className="hidden sm:inline">Status</span> Refresh
                             </button>
                             <button onClick={() => loadData(false)} title="Quick Sync: Last 120 days Shopify / 600 Deco Jobs" disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest border-r border-gray-100 text-gray-600 hover:bg-gray-50">
                                 <RefreshCw className={`w-3.5 h-3.5 ${loading && !isDeepSyncRunning ? 'animate-spin' : ''}`} /> Sync
@@ -1540,7 +1540,7 @@ const App: React.FC = () => {
                     onApplyView={handleApplyView}
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 pt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pt-4">
                     <StatsCard title="NOT ON DECO" value={stats.notOnDeco} icon={<AlertTriangle />} colorClass="bg-red-500" onClick={() => setActiveQuickFilter(prev => prev === 'missing_po' ? null : 'missing_po')} isActive={activeQuickFilter === 'missing_po'}>
                         <div className="space-y-1.5 pt-1">
                             <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'overdue5' ? null : 'overdue5'); }} className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:text-red-700 cursor-pointer transition-colors ${activeQuickFilter === 'overdue5' ? 'text-red-700 font-black' : 'text-gray-400'}`}>
@@ -1629,7 +1629,7 @@ const App: React.FC = () => {
             </div>
         )}
 
-        <main className="flex-1 p-4 md:p-8 max-w-[1600px] mx-auto w-full">
+        <main className="flex-1 p-2 sm:p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto w-full">
             {activeTab === 'dashboard' && (
               <OrderTable 
                 orders={tableOrders} 
