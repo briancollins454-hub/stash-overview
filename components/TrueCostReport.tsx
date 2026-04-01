@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { UnifiedOrder } from '../types';
-import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ChevronDown, ChevronUp, BarChart3, Filter } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, ChevronDown, ChevronUp, BarChart3, Filter, HelpCircle } from 'lucide-react';
 
 interface Props {
   orders: UnifiedOrder[];
@@ -13,13 +13,14 @@ interface OrderCost {
   orderNumber: string;
   customerName: string;
   shopifyRevenue: number;
-  decoCost: number;
+  decoCost: number | null; // null = Deco cost unknown
   shippingCost: number;
-  profit: number;
-  margin: number;
+  profit: number | null; // null = can't calculate without Deco cost
+  margin: number | null;
   itemCount: number;
   discrepancies: Array<{ item: string; shopifyPrice: number; decoPrice: number; diff: number }>;
   date: string;
+  decoJobId?: string;
 }
 
 const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
@@ -42,10 +43,11 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
       if (!o.deco) continue;
 
       const shopifyRevenue = parseFloat(o.shopify.totalPrice) || 0;
-      const decoCost = o.deco.orderTotal ?? o.deco.orderSubtotal ?? 0;
+      const rawDecoCost = o.deco.orderTotal ?? o.deco.orderSubtotal ?? null;
+      const decoCost = rawDecoCost !== null && rawDecoCost > 0 ? rawDecoCost : null;
       const shippingCost = o.shipStationTracking?.shippingCost ?? (parseFloat(o.shopify.shippingCost || '0'));
-      const profit = shopifyRevenue - decoCost - shippingCost;
-      const margin = shopifyRevenue > 0 ? (profit / shopifyRevenue) * 100 : 0;
+      const profit = decoCost !== null ? shopifyRevenue - decoCost - shippingCost : null;
+      const margin = profit !== null && shopifyRevenue > 0 ? (profit / shopifyRevenue) * 100 : null;
 
       // Find price discrepancies between Shopify and Deco items
       const discrepancies: OrderCost['discrepancies'] = [];
@@ -79,13 +81,14 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
         itemCount: o.shopify.items.length,
         discrepancies,
         date: o.shopify.date,
+        decoJobId: o.deco.id,
       });
     }
 
     // Sort
     results.sort((a, b) => {
-      if (sortBy === 'margin') return a.margin - b.margin;
-      if (sortBy === 'profit') return a.profit - b.profit;
+      if (sortBy === 'margin') return (a.margin ?? 999) - (b.margin ?? 999);
+      if (sortBy === 'profit') return (a.profit ?? 999) - (b.profit ?? 999);
       if (sortBy === 'revenue') return b.shopifyRevenue - a.shopifyRevenue;
       if (sortBy === 'discrepancy') return b.discrepancies.length - a.discrepancies.length;
       return 0;
@@ -94,21 +97,23 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
     const filtered = showOnlyDiscrepancies ? results.filter(r => r.discrepancies.length > 0) : results;
 
     const totalRevenue = results.reduce((s, r) => s + r.shopifyRevenue, 0);
-    const totalCost = results.reduce((s, r) => s + r.decoCost, 0);
+    const withCost = results.filter(r => r.decoCost !== null);
+    const totalCost = withCost.reduce((s, r) => s + (r.decoCost || 0), 0);
     const totalShipping = results.reduce((s, r) => s + r.shippingCost, 0);
-    const totalProfit = results.reduce((s, r) => s + r.profit, 0);
-    const avgMargin = results.length > 0 ? results.reduce((s, r) => s + r.margin, 0) / results.length : 0;
-    const unprofitable = results.filter(r => r.profit < 0).length;
+    const totalProfit = withCost.reduce((s, r) => s + (r.profit || 0), 0);
+    const avgMargin = withCost.length > 0 ? withCost.reduce((s, r) => s + (r.margin || 0), 0) / withCost.length : null;
+    const unprofitable = results.filter(r => r.profit !== null && r.profit < 0).length;
     const discrepancyCount = results.filter(r => r.discrepancies.length > 0).length;
+    const costDataPct = results.length > 0 ? Math.round((withCost.length / results.length) * 100) : 0;
 
     return {
       costData: filtered,
-      summary: { totalRevenue, totalCost, totalShipping, totalProfit, avgMargin, unprofitable, discrepancyCount, total: results.length }
+      summary: { totalRevenue, totalCost, totalShipping, totalProfit, avgMargin, unprofitable, discrepancyCount, total: results.length, withCostCount: withCost.length, costDataPct }
     };
   }, [orders, period, sortBy, showOnlyDiscrepancies]);
 
   const fmt = (n: number) => `£${n.toFixed(2)}`;
-  const hasCostData = costData.some(c => c.decoCost > 0);
+  const hasData = costData.length > 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700">
@@ -147,11 +152,11 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
         </div>
       </div>
 
-      {!hasCostData ? (
+      {!hasData ? (
         <div className="p-12 text-center">
           <DollarSign className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <p className="text-gray-500 dark:text-gray-400 font-medium">No cost data available yet</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Cost data appears when DecoNetwork orders include pricing fields</p>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">No Deco-linked orders found</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Link orders to DecoNetwork to see profitability analysis</p>
         </div>
       ) : (
         <>
@@ -163,19 +168,29 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
               <p className="text-xs text-blue-500 dark:text-blue-400 mt-1">{summary.total} orders</p>
             </div>
             <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4">
-              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Total Deco Cost</p>
-              <p className="text-xl font-bold text-amber-900 dark:text-amber-100">{fmt(summary.totalCost)}</p>
-              <p className="text-xs text-amber-500 dark:text-amber-400 mt-1">+ {fmt(summary.totalShipping)} shipping</p>
+              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Deco Cost Data</p>
+              {summary.withCostCount > 0 ? (
+                <><p className="text-xl font-bold text-amber-900 dark:text-amber-100">{fmt(summary.totalCost)}</p>
+                <p className="text-xs text-amber-500 dark:text-amber-400 mt-1">{summary.withCostCount}/{summary.total} orders · + {fmt(summary.totalShipping)} shipping</p></>
+              ) : (
+                <><p className="text-xl font-bold text-amber-900 dark:text-amber-100 flex items-center gap-1"><HelpCircle className="w-4 h-4" /> Unavailable</p>
+                <p className="text-xs text-amber-500 dark:text-amber-400 mt-1">Deco API not returning cost fields</p></>
+              )}
             </div>
-            <div className={`rounded-xl p-4 ${summary.totalProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-              <p className={`text-xs font-medium ${summary.totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>Net Profit</p>
-              <p className={`text-xl font-bold ${summary.totalProfit >= 0 ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100'}`}>{fmt(summary.totalProfit)}</p>
-              <p className={`text-xs mt-1 ${summary.totalProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>Avg margin: {summary.avgMargin.toFixed(1)}%</p>
+            <div className={`rounded-xl p-4 ${summary.withCostCount === 0 ? 'bg-gray-50 dark:bg-gray-700/30' : summary.totalProfit >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+              <p className={`text-xs font-medium ${summary.withCostCount === 0 ? 'text-gray-500' : summary.totalProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>Net Profit</p>
+              {summary.withCostCount > 0 ? (
+                <><p className={`text-xl font-bold ${summary.totalProfit >= 0 ? 'text-emerald-900 dark:text-emerald-100' : 'text-red-900 dark:text-red-100'}`}>{fmt(summary.totalProfit)}</p>
+                <p className={`text-xs mt-1 ${summary.totalProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>Avg margin: {summary.avgMargin?.toFixed(1) ?? '—'}%</p></>
+              ) : (
+                <><p className="text-xl font-bold text-gray-400">—</p>
+                <p className="text-xs text-gray-400 mt-1">Needs Deco cost data</p></>
+              )}
             </div>
-            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4">
-              <p className="text-xs text-red-600 dark:text-red-400 font-medium">Alerts</p>
-              <p className="text-xl font-bold text-red-900 dark:text-red-100">{summary.unprofitable}</p>
-              <p className="text-xs text-red-500 dark:text-red-400 mt-1">unprofitable · {summary.discrepancyCount} price gaps</p>
+            <div className="bg-gray-50 dark:bg-gray-700/30 rounded-xl p-4">
+              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Shipping Costs</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmt(summary.totalShipping)}</p>
+              <p className="text-xs text-gray-400 mt-1">{summary.discrepancyCount} price gaps · {summary.unprofitable} unprofitable</p>
             </div>
           </div>
 
@@ -202,12 +217,12 @@ const TrueCostReport: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
                       )}
                     </div>
                     <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{fmt(row.shopifyRevenue)}</span>
-                    <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{fmt(row.decoCost)}</span>
-                    <span className={`text-sm font-mono font-semibold ${row.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {row.profit >= 0 ? '+' : ''}{fmt(row.profit)}
+                    <span className="text-sm text-gray-700 dark:text-gray-300 font-mono">{row.decoCost !== null ? fmt(row.decoCost) : <span className="text-gray-400">—</span>}</span>
+                    <span className={`text-sm font-mono font-semibold ${row.profit === null ? 'text-gray-400' : row.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      {row.profit !== null ? `${row.profit >= 0 ? '+' : ''}${fmt(row.profit)}` : '—'}
                     </span>
-                    <span className={`text-sm font-mono ${row.margin >= 20 ? 'text-emerald-600' : row.margin >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
-                      {row.margin.toFixed(1)}%
+                    <span className={`text-sm font-mono ${row.margin === null ? 'text-gray-400' : row.margin >= 20 ? 'text-emerald-600' : row.margin >= 0 ? 'text-amber-600' : 'text-red-600'}`}>
+                      {row.margin !== null ? `${row.margin.toFixed(1)}%` : '—'}
                     </span>
                     {expandedOrder === row.orderNumber ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
                   </button>
