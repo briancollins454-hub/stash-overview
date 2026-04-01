@@ -9,7 +9,7 @@ import { fulfillShopifyOrder } from './services/fulfillmentService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
@@ -333,32 +333,7 @@ const App: React.FC = () => {
             if (missingIds.length > 0) {
                 setSyncStatusMsg(`Syncing ${missingIds.length} missing jobs...`);
                 
-                const concurrency = 5;
-                let completed = 0;
-                const newFetchedJobs: DecoJob[] = [];
-
-                for (let i = 0; i < missingIds.length; i += concurrency) {
-                    const batch = missingIds.slice(i, i + concurrency);
-                    setSyncStatusMsg(`Syncing Jobs (${completed + 1}-${Math.min(completed + batch.length, missingIds.length)} of ${missingIds.length})...`);
-                    
-                    const results = await Promise.all(batch.map(async (id) => {
-                        try {
-                            return await fetchSingleDecoJob(apiSettings, id);
-                        } catch (e: any) {
-                            console.error(`Error fetching job ${id}:`, e);
-                            return null;
-                        }
-                    }));
-
-                    results.forEach(job => {
-                        if (job && job.jobNumber) newFetchedJobs.push(job);
-                    });
-
-                    completed += batch.length;
-                    if (i + concurrency < missingIds.length) {
-                        await new Promise(r => setTimeout(r, 200));
-                    }
-                }
+                const newFetchedJobs = await fetchBulkDecoJobs(apiSettings, missingIds);
 
                 if (newFetchedJobs.length > 0) {
                     setRawDecoJobs(prev => {

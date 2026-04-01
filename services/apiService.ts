@@ -2,10 +2,7 @@ import { DecoJob, ShopifyOrder, DecoItem } from '../types';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
 
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-let lastRequestTime = 0;
-const PROXY_THROTTLE_MS = 200; 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
 
 // In-memory cache for single job fetches to speed up repeated lookups
 const decoJobCache = new Map<string, { job: DecoJob | null, timestamp: number }>();
@@ -101,11 +98,6 @@ const parseDecoItems = (job: any): DecoItem[] => {
 };
 
 const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
-    const now = Date.now();
-    const wait = PROXY_THROTTLE_MS - (now - lastRequestTime);
-    if (wait > 0) await delay(wait);
-    lastRequestTime = Date.now();
-
     try {
         const response = await fetch(route, {
             method: 'POST',
@@ -158,7 +150,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     let pageCount = 0;
     
     const filterField = isDelta ? 'updated_at' : 'created_at';
-    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+    const query = `query getOrders($cursor: String, $query: String) { orders(first: 250, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
         const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
@@ -244,8 +236,8 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     const minDate = new Date(); minDate.setDate(minDate.getDate() - lookback);
     const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
     let allDeco: any[] = []; let offset = 0; let hasMore = true;
-    const BATCH_SIZE = 100;
-    const MAX_JOBS = isDeepSync ? 1500 : 600; // Increased to cover more history
+    const BATCH_SIZE = 250;
+    const MAX_JOBS = isDeepSync ? 1500 : 600;
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
@@ -254,7 +246,7 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
-        else { offset += list.length; await delay(400); }
+        else { offset += list.length; await delay(100); }
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
@@ -280,9 +272,33 @@ export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): 
                 return { id: job.order_id.toString(), jobNumber: job.order_id.toString(), poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job', customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status), dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled, dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed, itemsProduced: items.filter(i => i.isProduced).length, totalItems: items.length, notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content).join(' | ') : '', productCode: items[0]?.productCode || '', items };
             }
         } catch (e) { }
-        if (i < fields.length - 1) await delay(200); // Small delay between field attempts if not found
     }
     return null;
+};
+
+// Bulk fetch multiple Deco jobs by ID in a single server call
+export const fetchBulkDecoJobs = async (settings: ApiSettings, jobIds: string[]): Promise<DecoJob[]> => {
+    if (!settings.useLiveData || jobIds.length === 0) return [];
+    try {
+        const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds });
+        const json = await res.json();
+        const results = json.results || [];
+        return results.filter((r: any) => r.order).map((r: any) => {
+            const job = r.order;
+            const items = parseDecoItems(job);
+            const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
+            return { id: job.order_id.toString(), jobNumber: job.order_id.toString(), poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job', customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status), dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled, dateDue: job.date_due, dateShipped: job.date_shipped || job.date_completed, itemsProduced: items.filter((i: DecoItem) => i.isProduced).length, totalItems: items.length, notes: Array.isArray(job.notes) ? job.notes.map((n: any) => n.content).join(' | ') : '', productCode: items[0]?.productCode || '', items };
+        });
+    } catch (e: any) {
+        console.error('Bulk Deco fetch failed, falling back to individual:', e.message);
+        // Fallback to individual fetches
+        const results: DecoJob[] = [];
+        for (const id of jobIds) {
+            const job = await fetchSingleDecoJob(settings, id);
+            if (job) results.push(job);
+        }
+        return results;
+    }
 };
 
 export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: string): Promise<ShopifyOrder | null> => {

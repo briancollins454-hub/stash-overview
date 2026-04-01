@@ -15,7 +15,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Deco credentials not configured on server' });
   }
 
-  const { endpoint, params } = req.body || {};
+  const { action, endpoint, params, jobIds } = req.body || {};
+
+  // Bulk fetch: fetch multiple jobs by ID in parallel on the server
+  if (action === 'bulk' && Array.isArray(jobIds)) {
+    try {
+      const PARALLEL = 10;
+      const allResults: any[] = [];
+      
+      for (let i = 0; i < jobIds.length; i += PARALLEL) {
+        const batch = jobIds.slice(i, i + PARALLEL);
+        const promises = batch.map(async (jobId: string) => {
+          const fields = ['1', '2', '7'];
+          for (const field of fields) {
+            try {
+              const qp = new URLSearchParams();
+              qp.append('username', username);
+              qp.append('password', password);
+              qp.append('field', field);
+              qp.append('condition', '1');
+              qp.append('string', String(jobId).trim());
+              qp.append('criteria', String(jobId).trim());
+              qp.append('limit', '1');
+              qp.append('include_workflow_data', '1');
+              qp.append('skip_login_token', '1');
+              const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+              const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+              const data = await resp.json();
+              const order = data.orders?.[0];
+              if (order) return { jobId, order };
+            } catch { }
+          }
+          return { jobId, order: null };
+        });
+        const results = await Promise.all(promises);
+        allResults.push(...results);
+      }
+      
+      return res.status(200).json({ results: allResults });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Bulk fetch failed', details: error.message });
+    }
+  }
 
   if (!endpoint || typeof endpoint !== 'string') {
     return res.status(400).json({ error: 'endpoint is required' });
