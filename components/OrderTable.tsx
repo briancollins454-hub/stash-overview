@@ -1,7 +1,7 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { UnifiedOrder, DecoJob } from '../types';
-import { isEligibleForMapping } from '../services/apiService';
-import { getTrackingUrl } from '../services/shipstationService';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { UnifiedOrder, DecoJob, ApiSettings } from '../types';
+import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
+import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
 import { 
     AlertCircle, Truck, Clock, AlertTriangle, Package, CheckCircle2, 
     ChevronDown, ChevronUp, ShoppingBag, ArrowUpDown, ExternalLink, 
@@ -51,6 +51,7 @@ export interface OrderTableProps {
     confirmedMatches?: Record<string, string>;
     onOpenNotes?: (orderId: string, orderNumber: string) => void;
     noteCounts?: Record<string, number>;
+    settings?: ApiSettings;
 }
 
 // --- Helper Components ---
@@ -143,7 +144,7 @@ function guessProductionMethod(name: string, sku: string): string {
 
 const OrderTable: React.FC<OrderTableProps> = ({ 
     orders, excludedTags, sortOption, onSortChange, shopifyDomain, onTimelineScan, onBulkScan, onPabblySync, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, onManualLink, onNavigateToJob, onItemJobLink, isBulkScanning, scanProgress, scanCount,
-    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts
+    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts, settings
 }) => {
   const [mappingModalOpen, setMappingModalOpen] = useState(false);
   const [ordersForMapping, setOrdersForMapping] = useState<UnifiedOrder[]>([]);
@@ -166,6 +167,43 @@ const OrderTable: React.FC<OrderTableProps> = ({
       shopifyStatuses: new Set(),
       productionStatuses: new Set()
   });
+
+  // Enrich order with fresh Shopify data before printing if image/address is missing
+  const enrichForPrint = useCallback(async (o: UnifiedOrder): Promise<UnifiedOrder> => {
+    const missingImages = o.shopify.items.some(i => !i.imageUrl);
+    const missingAddress = !o.shopify.shippingAddress;
+    if (!missingImages && !missingAddress) return o;
+    let enriched = o;
+    // Try fresh Shopify fetch for missing images or address
+    if (settings && (missingImages || missingAddress)) {
+      try {
+        const fresh = await fetchSingleShopifyOrder(settings, o.shopify.id);
+        if (fresh) {
+          const mergedItems = enriched.shopify.items.map(item => {
+            if (item.imageUrl) return item;
+            const freshItem = fresh.items.find(fi => fi.id === item.id);
+            return freshItem?.imageUrl ? { ...item, imageUrl: freshItem.imageUrl } : item;
+          });
+          enriched = { ...enriched, shopify: { ...enriched.shopify, items: mergedItems, shippingAddress: enriched.shopify.shippingAddress || fresh.shippingAddress } };
+        }
+      } catch { /* fall through */ }
+    }
+    // ShipStation fallback for address
+    if (!enriched.shopify.shippingAddress && settings) {
+      try {
+        const ss = await fetchShipStationOrder(settings, o.shopify.orderNumber);
+        if (ss?.shipTo) {
+          enriched = { ...enriched, shopify: { ...enriched.shopify, shippingAddress: {
+            name: ss.shipTo.name || '', address1: ss.shipTo.street1 || '',
+            address2: ss.shipTo.street2 || '', city: ss.shipTo.city || '',
+            province: ss.shipTo.state || '', zip: ss.shipTo.postalCode || '',
+            country: ss.shipTo.country || '', phone: ss.shipTo.phone || ''
+          }}};
+        }
+      } catch { /* fall through */ }
+    }
+    return enriched;
+  }, [settings]);
 
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
 
@@ -669,9 +707,10 @@ const OrderTable: React.FC<OrderTableProps> = ({
                 Export
               </button>
               <button 
-                  onClick={() => {
+                  onClick={async () => {
                     const selected = orders.filter(o => selectedOrderIds.has(o.shopify.id));
-                    printOrderSheets(selected);
+                    const enriched = await Promise.all(selected.map(enrichForPrint));
+                    printOrderSheets(enriched);
                   }}
                   className="text-xs hover:text-white text-indigo-200 font-bold flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors uppercase tracking-widest"
               >
@@ -1163,9 +1202,10 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                         )}
                                         
                                         <button
-                                            onClick={(e) => {
+                                            onClick={async (e) => {
                                                 e.stopPropagation();
-                                                printOrderSheet(order);
+                                                const enriched = await enrichForPrint(order);
+                                                printOrderSheet(enriched);
                                             }}
                                             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-50 text-gray-700 rounded border border-gray-200 font-bold text-[10px] hover:bg-gray-100 uppercase tracking-widest mt-2 transition-colors"
                                         >

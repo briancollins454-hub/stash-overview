@@ -686,19 +686,27 @@ const App: React.FC = () => {
                 setReferenceProducts(cloudData.referenceProducts || []);
                 setMissingCloudTables(cloudData.missingTables || []);
                 if (cloudData.orders && cloudData.orders.length > 0) {
-                    // Merge cloud orders with local cache, preferring whichever has more complete data
+                    // Merge cloud orders with local cache, preserving the most complete data from each source
                     const orderMap = new Map<string, ShopifyOrder>();
                     initialOrders.forEach(o => orderMap.set(o.id, o));
                     cloudData.orders.forEach(o => {
                         const existing = orderMap.get(o.id);
                         if (!existing) {
                             orderMap.set(o.id, o);
-                        } else if (!existing.shippingAddress && o.shippingAddress) {
-                            orderMap.set(o.id, o);
-                        } else if (existing.shippingAddress && !o.shippingAddress) {
-                            // keep existing — it has address data
-                        } else if (new Date(o.updatedAt) > new Date(existing.updatedAt)) {
-                            orderMap.set(o.id, o);
+                        } else {
+                            // Field-level merge: keep the version with more complete data, but always preserve populated fields
+                            const winner = new Date(o.updatedAt) > new Date(existing.updatedAt) ? o : existing;
+                            const loser = winner === o ? existing : o;
+                            const mergedItems = winner.items.map(item => {
+                                if (item.imageUrl) return item;
+                                const match = loser.items.find(li => li.id === item.id);
+                                return match?.imageUrl ? { ...item, imageUrl: match.imageUrl } : item;
+                            });
+                            orderMap.set(o.id, {
+                                ...winner,
+                                items: mergedItems,
+                                shippingAddress: winner.shippingAddress || loser.shippingAddress
+                            });
                         }
                     });
                     initialOrders = Array.from(orderMap.values());
@@ -1778,6 +1786,7 @@ const App: React.FC = () => {
                 excludedTags={excludedTags} 
                 groupingMode={groupingMode}
                 shopifyDomain={apiSettings.shopifyDomain} 
+                settings={apiSettings}
                 onOpenNotes={openNotes}
                 noteCounts={noteCounts} 
                 onConfirmMatch={(i, d) => handleBulkConfirmMatch([{itemKey: i, decoId: d}])} 
