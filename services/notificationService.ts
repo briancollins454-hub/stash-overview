@@ -1,5 +1,5 @@
 // ─── Notification Service ──────────────────────────────────────────────────
-// Stores notifications in Supabase so @mentioned users see them on ANY device.
+// Stores notifications in Firebase Firestore so @mentioned users see them on ANY device.
 
 export interface AppNotification {
   id: string;
@@ -28,8 +28,7 @@ export async function createMentionNotifications(params: {
   const preview = messageText.length > 120 ? messageText.slice(0, 120) + '…' : messageText;
   const now = new Date().toISOString();
 
-  const rows = mentions.map(username => ({
-    id: `notif-${Date.now()}-${username}-${Math.random().toString(36).slice(2, 6)}`,
+  const notifications = mentions.map(username => ({
     recipient_username: username,
     sender_name: senderName,
     order_id: orderId,
@@ -41,15 +40,10 @@ export async function createMentionNotifications(params: {
   }));
 
   try {
-    await fetch('/api/supabase-data', {
+    await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: 'stash_notifications',
-        method: 'POST',
-        body: rows,
-        prefer: 'return=minimal',
-      }),
+      body: JSON.stringify({ action: 'create', notifications }),
     });
   } catch (e) {
     console.error('Failed to create mention notifications:', e);
@@ -59,13 +53,10 @@ export async function createMentionNotifications(params: {
 // ─── Fetch unread notifications for a user ─────────────────────────────────
 export async function fetchUnreadNotifications(username: string): Promise<AppNotification[]> {
   try {
-    const resp = await fetch('/api/supabase-data', {
+    const resp = await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `stash_notifications?recipient_username=eq.${encodeURIComponent(username)}&is_read=eq.false&order=created_at.desc&limit=50`,
-        method: 'GET',
-      }),
+      body: JSON.stringify({ action: 'list', username }),
     });
     if (!resp.ok) return [];
     const data = await resp.json();
@@ -78,14 +69,10 @@ export async function fetchUnreadNotifications(username: string): Promise<AppNot
 // ─── Mark a single notification as read ────────────────────────────────────
 export async function markNotificationRead(notifId: string): Promise<void> {
   try {
-    await fetch('/api/supabase-data', {
+    await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `stash_notifications?id=eq.${encodeURIComponent(notifId)}`,
-        method: 'PATCH',
-        body: { is_read: true },
-      }),
+      body: JSON.stringify({ action: 'mark_read', notifId }),
     });
   } catch (e) {
     console.error('Failed to mark notification read:', e);
@@ -95,14 +82,10 @@ export async function markNotificationRead(notifId: string): Promise<void> {
 // ─── Mark all notifications as read for a user ─────────────────────────────
 export async function markAllNotificationsRead(username: string): Promise<void> {
   try {
-    await fetch('/api/supabase-data', {
+    await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: `stash_notifications?recipient_username=eq.${encodeURIComponent(username)}&is_read=eq.false`,
-        method: 'PATCH',
-        body: { is_read: true },
-      }),
+      body: JSON.stringify({ action: 'mark_all_read', username }),
     });
   } catch (e) {
     console.error('Failed to mark all notifications read:', e);
