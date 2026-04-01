@@ -8,6 +8,8 @@ export interface OrderNote {
   author: string;
   createdAt: number;
   updatedAt: number;
+  priority?: string;
+  pinned?: boolean;
 }
 
 const STORAGE_KEY = 'stash_order_notes';

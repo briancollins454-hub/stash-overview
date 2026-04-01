@@ -59,6 +59,9 @@ const LateOrderReport = lazyRetry(() => import('./components/LateOrderReport'));
 const EanCoverageReport = lazyRetry(() => import('./components/EanCoverageReport'));
 const ArtworkApprovalTracker = lazyRetry(() => import('./components/ArtworkApprovalTracker'));
 const ShippingManager = lazyRetry(() => import('./components/ShippingManager'));
+const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard'));
+const AutoJobLinker = lazyRetry(() => import('./components/AutoJobLinker'));
+const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment'));
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import OrderWidget from './components/OrderWidget';
@@ -92,7 +95,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, logout: signOut } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations'];
+  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill'];
   const activeTab = validTabs.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'dashboard';
   const setActiveTab = useCallback((tab: string) => {
     setSearchParams(prev => {
@@ -1292,7 +1295,7 @@ const App: React.FC = () => {
             
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-1">
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
@@ -1340,7 +1343,7 @@ const App: React.FC = () => {
         {mobileMenuOpen && (
             <div className="md:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-2" onClick={e => e.stopPropagation()}>
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }].map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
@@ -1742,6 +1745,70 @@ const App: React.FC = () => {
                     />
                   </ErrorBoundary>
                 </div>
+              </Suspense>
+            )}
+
+            {/* Revenue Dashboard Tab */}
+            {activeTab === 'revenue' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Revenue Dashboard Error">
+                  <RevenueDashboard
+                    orders={unifiedOrders}
+                    onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Auto Job Linker Tab */}
+            {activeTab === 'autolink' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Auto Linker Error">
+                  <AutoJobLinker
+                    orders={unifiedOrders}
+                    decoJobs={rawDecoJobs}
+                    settings={apiSettings}
+                    itemJobLinks={itemJobLinks}
+                    onLink={(orderNumber, itemId, jobId) => {
+                      setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId }));
+                      saveCloudJobLink(apiSettings, itemId, jobId);
+                      handleRefreshJob(jobId);
+                    }}
+                    onBulkLink={(links) => {
+                      setItemJobLinks((prev: Record<string, string>) => {
+                        const next = { ...prev };
+                        links.forEach(l => { next[l.itemId] = l.jobId; });
+                        return next;
+                      });
+                      links.forEach(l => saveCloudJobLink(apiSettings, l.itemId, l.jobId));
+                    }}
+                    onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Batch Fulfillment Tab */}
+            {activeTab === 'fulfill' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Batch Fulfillment Error">
+                  <BatchFulfillment
+                    orders={unifiedOrders}
+                    settings={apiSettings}
+                    onFulfilled={async (orderId) => {
+                      const numericId = orderId.includes('/') ? orderId : `gid://shopify/Order/${orderId}`;
+                      const updated = await fetchSingleShopifyOrder(apiSettings, numericId);
+                      if (updated) {
+                        setRawShopifyOrders(prev => {
+                          const map = new Map(prev.map(o => [o.id, o]));
+                          map.set(updated.id, updated);
+                          return Array.from(map.values());
+                        });
+                      }
+                    }}
+                    onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
               </Suspense>
             )}
         </main>
