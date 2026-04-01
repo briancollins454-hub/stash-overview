@@ -130,13 +130,19 @@ async function firestoreUpdate(docId: string, updates: Record<string, any>): Pro
 // ─── Firebase ID Token Verification ────────────────────────────────────────
 async function verifyFirebaseIdToken(idToken: string): Promise<{ email: string } | null> {
   try {
-    const resp = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    // Use Firebase Auth REST API to verify the ID token and get user info
+    const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    });
     if (!resp.ok) return null;
     const data = await resp.json();
-    if (!data.email) return null;
-    const domain = data.email.split('@')[1]?.toLowerCase();
+    const user = data.users?.[0];
+    if (!user?.email) return null;
+    const domain = user.email.split('@')[1]?.toLowerCase();
     if (domain !== 'marxcorporate.com' && domain !== 'stashshop.co.uk') return null;
-    return { email: data.email };
+    return { email: user.email };
   } catch {
     return null;
   }
