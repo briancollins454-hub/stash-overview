@@ -89,6 +89,18 @@ function fromFirestoreDoc(doc: any): FirestoreUser {
   };
 }
 
+// Get a server-side anonymous Firebase token for unauthenticated operations (login, verify, bootstrap)
+async function getAnonToken(): Promise<string> {
+  const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ returnSecureToken: true }),
+  });
+  if (!resp.ok) throw new Error('Failed to get anonymous auth token');
+  const data = await resp.json();
+  return data.idToken;
+}
+
 function fsHeaders(authToken?: string): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (authToken) h['Authorization'] = `Bearer ${authToken}`;
@@ -207,6 +219,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { action, token, firebaseIdToken, ...data } = req.body || {};
 
+  // For operations without a Firebase ID token (login, verify, bootstrap), get an anonymous token
+  const authToken = firebaseIdToken || await getAnonToken().catch(() => undefined);
+
   try {
     switch (action) {
       // ─── LOGIN ────────────────────────────────────────
@@ -215,7 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!username || !password) {
           return res.status(400).json({ error: 'Username and password required' });
         }
-        const allUsers = await firestoreList(firebaseIdToken);
+        const allUsers = await firestoreList(authToken);
         const user = allUsers.find(u => u.username === username && u.is_active);
         if (!user) {
           return res.status(401).json({ error: 'Invalid username or password' });
@@ -232,7 +247,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!token) return res.status(401).json({ error: 'No token provided' });
         const verified = verifyToken(token);
         if (!verified) return res.status(401).json({ error: 'Invalid or expired token' });
-        const user = await firestoreGet(verified.userId, firebaseIdToken);
+        const user = await firestoreGet(verified.userId, authToken);
         if (!user || !user.is_active) {
           return res.status(401).json({ error: 'User no longer active' });
         }
@@ -242,7 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // ─── LIST USERS ──────────────────────────────────
       case 'list': {
         await requireAdmin(token, firebaseIdToken);
-        const users = await firestoreList(firebaseIdToken);
+        const users = await firestoreList(authToken);
         return res.json(users.map(formatUser));
       }
 
@@ -261,7 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(403).json({ error: 'Only superusers can create superuser accounts' });
         }
         // Check for duplicate username
-        const allUsers = await firestoreList(firebaseIdToken);
+        const allUsers = await firestoreList(authToken);
         if (allUsers.some(u => u.username === username)) {
           return res.status(409).json({ error: 'Username already exists' });
         }
@@ -274,7 +289,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role,
           is_active: true,
           created_by: caller.userId,
-        }, firebaseIdToken);
+        }, authToken);
         return res.json({ success: true });
       }
 
@@ -303,7 +318,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (Object.keys(updates).length === 0) {
           return res.status(400).json({ error: 'No updates provided' });
         }
-        await firestoreUpdate(userId, updates, firebaseIdToken);
+        await firestoreUpdate(userId, updates, authToken);
         return res.json({ success: true });
       }
 
@@ -315,13 +330,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (userId === caller.userId) {
           return res.status(400).json({ error: 'Cannot delete your own account' });
         }
-        await firestoreUpdate(userId, { is_active: false }, firebaseIdToken);
+        await firestoreUpdate(userId, { is_active: false }, authToken);
         return res.json({ success: true });
       }
 
       // ─── BOOTSTRAP: create first superuser (no auth needed) ──
       case 'bootstrap': {
-        const allUsers = await firestoreList(firebaseIdToken);
+        const allUsers = await firestoreList(authToken);
         if (allUsers.length > 0) {
           return res.status(403).json({ error: 'Users already exist. Use admin panel to add users.' });
         }
@@ -338,7 +353,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role: 'superuser',
           is_active: true,
           created_by: 'bootstrap',
-        }, firebaseIdToken);
+        }, authToken);
         return res.json({ success: true, message: 'Superuser created. You can now log in.' });
       }
 
