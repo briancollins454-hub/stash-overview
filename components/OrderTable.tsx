@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import OrderMappingModal from './OrderMappingModal';
 import JobIdBadge from './JobIdBadge';
-import { printOrderSheet } from '../utils/printOrderSheet';
+import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
 
 // --- Types ---
 
@@ -667,6 +667,16 @@ const OrderTable: React.FC<OrderTableProps> = ({
               >
                 <Download className="w-4 h-4" />
                 Export
+              </button>
+              <button 
+                  onClick={() => {
+                    const selected = orders.filter(o => selectedOrderIds.has(o.shopify.id));
+                    printOrderSheets(selected);
+                  }}
+                  className="text-xs hover:text-white text-indigo-200 font-bold flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors uppercase tracking-widest"
+              >
+                <Printer className="w-4 h-4" />
+                Print
               </button>
               <div className="h-4 w-px bg-indigo-700"></div>
               <button className="text-xs hover:text-indigo-200 font-bold uppercase tracking-widest" onClick={() => onSelectionChange(new Set())}>Cancel</button>
