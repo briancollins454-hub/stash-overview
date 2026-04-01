@@ -208,6 +208,30 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   return { css, bodyHtml, orderNumber: order.shopify.orderNumber };
 }
 
+function waitForImagesAndPrint(w: Window): void {
+  const images = w.document.querySelectorAll('img');
+  if (images.length === 0) {
+    w.print();
+    return;
+  }
+  let loaded = 0;
+  const total = images.length;
+  const done = () => {
+    loaded++;
+    if (loaded >= total) w.print();
+  };
+  images.forEach(img => {
+    if (img.complete) {
+      done();
+    } else {
+      img.addEventListener('load', done);
+      img.addEventListener('error', done);
+    }
+  });
+  // Safety fallback — print after 3s even if some images fail
+  setTimeout(() => { if (loaded < total) w.print(); }, 3000);
+}
+
 export function printOrderSheet(order: UnifiedOrder): void {
   const { css, bodyHtml, orderNumber } = buildOrderSheetHtml(order);
 
@@ -221,7 +245,7 @@ export function printOrderSheet(order: UnifiedOrder): void {
   if (!w) return;
   w.document.write(html);
   w.document.close();
-  w.print();
+  waitForImagesAndPrint(w);
 }
 
 /**
@@ -253,5 +277,5 @@ export function printOrderSheets(ordersToPrint: UnifiedOrder[]): void {
   if (!w) return;
   w.document.write(html);
   w.document.close();
-  w.print();
+  waitForImagesAndPrint(w);
 }
