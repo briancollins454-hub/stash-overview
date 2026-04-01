@@ -196,7 +196,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
 
   // Batch Print + Ship: print packing slips, create labels for all selected, auto-fulfill via ShipStation
   const handleBatchShip = useCallback(async () => {
-    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id) && !o.shipStationTracking?.trackingNumber);
+    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled');
     if (selected.length === 0) return;
 
     setShowBatchConfirm(false);
@@ -323,7 +323,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
             <div>
               <p className="text-[11px] font-black text-amber-300 mb-1">Confirm Batch Ship</p>
               <p className="text-[10px] text-amber-200/80 font-bold leading-relaxed">
-                This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && !o.shipStationTracking?.trackingNumber).length} orders using the default carrier/service from ShipStation.
+                This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled').length} orders using the default carrier/service from ShipStation.
                 Each label will charge your ShipStation account and auto-fulfil the order on Shopify.
               </p>
             </div>
@@ -419,6 +419,8 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
             const addr = o.shopify.shippingAddress;
             const itemCount = o.shopify.items.reduce((sum, i) => sum + i.quantity, 0);
             const hasTracking = !!o.shipStationTracking?.trackingNumber;
+            const isPartial = o.shopify.fulfillmentStatus === 'partial';
+            const isFullyShipped = hasTracking && !isPartial;
 
             return (
               <div key={o.shopify.id} className={`rounded-xl border transition-all ${isExpanded ? 'bg-white/[0.07] border-blue-500/30' : 'bg-white/5 border-white/10 hover:border-white/20'}`}>
@@ -441,7 +443,8 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                       </button>
                       <span className="text-[10px] font-bold text-gray-400">{o.shopify.customerName}</span>
                       {o.clubName && <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-[8px] font-black text-indigo-300">{o.clubName}</span>}
-                      {hasTracking && <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[8px] font-black text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /> Shipped</span>}
+                      {hasTracking && isPartial && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[8px] font-black text-amber-400 flex items-center gap-1"><Package className="w-2.5 h-2.5" /> Partial</span>}
+                      {isFullyShipped && <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-[8px] font-black text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" /> Shipped</span>}
                     </div>
                     <div className="flex items-center gap-3 mt-0.5">
                       <span className="text-[9px] text-gray-500 font-bold">{itemCount} items</span>
@@ -540,8 +543,8 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                       )}
                     </div>
 
-                    {/* ShipStation Label Section */}
-                    {!hasTracking && (
+                    {/* ShipStation Label Section — show for orders without tracking OR partially fulfilled */}
+                    {(!hasTracking || isPartial) && (
                       <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 space-y-3">
                         <h4 className="text-[9px] font-black uppercase tracking-widest text-blue-300 flex items-center gap-1.5"><Tag className="w-3 h-3" /> Create Shipping Label</h4>
 
