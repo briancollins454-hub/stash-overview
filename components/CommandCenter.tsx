@@ -115,6 +115,7 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<UnifiedOrder | null>(null);
   const [activeView, setActiveView] = useState<'overview' | 'pipeline' | 'clubs'>('overview');
+  const [expandedWeeks, setExpandedWeeks] = useState<Set<string>>(new Set());
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Fullscreen API
@@ -473,8 +474,9 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
                     const total = bucket.orders.length;
                     const readyCount = bucket.orders.filter(o => o.completionPercentage === 100 || o.isStockDispatchReady).length;
                     const value = bucket.orders.reduce((s, o) => s + (parseFloat(o.shopify.totalPrice) || 0), 0);
-                    const shown = bucket.orders.slice(0, 6);
-                    const remaining = total - shown.length;
+                    const isExpanded = expandedWeeks.has(bucket.label);
+                    const shown = isExpanded ? bucket.orders : bucket.orders.slice(0, 6);
+                    const remaining = isExpanded ? 0 : total - Math.min(total, 6);
                     return (
                       <div key={bucket.label} className={`rounded-xl border ${bucket.borderColor} ${bucket.color} p-4`}>
                         <div className="flex items-center justify-between mb-2">
@@ -506,19 +508,23 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
                                   <p className={`text-[10px] font-black tabular-nums ${overdue ? 'text-red-400' : o.completionPercentage === 100 ? 'text-emerald-400' : 'text-white/50'}`}>
                                     {o.completionPercentage}%
                                   </p>
-                                  <div className="w-12 h-1 bg-white/10 rounded-full mt-0.5 overflow-hidden">
-                                    <div className="h-full rounded-full transition-all duration-700" style={{
-                                      width: `${o.completionPercentage}%`,
-                                      background: o.completionPercentage === 100 ? '#10b981' : o.completionPercentage > 50 ? '#f59e0b' : '#ef4444'
-                                    }} />
-                                  </div>
+                                  <p className="text-[8px] text-white/25 tabular-nums mt-0.5">
+                                    {o.slaTargetDate ? new Date(o.slaTargetDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'No date'}
+                                  </p>
                                 </div>
                               </div>
                             );
                           })}
                           {remaining > 0 && (
-                            <div className="flex items-center justify-center rounded-lg px-3 py-2 border border-white/5 bg-white/[0.01] text-[10px] text-white/30 font-bold">
+                            <div onClick={() => setExpandedWeeks(prev => { const next = new Set(prev); next.add(bucket.label); return next; })}
+                              className="flex items-center justify-center rounded-lg px-3 py-2 border border-white/5 bg-white/[0.01] text-[10px] text-white/30 font-bold cursor-pointer hover:bg-white/[0.05] hover:text-white/50 transition-all">
                               +{remaining} more
+                            </div>
+                          )}
+                          {isExpanded && total > 6 && (
+                            <div onClick={() => setExpandedWeeks(prev => { const next = new Set(prev); next.delete(bucket.label); return next; })}
+                              className="flex items-center justify-center rounded-lg px-3 py-2 border border-white/5 bg-white/[0.01] text-[10px] text-white/30 font-bold cursor-pointer hover:bg-white/[0.05] hover:text-white/50 transition-all">
+                              Show less
                             </div>
                           )}
                         </div>
