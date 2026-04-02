@@ -22,9 +22,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'text is required' });
     }
 
-    // Default: "Rachel" — warm, clear, professional British female
-    // Other good ones: "Drew" (male), "Clyde" (deep male), "Dorothy" (warm female)
-    const voice = voiceId || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+    // Default: "George" — warm, confident British male — perfect for cheeky smart-arse character
+    // Alternatives: "Charlie" (Aus male), "Callum" (transatlantic male), "Daniel" (authoritative British)
+    const voice = voiceId || process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb';
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
       method: 'POST',
