@@ -82,3 +82,19 @@ export const removeItem = async (key: string): Promise<void> => {
     console.error(`IndexedDB removeItem error for ${key}:`, e);
   }
 };
+
+export const clearAll = async (): Promise<void> => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error('IndexedDB clearAll error:', e);
+  }
+};
