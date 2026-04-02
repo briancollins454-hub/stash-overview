@@ -8,20 +8,20 @@ function escapeHtml(str: string): string {
 function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const props = (i.properties || []).filter(p => p.value);
   const propsHtml = props.length > 0
-    ? props.map(p => '<br><small style="color:#555;font-size:8px;">' + escapeHtml(String(p.name)) + ': ' + escapeHtml(String(p.value)) + '</small>').join('')
+    ? props.map(p => '<br><span style="color:#555;font-size:12px;">' + escapeHtml(String(p.name)) + ': ' + escapeHtml(String(p.value)) + '</span>').join('')
     : '';
-  const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + escapeHtml(i.sku) + '</small>' : '';
-  const eanHtml = i.ean && i.ean !== '-' ? '<br><small style="color:#888;font-size:8px;">EAN: ' + escapeHtml(i.ean) + '</small>' : '';
+  const skuHtml = i.sku ? '<br><span style="color:#888;font-size:11px;">SKU: ' + escapeHtml(i.sku) + '</span>' : '';
+  const eanHtml = i.ean && i.ean !== '-' ? '<br><span style="color:#888;font-size:11px;">EAN: ' + escapeHtml(i.ean) + '</span>' : '';
   const imgHtml = i.imageUrl
-    ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:32px;height:32px;object-fit:cover;" /><div style="display:none;width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>'
-    : '<div style="width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>';
+    ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:80px;height:80px;object-fit:cover;border-radius:4px;" /><div style="display:none;width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>'
+    : '<div style="width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>';
   const unitPrice = i.price ? parseFloat(i.price) : 0;
   const lineTotal = unitPrice * (i.quantity || 0);
   const qty = i.quantity || 0;
-  const qtyHtml = qty > 1 ? '<strong style="font-size:12px;">' + qty + '</strong>' : '' + qty;
+  const qtyHtml = qty > 1 ? '<strong style="font-size:16px;">' + qty + '</strong>' : '' + qty;
   return '<tr>' +
-    '<td style="width:36px;text-align:center;">' + imgHtml + '</td>' +
-    '<td>' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td style="width:85px;text-align:center;vertical-align:middle;padding:4px;">' + imgHtml + '</td>' +
+    '<td style="font-size:14px;font-weight:600;padding:6px;">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
     '<td style="text-align:center;">' + qtyHtml + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
@@ -43,9 +43,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '@page { margin: 10mm; size: A4; }',
     'body { font-family: Arial, sans-serif; padding: 0; color: #111; font-size: 10px; }',
     '.rush { background: #dc2626; color: white; font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 3px; text-align: center; padding: 3px 10px; margin-bottom: 4px; }',
-    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; font-size: 9px; }',
-    '.items-table th, .items-table td { border: 1px solid #999; padding: 2px 4px; text-align: left; vertical-align: top; }',
-    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 8px; letter-spacing: 0.5px; font-weight: bold; }',
+    '.items-table { width: 100%; border-collapse: collapse; margin-bottom: 6px; font-size: 14px; }',
+    '.items-table th, .items-table td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: middle; }',
+    '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; font-weight: bold; }',
     '.section-title { font-size: 10px; font-weight: bold; margin: 6px 0 2px 0; padding-bottom: 2px; border-bottom: 1.5px solid #111; text-transform: uppercase; }',
     '.payment-table { margin-left: auto; width: 50%; margin-top: 4px; border-collapse: collapse; }',
     '.payment-table td { padding: 1px 6px; font-size: 10px; }',
@@ -53,9 +53,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.countdown { font-size: 11px; font-weight: 900; text-align: center; padding: 3px; border: 2px solid; margin: 4px 0; }',
     '.overdue { color: #dc2626; font-weight: 900; }',
     '.ok { color: #16a34a; font-weight: bold; }',
-    '.check { width: 11px; height: 11px; border: 2px solid #999; display: inline-block; border-radius: 2px; vertical-align: middle; }',
-    '.qc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-top: 3px; }',
-    '.qc-item { display: flex; align-items: center; gap: 4px; font-size: 9px; font-weight: bold; text-transform: uppercase; }',
+
     '.notes-section { border: 1px dashed #999; padding: 4px; min-height: 20px; font-size: 8px; color: #666; margin-top: 4px; }',
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
@@ -125,7 +123,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   }
 
   // Items table header
-  const itemTableHead = '<thead><tr><th style="width:36px">Image</th><th>Item</th><th style="width:50px;text-align:center">Qty</th><th style="width:55px;text-align:right">Price</th><th style="width:55px;text-align:right">Total</th><th style="width:60px;text-align:center">Packed By</th></tr></thead>';
+  const itemTableHead = '<thead><tr><th style="width:85px">Image</th><th>Item</th><th style="width:60px;text-align:center">Qty</th><th style="width:70px;text-align:right">Price</th><th style="width:70px;text-align:right">Total</th><th style="width:70px;text-align:center">Packed By</th></tr></thead>';
 
   // Unfulfilled items section
   let unfulfilledSection = '';
@@ -175,17 +173,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
       '</table>';
   }
 
-  // QC Checklist
-  const qcHtml =
-    '<div class="section-title">QC Checklist</div>' +
-    '<div class="qc-grid">' +
-      '<div class="qc-item"><span class="check"></span> Print Aligned</div>' +
-      '<div class="qc-item"><span class="check"></span> Correct Size</div>' +
-      '<div class="qc-item"><span class="check"></span> Colour Match</div>' +
-      '<div class="qc-item"><span class="check"></span> Packaging</div>' +
-      '<div class="qc-item"><span class="check"></span> Labels Attached</div>' +
-      '<div class="qc-item"><span class="check"></span> Final Sign-off</div>' +
-    '</div>';
+
 
   // Saved internal notes
   let savedNotesHtml = '';
@@ -209,7 +197,6 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     paymentHtml +
     noteHtml +
     decoHtml +
-    qcHtml +
     savedNotesHtml +
     '<div class="notes-section">Production Notes (write here):</div>';
 
