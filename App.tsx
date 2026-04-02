@@ -326,6 +326,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [lastSyncLabel, setLastSyncLabel] = useState<string>('');
   const syncAbortRef = useRef<AbortController | null>(null);
+  const loadingRef = useRef(false);
   const autoRefreshRef = useRef<() => void>(() => {});
 
   // New feature state
@@ -390,7 +391,7 @@ const App: React.FC = () => {
   const isConfigMissing = false; // Credentials are now server-side
 
   const loadData = async (isDeepSync: boolean = false, baseOrdersOverride?: ShopifyOrder[]) => {
-    if (loading) return;
+    if (loadingRef.current) return;
     if (isConfigMissing) {
         setToastMsg({ text: "API Credentials Missing.", type: "error" });
         return;
@@ -401,6 +402,7 @@ const App: React.FC = () => {
     const controller = new AbortController();
     syncAbortRef.current = controller;
     
+    loadingRef.current = true;
     setLoading(true);
     if (isDeepSync) setIsDeepSyncRunning(true);
     setSyncStatusMsg(isDeepSync ? 'Rebuilding Archive...' : 'Syncing Recent...');
@@ -418,13 +420,12 @@ const App: React.FC = () => {
                 sinceDate = new Date(latestUpdate - 1800000).toISOString();
             }
 
-            // Parallel fetch for speed
+            // Parallel fetch for speed — but NOT unfulfilled orders (would hit Shopify rate limit)
             setSyncStatusMsg('Syncing APIs...');
-            const [shopifyResult, decoResult, ssResult, unfulfilledResult] = await Promise.allSettled([
+            const [shopifyResult, decoResult, ssResult] = await Promise.allSettled([
                 fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync, currentBaseOrders.length),
                 fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync),
-                fetchShipStationShipments(apiSettings),
-                fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg))
+                fetchShipStationShipments(apiSettings)
             ]);
 
             if (shopifyResult.status === 'fulfilled') {
@@ -445,13 +446,27 @@ const App: React.FC = () => {
                 setShipStationData(ssMap);
             }
 
+            // Fetch ALL unfulfilled orders AFTER Shopify date-window fetch to avoid rate limiting
+            setSyncStatusMsg('Fetching unfulfilled orders...');
+            let unfulfilledOrders: ShopifyOrder[] = [];
+            try {
+                unfulfilledOrders = await fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg));
+            } catch (e1) {
+                // Retry once after a short delay
+                try {
+                    await new Promise(r => setTimeout(r, 2000));
+                    unfulfilledOrders = await fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg));
+                } catch (e2: any) {
+                    console.warn('Unfulfilled orders fetch failed after retry:', e2.message);
+                    setToastMsg({ text: `⚠️ Unfulfilled orders sync failed — counts may be incomplete. Try syncing again.`, type: 'error' });
+                }
+            }
+
             // Merge: base orders + date-window orders + ALL unfulfilled orders (catches old active ones)
             const orderMap = new Map<string, ShopifyOrder>();
             currentBaseOrders.forEach(o => orderMap.set(o.id, o));
             sOrders.forEach(o => orderMap.set(o.id, o));
-            if (unfulfilledResult.status === 'fulfilled') {
-                unfulfilledResult.value.forEach(o => orderMap.set(o.id, o));
-            }
+            unfulfilledOrders.forEach(o => orderMap.set(o.id, o));
             const mergedOrders = Array.from(orderMap.values());
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
@@ -552,6 +567,7 @@ const App: React.FC = () => {
             setToastMsg({ text: `Sync issue: ${e.message}`, type: 'error' });
         }
     } finally { 
+        loadingRef.current = false;
         setLoading(false); 
         setIsDeepSyncRunning(false);
         setSyncStatusMsg('');
@@ -1757,7 +1773,7 @@ const App: React.FC = () => {
                             <button onClick={() => { if(window.confirm("Deep scan will fetch updates across the full 365-day window. Your cached data will be preserved and updated. Proceed?")) loadData(true); }} disabled={loading} className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest ${isDeepSyncRunning ? 'bg-amber-100 text-amber-800' : 'text-indigo-500 hover:bg-indigo-50'}`}>
                                 {isDeepSyncRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowDownToLine className="w-3.5 h-3.5" />} Deep Scan
                             </button>
-                            <button onClick={async () => { if(!window.confirm("FULL RESET: This will wipe ALL local cached data and re-download everything from scratch (APIs + cloud mappings). All computers should do this to get in sync. Proceed?")) return; setSyncStatusMsg('Wiping local cache...'); setLoading(true); try { await clearLocalDB(); setRawShopifyOrders([]); setRawDecoJobs([]); setConfirmedMatches({}); setProductMappings({}); setItemJobLinks({}); setPhysicalStock([]); setReturnStock([]); setReferenceProducts([]); setSyncStatusMsg('Fetching cloud data...'); const cloudData = await fetchCloudData(apiSettings); if (cloudData) { if (cloudData.mappings) { setConfirmedMatches(cloudData.mappings); await setLocalItem('stash_confirmed_matches', cloudData.mappings); } if (cloudData.productMappings) { setProductMappings(cloudData.productMappings); await setLocalItem('stash_product_mappings', cloudData.productMappings); } if (cloudData.links) { setItemJobLinks(cloudData.links); await setLocalItem('stash_item_job_links', cloudData.links); } if (cloudData.decoJobs && cloudData.decoJobs.length > 0) { setRawDecoJobs(cloudData.decoJobs); await setLocalItem('stash_raw_deco_jobs', cloudData.decoJobs); } if (cloudData.orders && cloudData.orders.length > 0) { setRawShopifyOrders(cloudData.orders); await setLocalItem('stash_raw_shopify_orders', cloudData.orders); } if (cloudData.physicalStock) setPhysicalStock(cloudData.physicalStock); if (cloudData.returnStock) setReturnStock(cloudData.returnStock); if (cloudData.referenceProducts) setReferenceProducts(cloudData.referenceProducts); } setLoading(false); await loadData(true); setToastMsg({ text: 'Full reset complete — all data re-synced from cloud', type: 'success' }); } catch(e: any) { setLoading(false); setToastMsg({ text: `Reset failed: ${e.message}`, type: 'error' }); } }} disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest text-red-500 hover:bg-red-50 border-l border-gray-100">
+                            <button onClick={async () => { if(!window.confirm("FULL RESET: This will wipe ALL local cached data and re-download everything from scratch (APIs + cloud mappings). All computers should do this to get in sync. Proceed?")) return; setSyncStatusMsg('Wiping local cache...'); loadingRef.current = true; setLoading(true); try { await clearLocalDB(); setRawShopifyOrders([]); setRawDecoJobs([]); setConfirmedMatches({}); setProductMappings({}); setItemJobLinks({}); setPhysicalStock([]); setReturnStock([]); setReferenceProducts([]); setSyncStatusMsg('Fetching cloud data...'); const cloudData = await fetchCloudData(apiSettings, { includeOrders: true }); if (cloudData) { if (cloudData.mappings) { setConfirmedMatches(cloudData.mappings); await setLocalItem('stash_confirmed_matches', cloudData.mappings); } if (cloudData.productMappings) { setProductMappings(cloudData.productMappings); await setLocalItem('stash_product_mappings', cloudData.productMappings); } if (cloudData.links) { setItemJobLinks(cloudData.links); await setLocalItem('stash_item_job_links', cloudData.links); } if (cloudData.decoJobs && cloudData.decoJobs.length > 0) { setRawDecoJobs(cloudData.decoJobs); await setLocalItem('stash_raw_deco_jobs', cloudData.decoJobs); } if (cloudData.orders && cloudData.orders.length > 0) { setRawShopifyOrders(cloudData.orders); await setLocalItem('stash_raw_shopify_orders', cloudData.orders); } if (cloudData.physicalStock) setPhysicalStock(cloudData.physicalStock); if (cloudData.returnStock) setReturnStock(cloudData.returnStock); if (cloudData.referenceProducts) setReferenceProducts(cloudData.referenceProducts); } loadingRef.current = false; setLoading(false); await loadData(true); setToastMsg({ text: 'Full reset complete — all data re-synced from cloud', type: 'success' }); } catch(e: any) { loadingRef.current = false; setLoading(false); setToastMsg({ text: `Reset failed: ${e.message}`, type: 'error' }); } }} disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest text-red-500 hover:bg-red-50 border-l border-gray-100">
                                 <RefreshCw className="w-3.5 h-3.5" /> Full Reset
                             </button>
                         </div>

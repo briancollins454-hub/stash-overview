@@ -86,7 +86,7 @@ const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, lim
     }
 };
 
-export const fetchCloudData = async (settings: ApiSettings): Promise<{
+export const fetchCloudData = async (settings: ApiSettings, opts?: { includeOrders?: boolean }): Promise<{
     mappings: Record<string, string>;
     links: Record<string, string>;
     productMappings: Record<string, string>;
@@ -99,6 +99,7 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
 } | null> => {
     try {
         const missingTables: string[] = [];
+        const includeOrders = opts?.includeOrders ?? false;
         
         // Parallel fetch for speed with full pagination support
         const [mappings, links, productMappings, physicalStock, returnStock, referenceProducts, rawOrders, rawDecoJobs] = await Promise.all([
@@ -108,7 +109,7 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
             fetchAllFromCloud<PhysicalStockItem>('stash_stock'),
             fetchAllFromCloud<ReturnStockItem>('stash_returns'),
             fetchAllFromCloud<ReferenceProduct>('stash_reference_products'),
-            fetchAllFromCloud<any>('stash_orders', 'order_data'),
+            includeOrders ? fetchAllFromCloud<any>('stash_orders', 'order_data') : Promise.resolve([]),
             fetchAllFromCloud<any>('stash_deco_jobs', 'job_data')
         ]);
 
