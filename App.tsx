@@ -499,6 +499,31 @@ const App: React.FC = () => {
             if (sOrders.length > 0) {
                 saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
+
+            // Re-fetch cloud mappings so changes from other devices are picked up on every sync
+            setSyncStatusMsg('Syncing cloud mappings...');
+            try {
+                const cloudData = await fetchCloudData(apiSettings);
+                if (cloudData) {
+                    setConfirmedMatches(prev => {
+                        const merged = { ...prev, ...(cloudData.mappings || {}) };
+                        setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                        return merged;
+                    });
+                    setProductMappings(prev => {
+                        const merged = { ...prev, ...(cloudData.productMappings || {}) };
+                        setLocalItem('stash_product_mappings', merged).catch(console.error);
+                        return merged;
+                    });
+                    setItemJobLinks(prev => {
+                        const merged = { ...prev, ...(cloudData.links || {}) };
+                        setLocalItem('stash_item_job_links', merged).catch(console.error);
+                        return merged;
+                    });
+                }
+            } catch (e) {
+                console.warn('Cloud mapping sync failed:', e);
+            }
         } else {
             const { MOCK_SHOPIFY_ORDERS, MOCK_DECO_JOBS } = await import('./constants');
             setRawShopifyOrders(MOCK_SHOPIFY_ORDERS); 
