@@ -645,15 +645,21 @@ const App: React.FC = () => {
             if (savedExcluded) setExcludedTags(JSON.parse(savedExcluded));
 
             // Load from IndexedDB first for instant UI
-            const [cachedOrders, cachedJobs] = await Promise.all([
+            const [cachedOrders, cachedJobs, cachedMatches, cachedProductMappings, cachedJobLinks] = await Promise.all([
                 getLocalItem<ShopifyOrder[]>('stash_raw_shopify_orders'),
-                getLocalItem<DecoJob[]>('stash_raw_deco_jobs')
+                getLocalItem<DecoJob[]>('stash_raw_deco_jobs'),
+                getLocalItem<Record<string, string>>('stash_confirmed_matches'),
+                getLocalItem<Record<string, string>>('stash_product_mappings'),
+                getLocalItem<Record<string, string>>('stash_item_job_links'),
             ]);
             if (cachedOrders) {
                 initialOrders = cachedOrders;
                 setRawShopifyOrders(cachedOrders);
             }
             if (cachedJobs) setRawDecoJobs(cachedJobs);
+            if (cachedMatches) setConfirmedMatches(cachedMatches);
+            if (cachedProductMappings) setProductMappings(cachedProductMappings);
+            if (cachedJobLinks) setItemJobLinks(cachedJobLinks);
 
             // Load settings from Firestore (tied to user account)
             if (user?.uid) {
@@ -678,9 +684,22 @@ const App: React.FC = () => {
             setSyncStatusMsg('Loading Cloud State...');
             const cloudData = await fetchCloudData(apiSettings);
             if (cloudData) {
-                setConfirmedMatches(cloudData.mappings || {});
-                setProductMappings(cloudData.productMappings || {});
-                setItemJobLinks(cloudData.links || {});
+                // Merge cloud mappings with local cache (cloud wins for conflicts since it may have data from other devices)
+                setConfirmedMatches(prev => {
+                    const merged = { ...prev, ...(cloudData.mappings || {}) };
+                    setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                    return merged;
+                });
+                setProductMappings(prev => {
+                    const merged = { ...prev, ...(cloudData.productMappings || {}) };
+                    setLocalItem('stash_product_mappings', merged).catch(console.error);
+                    return merged;
+                });
+                setItemJobLinks(prev => {
+                    const merged = { ...prev, ...(cloudData.links || {}) };
+                    setLocalItem('stash_item_job_links', merged).catch(console.error);
+                    return merged;
+                });
                 setPhysicalStock(cloudData.physicalStock || []);
                 setReturnStock(cloudData.returnStock || []);
                 setReferenceProducts(cloudData.referenceProducts || []);
@@ -1106,6 +1125,7 @@ const App: React.FC = () => {
       setConfirmedMatches((prev: Record<string, string>) => {
           const next: Record<string, string> = { ...prev };
           mappings.forEach(m => { next[m.itemKey] = m.decoId; });
+          setLocalItem('stash_confirmed_matches', next).catch(console.error);
           return next;
       });
 
@@ -1113,6 +1133,7 @@ const App: React.FC = () => {
           setProductMappings(prev => {
               const next = { ...prev };
               Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => { next[sPattern] = dPattern; });
+              setLocalItem('stash_product_mappings', next).catch(console.error);
               return next;
           });
           Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => saveProductMapping(apiSettings, sPattern, dPattern).catch(console.error));
@@ -1122,6 +1143,7 @@ const App: React.FC = () => {
           setItemJobLinks(prev => {
               const next = { ...prev };
               mappings.forEach(m => { next[m.itemKey] = jobId; });
+              setLocalItem('stash_item_job_links', next).catch(console.error);
               return next;
           });
           mappings.forEach(m => saveCloudJobLink(apiSettings, m.itemKey, jobId).catch(console.error));
@@ -1612,7 +1634,7 @@ const App: React.FC = () => {
                         options={groupOptions} 
                         selectedValues={selectedGroups} 
                         onChange={setSelectedGroups} 
-                        showZeroByDefault={true}
+                        showZeroByDefault={false}
                     />
                     
                     <div className="flex items-center border border-gray-300 rounded-lg bg-white overflow-hidden shadow-sm flex-wrap sm:flex-nowrap">
