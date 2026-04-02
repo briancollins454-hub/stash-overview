@@ -375,7 +375,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     });
 
     return list;
-  }, [decoJobs, searchTerm, paymentFilter, agingFilter, sortField, sortDir]);
+  }, [allJobs, searchTerm, paymentFilter, agingFilter, sortField, sortDir]);
 
   const handleSort = useCallback((field: SortField) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -517,7 +517,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             <span className="text-sm font-bold text-red-600 dark:text-red-400">Failed to load financial data</span>
           </div>
           <p className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{loadError}</p>
-          <button onClick={loadFinancialData} className="mt-2 px-3 py-1.5 rounded text-[10px] font-bold bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300">Retry</button>
+          <button onClick={fullSync} className="mt-2 px-3 py-1.5 rounded text-[10px] font-bold bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300">Retry</button>
         </div>
       )}
 

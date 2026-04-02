@@ -184,8 +184,12 @@ const StockManager: React.FC<StockManagerProps> = ({
                 });
             }
 
-            setReferenceProducts(products);
-            alert(`Import Successful! ${products.length} products merged into Global Master library.`);
+            setReferenceProducts((() => {
+              const existing = new Map(referenceProducts.map(p => [p.ean, p]));
+              products.forEach(p => existing.set(p.ean, p));
+              return Array.from(existing.values());
+            })());
+            alert(`Import Successful! ${products.length} products merged into Global Master library (${referenceProducts.length + products.length - new Map([...referenceProducts, ...products].map(p => [p.ean, p])).size} updated, ${products.length - referenceProducts.filter(e => products.some(p => p.ean === e.ean)).length} new).`);
             
             setCsvFile(null);
             setCsvHeaders([]);

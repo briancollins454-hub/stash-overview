@@ -136,10 +136,10 @@ const AutoJobLinker: React.FC<Props> = ({ orders, decoJobs, settings, itemJobLin
     setIsLinking(true);
     const links = highConfidence
       .filter(s => !appliedLinks.has(`${s.orderId}-${s.decoJobNumber}`))
-      .map(s => ({ itemId: s.orderId, jobId: s.decoJobNumber }));
+      .map(s => ({ itemId: s.orderId, jobId: s.decoJobNumber, orderNumber: s.orderNumber }));
     
     for (const link of links) {
-      onLink('', link.itemId, link.jobId);
+      onLink(link.orderNumber, link.itemId, link.jobId);
       setAppliedLinks(prev => new Set(prev).add(`${link.itemId}-${link.jobId}`));
     }
     setIsLinking(false);

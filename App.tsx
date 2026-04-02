@@ -413,7 +413,7 @@ const App: React.FC = () => {
             const currentBaseOrders = baseOrdersOverride || rawShopifyOrders;
 
             if (!isDeepSync && currentBaseOrders.length > 0) {
-                const latestUpdate = Math.max(...currentBaseOrders.map(o => new Date(o.updatedAt).getTime()), Date.now() - (72 * 60 * 60 * 1000));
+                const latestUpdate = currentBaseOrders.reduce((max, o) => Math.max(max, new Date(o.updatedAt).getTime()), Date.now() - (72 * 60 * 60 * 1000));
                 sinceDate = new Date(latestUpdate - 1800000).toISOString();
             }
 
@@ -444,12 +444,7 @@ const App: React.FC = () => {
             }
 
             const orderMap = new Map<string, ShopifyOrder>();
-            if (!isDeepSync) {
-                currentBaseOrders.forEach(o => orderMap.set(o.id, o));
-            } else {
-                // Deep sync: keep cached orders as base, fresh data overwrites
-                currentBaseOrders.forEach(o => orderMap.set(o.id, o));
-            }
+            currentBaseOrders.forEach(o => orderMap.set(o.id, o));
             sOrders.forEach(o => orderMap.set(o.id, o)); 
             const mergedOrders = Array.from(orderMap.values());
             setRawShopifyOrders(mergedOrders);
@@ -630,7 +625,7 @@ const App: React.FC = () => {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
         e.preventDefault();
-        if (!loading && !isBulkRefreshing && user) loadData(false);
+        autoRefreshRef.current();
       }
       if (e.key === 'Escape') {
         setShowSettings(false);
@@ -1025,6 +1020,7 @@ const App: React.FC = () => {
         return;
     }
 
+    try {
     setIsBulkRefreshing(true);
     setScanProgress(0);
     setScanLog([{ 
@@ -1104,7 +1100,6 @@ const App: React.FC = () => {
         });
     }
 
-    setIsBulkRefreshing(false);
     notify('Stash Shop Sync', { body: `Status refresh complete. ${updatedJobs.length} jobs updated.` });
     setScanLog(prev => [...prev, { 
         id: 'end', 
@@ -1112,6 +1107,9 @@ const App: React.FC = () => {
         type: 'success', 
         timestamp: new Date().toLocaleTimeString() 
     }]);
+    } finally {
+      setIsBulkRefreshing(false);
+    }
   };
 
   const handleManualJobLink = async (orderIdOrIds: string | string[], jobId: string) => {
@@ -1119,6 +1117,7 @@ const App: React.FC = () => {
       setItemJobLinks((prev: Record<string, string>) => {
           const next: Record<string, string> = { ...prev };
           ids.forEach((id: string) => { next[id] = jobId; });
+          setLocalItem('stash_item_job_links', next).catch(console.error);
           return next;
       });
       ids.forEach((id: string) => saveCloudJobLink(apiSettings, id, jobId).catch(console.error));
@@ -1221,6 +1220,7 @@ const App: React.FC = () => {
     const needsApiSearch: typeof notOnDeco = [];
 
     // Phase 1: Match against cached Deco jobs by customer name
+    const phase1Linked = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
     for (let i = 0; i < notOnDeco.length; i++) {
       if (stopScanRef.current) break;
       const order = notOnDeco[i];
@@ -1231,9 +1231,10 @@ const App: React.FC = () => {
       const cachedMatches = decoByName.get(shopifyName);
       if (cachedMatches && cachedMatches.length > 0) {
         // Pick the most recent unlinked job
-        const alreadyLinkedJobIds = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
-        const bestMatch = cachedMatches.find(j => !alreadyLinkedJobIds.has(j.jobNumber)) || cachedMatches[0];
+        const bestMatch = cachedMatches.find(j => !phase1Linked.has(j.jobNumber));
+        if (!bestMatch) { needsApiSearch.push(order); continue; }
         handleManualJobLink(order.shopify.id, bestMatch.jobNumber);
+        phase1Linked.add(bestMatch.jobNumber);
         linked++; cacheHits++;
         setScanLog(prev => [...prev, { id: `cache-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${order.shopify.customerName} → Job #${bestMatch.jobNumber} (cache match)`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
       } else {
@@ -1244,14 +1245,14 @@ const App: React.FC = () => {
         if (surname.length >= 3) {
           for (const [decoName, jobs] of decoByName.entries()) {
             if (decoName.includes(surname) && decoName.includes(nameParts[0])) {
-              const alreadyLinkedJobIds = new Set(unifiedOrders.filter(o => o.decoJobId).map(o => o.decoJobId));
-              partialMatch = jobs.find(j => !alreadyLinkedJobIds.has(j.jobNumber)) || jobs[0];
+              partialMatch = jobs.find(j => !phase1Linked.has(j.jobNumber));
               break;
             }
           }
         }
         if (partialMatch) {
           handleManualJobLink(order.shopify.id, partialMatch.jobNumber);
+          phase1Linked.add(partialMatch.jobNumber);
           linked++; cacheHits++;
           setScanLog(prev => [...prev, { id: `partial-${order.shopify.orderNumber}`, message: `#${order.shopify.orderNumber} ${order.shopify.customerName} → Job #${partialMatch!.jobNumber} (name match)`, type: 'success', timestamp: new Date().toLocaleTimeString() }]);
         } else {

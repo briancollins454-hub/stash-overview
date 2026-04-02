@@ -24,7 +24,9 @@ export function exportOrdersToCSV(orders: UnifiedOrder[], filename = 'stash-orde
   ]);
 
   const escapeCell = (cell: any) => {
-    const str = String(cell ?? '');
+    let str = String(cell ?? '');
+    // Prevent CSV formula injection
+    if (/^[=+\-@\t\r]/.test(str)) str = "'" + str;
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
       return `"${str.replace(/"/g, '""')}"`;
     }

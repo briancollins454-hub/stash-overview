@@ -41,7 +41,7 @@ function verifyToken(token: string): { userId: string; role: string } | null {
     const [userId, role, expiryStr, hmac] = parts;
     const payload = `${userId}|${role}|${expiryStr}`;
     const expectedHmac = createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
-    if (hmac !== expectedHmac) return null;
+    if (hmac.length !== expectedHmac.length || !timingSafeEqual(Buffer.from(hmac, 'hex'), Buffer.from(expectedHmac, 'hex'))) return null;
     if (Date.now() > parseInt(expiryStr)) return null;
     return { userId, role };
   } catch {
