@@ -55,7 +55,7 @@ const fetchWithProxy = async (path: string, method: string, body?: any, prefer?:
     }
 };
 
-const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 5000): Promise<T[] | null> => {
+const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 500, retries = 2): Promise<T[] | null> => {
     try {
         const path = `${table}?select=${select}&limit=${limit}&offset=${offset}`;
         const res = await fetchWithProxy(path, 'GET');
@@ -65,19 +65,24 @@ const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, lim
         
         // Recursive pagination if we hit the limit
         if (data.length === limit && offset + limit < 100000) {
-            const nextBatch = await fetchAllFromCloud<T>(table, select, offset + limit, limit);
+            const nextBatch = await fetchAllFromCloud<T>(table, select, offset + limit, limit, retries);
             return [...data, ...(nextBatch || [])];
         }
         
         return data;
     } catch (e: any) {
         if (e.status === 404 || e.message.includes('404')) {
-            console.warn(`Cloud table "${table}" not found. This is expected if you haven't run the Supabase setup SQL yet.`);
+            console.warn(`Cloud table "${table}" not found.`);
             return null;
-        } else {
-            console.error(`Network error fetching cloud ${table}:`, e.message || e);
-            return [];
         }
+        // Retry on network/timeout errors
+        if (retries > 0) {
+            console.warn(`Cloud fetch ${table} failed, retrying (${retries} left)...`);
+            await new Promise(r => setTimeout(r, 1500));
+            return fetchAllFromCloud<T>(table, select, offset, limit, retries - 1);
+        }
+        console.error(`Cloud fetch ${table} failed after retries:`, e.message || e);
+        return [];
     }
 };
 

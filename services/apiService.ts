@@ -257,6 +257,51 @@ export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: stri
     }
 };
 
+/** Fetch ALL unfulfilled orders from Shopify regardless of date — ensures no active order is missed */
+export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgress?: (msg: string) => void): Promise<ShopifyOrder[]> => {
+    if (!settings.useLiveData) return [];
+    try {
+        // Shopify GraphQL: fulfillment_status:unshipped gets all orders not fully fulfilled, no date filter
+        let allRawOrders: any[] = [];
+        let hasNextPage = true;
+        let endCursor: string | null = null;
+        let pageCount = 0;
+        const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+        while (hasNextPage && pageCount < 100) {
+            if (onProgress) onProgress(`Unfulfilled: ${allRawOrders.length} orders — Page ${pageCount + 1}...`);
+            const variables = { cursor: endCursor, query: `fulfillment_status:unshipped status:open` };
+            const res = await fetchServerRoute('/api/shopify', { query, variables });
+            if (res.status === 401) throw new Error('Shopify Token Invalid.');
+            const json = await res.json();
+            if (json.errors) throw new Error(`Shopify API: ${json.errors[0]?.message}`);
+            const data = json.data?.orders;
+            if (!data) break;
+            const nodes = data.edges ? data.edges.map((e: any) => e.node) : [];
+            allRawOrders = [...allRawOrders, ...nodes];
+            hasNextPage = data.pageInfo?.hasNextPage || false;
+            endCursor = data.pageInfo?.endCursor || null;
+            pageCount++;
+        }
+        return allRawOrders.map((o: any) => {
+            const edges = o.lineItems?.edges || [];
+            const mappedItems = edges.map((edge: any) => {
+                const i = edge?.node;
+                if (!i || i.quantity <= 0) return null;
+                return { id: i.id, name: i.name || 'Unknown', quantity: i.quantity || 0, fulfilledQuantity: i.quantity - (i.unfulfilledQuantity || 0), sku: i.sku || '', ean: i.variant?.barcode || '-', variantId: i.variant?.id || '', vendor: i.vendor || '', itemStatus: i.fulfillmentStatus ? i.fulfillmentStatus.toLowerCase() : 'unfulfilled', imageUrl: i.image?.url || i.variant?.image?.url || '', price: i.originalUnitPriceSet?.shopMoney?.amount || undefined, properties: (i.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })) };
+            }).filter(Boolean);
+            let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
+            if (fStatus === 'partially_fulfilled') fStatus = 'partial';
+            const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
+            const sa = o.shippingAddress;
+            const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
+            return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress, shippingMethod: o.shippingLines?.edges?.[0]?.node?.title || undefined, shippingCost: o.totalShippingPriceSet?.shopMoney?.amount || undefined, subtotalPrice: o.subtotalPriceSet?.shopMoney?.amount || undefined, taxPrice: o.totalTaxSet?.shopMoney?.amount || undefined };
+        });
+    } catch (e: any) {
+        console.warn('Failed to fetch unfulfilled orders:', e.message);
+        return [];
+    }
+};
+
 const robustDecoFetch = async (settings: ApiSettings, endpoint: string, params: Record<string, string>) => {
     const response = await fetchServerRoute('/api/deco', { endpoint, params });
     

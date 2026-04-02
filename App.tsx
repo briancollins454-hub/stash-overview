@@ -8,7 +8,7 @@ import { exportOrdersToCSV } from './services/exportService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
@@ -420,10 +420,11 @@ const App: React.FC = () => {
 
             // Parallel fetch for speed
             setSyncStatusMsg('Syncing APIs...');
-            const [shopifyResult, decoResult, ssResult] = await Promise.allSettled([
+            const [shopifyResult, decoResult, ssResult, unfulfilledResult] = await Promise.allSettled([
                 fetchShopifyOrders(apiSettings, sinceDate, (msg) => setSyncStatusMsg(msg), isDeepSync, currentBaseOrders.length),
                 fetchDecoJobs(apiSettings, (msg) => setSyncStatusMsg(msg), isDeepSync),
-                fetchShipStationShipments(apiSettings)
+                fetchShipStationShipments(apiSettings),
+                fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg))
             ]);
 
             if (shopifyResult.status === 'fulfilled') {
@@ -444,9 +445,13 @@ const App: React.FC = () => {
                 setShipStationData(ssMap);
             }
 
+            // Merge: base orders + date-window orders + ALL unfulfilled orders (catches old active ones)
             const orderMap = new Map<string, ShopifyOrder>();
             currentBaseOrders.forEach(o => orderMap.set(o.id, o));
-            sOrders.forEach(o => orderMap.set(o.id, o)); 
+            sOrders.forEach(o => orderMap.set(o.id, o));
+            if (unfulfilledResult.status === 'fulfilled') {
+                unfulfilledResult.value.forEach(o => orderMap.set(o.id, o));
+            }
             const mergedOrders = Array.from(orderMap.values());
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
