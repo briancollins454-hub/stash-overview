@@ -6,7 +6,7 @@ function escapeHtml(str: string): string {
 }
 
 function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
-  const props = (i.properties || []).filter(p => p.value);
+  const props = (i.properties || []).filter(p => p.value && !String(p.name).startsWith('_'));
   const propsHtml = props.length > 0
     ? props.map(p => '<br><span style="color:#555;font-size:12px;">' + escapeHtml(String(p.name)) + ': ' + escapeHtml(String(p.value)) + '</span>').join('')
     : '';
