@@ -90,11 +90,16 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Method</td><td>' + shippingMethod + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
-        (order.decoJobId ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' : '') +
-        (order.productionDueDate ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Est. Production</td><td>' + new Date(order.productionDueDate).toLocaleDateString('en-GB') + '</td></tr>' : '') +
-        (order.decoJobId && order.deco ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' : '') +
-        (order.decoJobId && order.completionPercentage !== undefined ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' : '') +
       '</table>' +
+      (order.decoJobId ? '<div style="margin-top:6px;padding:5px 8px;background:#f0f0f0;border:1.5px solid #333;">' +
+        '<div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;border-bottom:1.5px solid #333;padding-bottom:2px;">Production Details</div>' +
+        '<table style="font-size:10px;border-collapse:collapse;">' +
+          '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' +
+          (order.productionDueDate ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Est. Production</td><td>' + new Date(order.productionDueDate).toLocaleDateString('en-GB') + '</td></tr>' : '') +
+          (order.deco ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' : '') +
+          (order.completionPercentage !== undefined ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' : '') +
+        '</table>' +
+      '</div>' : '') +
     '</td>' +
     '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
       '<div class="sticker">' +
@@ -163,19 +168,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
 
   const noteHtml = orderNote ? '<div class="section-title">Order Note</div><p>' + orderNote + '</p>' : '';
 
-  // Deco production detail
-  let decoHtml = '';
-  if (order.decoJobId && order.deco) {
-    const estDate = order.productionDueDate ? new Date(order.productionDueDate).toLocaleDateString('en-GB') : '-';
-    decoHtml =
-      '<div class="section-title">Production Details</div>' +
-      '<table style="font-size:10px;margin-bottom:6px;border-collapse:collapse;">' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Est. Production</td><td>' + estDate + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' +
-      '</table>';
-  }
+
 
 
 
@@ -200,7 +193,6 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     fulfilledSection +
     paymentHtml +
     noteHtml +
-    decoHtml +
     savedNotesHtml +
     '<div class="notes-section">Production Notes (write here):</div>';
 
