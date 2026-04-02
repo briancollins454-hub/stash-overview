@@ -243,7 +243,43 @@ export const saveReferenceProducts = async (settings: ApiSettings, products: Ref
 export const saveCloudJobLink = async (settings: ApiSettings, order_id: string, job_id: string) => {
     try {
         await fetchWithProxy('stash_job_links', 'POST', { order_id, job_id, updated_at: new Date().toISOString() }, 'resolution=merge-duplicates');
-    } catch (e) {}
+    } catch (e) {
+        console.error('Cloud Job Link Save Failed:', e);
+    }
+};
+
+export const saveCloudJobLinkBatch = async (settings: ApiSettings, links: Record<string, string>) => {
+    const entries = Object.entries(links);
+    if (entries.length === 0) return;
+    try {
+        const batchSize = 100;
+        for (let i = 0; i < entries.length; i += batchSize) {
+            const batch = entries.slice(i, i + batchSize).map(([order_id, job_id]) => ({
+                order_id, job_id, updated_at: new Date().toISOString()
+            }));
+            const res = await fetchWithProxy('stash_job_links', 'POST', batch, 'resolution=merge-duplicates');
+            if (!res.ok) console.error('Job Link Batch Save Error:', await res.text());
+        }
+    } catch (e: any) {
+        console.error('Cloud Job Link Batch Save Failed:', e.message || e);
+    }
+};
+
+export const saveCloudProductMappingBatch = async (settings: ApiSettings, mappings: Record<string, string>) => {
+    const entries = Object.entries(mappings);
+    if (entries.length === 0) return;
+    try {
+        const batchSize = 100;
+        for (let i = 0; i < entries.length; i += batchSize) {
+            const batch = entries.slice(i, i + batchSize).map(([shopify_pattern, deco_pattern]) => ({
+                shopify_pattern, deco_pattern, updated_at: new Date().toISOString()
+            }));
+            const res = await fetchWithProxy('stash_product_patterns', 'POST', batch, 'resolution=merge-duplicates');
+            if (!res.ok) console.error('Product Mapping Batch Save Error:', await res.text());
+        }
+    } catch (e: any) {
+        console.error('Cloud Product Mapping Batch Save Failed:', e.message || e);
+    }
 };
 
 export const saveCloudMappingBatch = async (settings: ApiSettings, mappings: { item_id: string, deco_id: string }[]) => {

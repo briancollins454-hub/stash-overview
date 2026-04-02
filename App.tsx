@@ -10,7 +10,7 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
+import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
@@ -500,26 +500,36 @@ const App: React.FC = () => {
                 saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
 
-            // Re-fetch cloud mappings so changes from other devices are picked up on every sync
-            setSyncStatusMsg('Syncing cloud mappings...');
+            // Two-way cloud sync: push local → fetch cloud → replace local (cloud = single source of truth)
+            setSyncStatusMsg('Pushing local mappings to cloud...');
             try {
+                // Push local mappings to cloud so any local-only entries survive the replace
+                const [currentMatches, currentPM, currentLinks] = await Promise.all([
+                    new Promise<Record<string,string>>(r => setConfirmedMatches(p => { r(p); return p; })),
+                    new Promise<Record<string,string>>(r => setProductMappings(p => { r(p); return p; })),
+                    new Promise<Record<string,string>>(r => setItemJobLinks(p => { r(p); return p; }))
+                ]);
+                await Promise.all([
+                    saveCloudMappingBatch(apiSettings, Object.entries(currentMatches).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
+                    saveCloudProductMappingBatch(apiSettings, currentPM),
+                    saveCloudJobLinkBatch(apiSettings, currentLinks)
+                ]);
+
+                setSyncStatusMsg('Fetching cloud mappings...');
                 const cloudData = await fetchCloudData(apiSettings);
                 if (cloudData) {
-                    setConfirmedMatches(prev => {
-                        const merged = { ...prev, ...(cloudData.mappings || {}) };
-                        setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                        return merged;
-                    });
-                    setProductMappings(prev => {
-                        const merged = { ...prev, ...(cloudData.productMappings || {}) };
-                        setLocalItem('stash_product_mappings', merged).catch(console.error);
-                        return merged;
-                    });
-                    setItemJobLinks(prev => {
-                        const merged = { ...prev, ...(cloudData.links || {}) };
-                        setLocalItem('stash_item_job_links', merged).catch(console.error);
-                        return merged;
-                    });
+                    // REPLACE — cloud is the single source of truth after push
+                    const cloudMappings = cloudData.mappings || {};
+                    setConfirmedMatches(cloudMappings);
+                    setLocalItem('stash_confirmed_matches', cloudMappings).catch(console.error);
+
+                    const cloudPM = cloudData.productMappings || {};
+                    setProductMappings(cloudPM);
+                    setLocalItem('stash_product_mappings', cloudPM).catch(console.error);
+
+                    const cloudLinks = cloudData.links || {};
+                    setItemJobLinks(cloudLinks);
+                    setLocalItem('stash_item_job_links', cloudLinks).catch(console.error);
                 }
             } catch (e) {
                 console.warn('Cloud mapping sync failed:', e);
@@ -707,24 +717,33 @@ const App: React.FC = () => {
             }
 
             setSyncStatusMsg('Loading Cloud State...');
+            // Push local mappings to cloud first (catches any that failed to save previously)
+            const hasLocalData = Object.keys(cachedMatches || {}).length > 0 || Object.keys(cachedProductMappings || {}).length > 0 || Object.keys(cachedJobLinks || {}).length > 0;
+            if (hasLocalData) {
+                setSyncStatusMsg('Pushing local mappings to cloud...');
+                await Promise.all([
+                    saveCloudMappingBatch(apiSettings, Object.entries(cachedMatches || {}).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
+                    saveCloudProductMappingBatch(apiSettings, cachedProductMappings || {}),
+                    saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {})
+                ]).catch(e => console.warn('Local push failed:', e));
+            }
+
+            setSyncStatusMsg('Fetching cloud mappings...');
             const cloudData = await fetchCloudData(apiSettings);
             if (cloudData) {
-                // Merge cloud mappings with local cache (cloud wins for conflicts since it may have data from other devices)
-                setConfirmedMatches(prev => {
-                    const merged = { ...prev, ...(cloudData.mappings || {}) };
-                    setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                    return merged;
-                });
-                setProductMappings(prev => {
-                    const merged = { ...prev, ...(cloudData.productMappings || {}) };
-                    setLocalItem('stash_product_mappings', merged).catch(console.error);
-                    return merged;
-                });
-                setItemJobLinks(prev => {
-                    const merged = { ...prev, ...(cloudData.links || {}) };
-                    setLocalItem('stash_item_job_links', merged).catch(console.error);
-                    return merged;
-                });
+                // REPLACE local with cloud — cloud is the single source of truth after push
+                const cloudMappings = cloudData.mappings || {};
+                setConfirmedMatches(cloudMappings);
+                setLocalItem('stash_confirmed_matches', cloudMappings).catch(console.error);
+
+                const cloudPM = cloudData.productMappings || {};
+                setProductMappings(cloudPM);
+                setLocalItem('stash_product_mappings', cloudPM).catch(console.error);
+
+                const cloudLinks = cloudData.links || {};
+                setItemJobLinks(cloudLinks);
+                setLocalItem('stash_item_job_links', cloudLinks).catch(console.error);
+
                 setPhysicalStock(cloudData.physicalStock || []);
                 setReturnStock(cloudData.returnStock || []);
                 setReferenceProducts(cloudData.referenceProducts || []);
