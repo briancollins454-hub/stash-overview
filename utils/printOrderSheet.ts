@@ -58,9 +58,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 10px 10px 6px 10px; overflow: hidden; font-size: 13px; line-height: 1.3; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; }',
-    '.sticker p { margin: 0; }',
-    '.sticker .note-text { font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 8px 10px 6px 10px; overflow: hidden; font-size: 12px; line-height: 1.25; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
+    '.sticker p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
+    '.sticker .note-text { font-size: 10px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
@@ -103,12 +103,11 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '</td>' +
     '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
       '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:15px;margin-bottom:3px;">#' + escapeHtml(order.shopify.orderNumber) + ' ' + escapeHtml(order.shopify.customerName) + '</p>' +
+      '<p style="font-weight:bold;font-size:13px;margin-bottom:2px;">#' + escapeHtml(order.shopify.orderNumber) + ' ' + escapeHtml(order.shopify.customerName) + '</p>' +
       addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
       (addr && addr.phone ? '<p>' + escapeHtml(addr.phone || '') + '</p>' : '') +
-      (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Note:</p><p class="note-text">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p>Deco Job: <strong>' + escapeHtml(order.decoJobId) + '</strong></p>' : '') +
+      (orderNote ? '<p style="margin-top:2px;font-weight:bold;font-size:10px;">Note:</p><p class="note-text">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:2px;font-size:11px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
       '</div>' +
     '</td>' +
     '</tr></table>';
