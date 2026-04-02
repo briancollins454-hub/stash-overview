@@ -91,9 +91,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
         (order.decoJobId ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' : '') +
+        (order.productionDueDate ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Est. Production</td><td>' + new Date(order.productionDueDate).toLocaleDateString('en-GB') + '</td></tr>' : '') +
         (order.decoJobId && order.deco ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' : '') +
         (order.decoJobId && order.completionPercentage !== undefined ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' : '') +
-        (order.productionDueDate ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Est. Production</td><td>' + new Date(order.productionDueDate).toLocaleDateString('en-GB') + '</td></tr>' : '') +
       '</table>' +
     '</td>' +
     '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
