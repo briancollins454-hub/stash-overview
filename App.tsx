@@ -71,6 +71,7 @@ const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment')
 const FinancialDashboard = lazyRetry(() => import('./components/FinancialDashboard'));
 const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 const CommandCenter = lazyRetry(() => import('./components/CommandCenter'));
+const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -2304,6 +2305,11 @@ const App: React.FC = () => {
             </Suspense>
           </div>
         )}
+
+        {/* Voice AI Assistant */}
+        <Suspense fallback={null}>
+          <VoiceAssistant stats={stats} orders={unifiedOrders} onNavigate={setActiveTab} onSync={(deep) => loadData(!!deep)} />
+        </Suspense>
     </div>
   );
 };
