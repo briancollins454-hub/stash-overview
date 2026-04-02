@@ -1,6 +1,6 @@
 
 import { ApiSettings } from '../components/SettingsModal';
-import { ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from '../types';
+import { ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct, DecoJob } from '../types';
 
 /**
  * SyncService handles the persistence of user-defined data (mappings/links),
@@ -86,6 +86,7 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
     links: Record<string, string>;
     productMappings: Record<string, string>;
     orders: ShopifyOrder[];
+    decoJobs: DecoJob[];
     physicalStock: PhysicalStockItem[];
     returnStock: ReturnStockItem[];
     referenceProducts: ReferenceProduct[];
@@ -95,14 +96,15 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
         const missingTables: string[] = [];
         
         // Parallel fetch for speed with full pagination support
-        const [mappings, links, productMappings, physicalStock, returnStock, referenceProducts, rawOrders] = await Promise.all([
+        const [mappings, links, productMappings, physicalStock, returnStock, referenceProducts, rawOrders, rawDecoJobs] = await Promise.all([
             fetchAllFromCloud<CloudMapping>('stash_mappings'),
             fetchAllFromCloud<CloudJobLink>('stash_job_links'),
             fetchAllFromCloud<any>('stash_product_patterns'),
             fetchAllFromCloud<PhysicalStockItem>('stash_stock'),
             fetchAllFromCloud<ReturnStockItem>('stash_returns'),
             fetchAllFromCloud<ReferenceProduct>('stash_reference_products'),
-            fetchAllFromCloud<any>('stash_orders', 'order_data')
+            fetchAllFromCloud<any>('stash_orders', 'order_data'),
+            fetchAllFromCloud<any>('stash_deco_jobs', 'job_data')
         ]);
 
         if (mappings === null) missingTables.push('stash_mappings');
@@ -112,8 +114,10 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
         if (returnStock === null) missingTables.push('stash_returns');
         if (referenceProducts === null) missingTables.push('stash_reference_products');
         if (rawOrders === null) missingTables.push('stash_orders');
+        if (rawDecoJobs === null) missingTables.push('stash_deco_jobs');
 
         const cloudOrders = (rawOrders || []).map(row => row.order_data as ShopifyOrder);
+        const cloudDecoJobs = (rawDecoJobs || []).map(row => row.job_data as DecoJob);
 
         const mappingRecord: Record<string, string> = {};
         if (Array.isArray(mappings)) {
@@ -135,6 +139,7 @@ export const fetchCloudData = async (settings: ApiSettings): Promise<{
             links: linkRecord, 
             productMappings: productMappingRecord, 
             orders: cloudOrders, 
+            decoJobs: cloudDecoJobs,
             physicalStock: physicalStock || [], 
             returnStock: returnStock || [], 
             referenceProducts: referenceProducts || [],
@@ -178,6 +183,33 @@ export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrde
             console.error("Cloud Order Save Failed:", e.message || e);
         }
         throw e;
+    }
+};
+
+export const saveCloudDecoJobs = async (settings: ApiSettings, jobs: DecoJob[]) => {
+    if (jobs.length === 0) return;
+    try {
+        const uniqueJobs = Array.from(new Map(jobs.map(j => [j.jobNumber, j])).values());
+        const batchSize = 20;
+        for (let i = 0; i < uniqueJobs.length; i += batchSize) {
+            const batch = uniqueJobs.slice(i, i + batchSize);
+            const payload = batch.map(j => ({
+                job_number: j.jobNumber,
+                job_data: j,
+                updated_at: new Date().toISOString()
+            }));
+            const res = await fetchWithProxy('stash_deco_jobs', 'POST', payload, 'resolution=merge-duplicates');
+            if (!res.ok) {
+                const error = await res.text();
+                console.error(`Deco Job Batch Save Error: ${error}`);
+            }
+        }
+    } catch (e: any) {
+        if (e.status === 404 || e.message.includes('404')) {
+            console.warn('Cloud Deco Job Save Failed: Table "stash_deco_jobs" not found. Create it in Supabase.');
+        } else {
+            console.error('Cloud Deco Job Save Failed:', e.message || e);
+        }
     }
 };
 

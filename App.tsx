@@ -10,7 +10,7 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
+import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
@@ -500,6 +500,9 @@ const App: React.FC = () => {
                 saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
 
+            // Save Deco jobs to cloud so all devices have the same job data
+            saveCloudDecoJobs(apiSettings, mergedDecoJobs).catch(console.error);
+
             // Two-way cloud sync: push local → fetch cloud → replace local (cloud = single source of truth)
             setSyncStatusMsg('Pushing local mappings to cloud...');
             try {
@@ -717,14 +720,18 @@ const App: React.FC = () => {
             }
 
             setSyncStatusMsg('Loading Cloud State...');
-            // Push local mappings to cloud first (catches any that failed to save previously)
-            const hasLocalData = Object.keys(cachedMatches || {}).length > 0 || Object.keys(cachedProductMappings || {}).length > 0 || Object.keys(cachedJobLinks || {}).length > 0;
-            if (hasLocalData) {
-                setSyncStatusMsg('Pushing local mappings to cloud...');
+            // Push ALL local data to cloud first (catches any that failed to save previously)
+            const hasLocalMappings = Object.keys(cachedMatches || {}).length > 0 || Object.keys(cachedProductMappings || {}).length > 0 || Object.keys(cachedJobLinks || {}).length > 0;
+            const hasLocalJobs = (cachedJobs || []).length > 0;
+            const hasLocalOrders = initialOrders.length > 0;
+            if (hasLocalMappings || hasLocalJobs || hasLocalOrders) {
+                setSyncStatusMsg('Pushing local data to cloud...');
                 await Promise.all([
                     saveCloudMappingBatch(apiSettings, Object.entries(cachedMatches || {}).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
                     saveCloudProductMappingBatch(apiSettings, cachedProductMappings || {}),
-                    saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {})
+                    saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {}),
+                    hasLocalJobs ? saveCloudDecoJobs(apiSettings, cachedJobs!) : Promise.resolve(),
+                    hasLocalOrders ? saveCloudOrders(apiSettings, initialOrders) : Promise.resolve()
                 ]).catch(e => console.warn('Local push failed:', e));
             }
 
@@ -748,6 +755,18 @@ const App: React.FC = () => {
                 setReturnStock(cloudData.returnStock || []);
                 setReferenceProducts(cloudData.referenceProducts || []);
                 setMissingCloudTables(cloudData.missingTables || []);
+
+                // Merge cloud Deco jobs with local — cloud wins on conflicts (newer data from deep scans on other devices)
+                if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
+                    setRawDecoJobs(prev => {
+                        const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+                        cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                        const merged = Array.from(jobMap.values());
+                        setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
+                        return merged;
+                    });
+                }
+
                 if (cloudData.orders && cloudData.orders.length > 0) {
                     // Merge cloud orders with local cache, preserving the most complete data from each source
                     const orderMap = new Map<string, ShopifyOrder>();
@@ -774,6 +793,7 @@ const App: React.FC = () => {
                     });
                     initialOrders = Array.from(orderMap.values());
                     setRawShopifyOrders(initialOrders);
+                    setLocalItem('stash_raw_shopify_orders', initialOrders).catch(console.error);
                 }
             }
         } catch (e: any) {
@@ -1732,7 +1752,7 @@ const App: React.FC = () => {
                             <button onClick={() => { if(window.confirm("Deep scan will fetch updates across the full 365-day window. Your cached data will be preserved and updated. Proceed?")) loadData(true); }} disabled={loading} className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest ${isDeepSyncRunning ? 'bg-amber-100 text-amber-800' : 'text-indigo-500 hover:bg-indigo-50'}`}>
                                 {isDeepSyncRunning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ArrowDownToLine className="w-3.5 h-3.5" />} Deep Scan
                             </button>
-                            <button onClick={async () => { if(!window.confirm("FULL RESET: This will wipe ALL local cached data and re-download everything from scratch (APIs + cloud mappings). All computers should do this to get in sync. Proceed?")) return; setSyncStatusMsg('Wiping local cache...'); setLoading(true); try { await clearLocalDB(); setRawShopifyOrders([]); setRawDecoJobs([]); setConfirmedMatches({}); setProductMappings({}); setItemJobLinks({}); setPhysicalStock([]); setReturnStock([]); setReferenceProducts([]); setSyncStatusMsg('Fetching cloud mappings...'); const cloudData = await fetchCloudData(apiSettings); if (cloudData) { if (cloudData.mappings) { setConfirmedMatches(cloudData.mappings); await setLocalItem('stash_confirmed_matches', cloudData.mappings); } if (cloudData.productMappings) { setProductMappings(cloudData.productMappings); await setLocalItem('stash_product_mappings', cloudData.productMappings); } if (cloudData.links) { setItemJobLinks(cloudData.links); await setLocalItem('stash_item_job_links', cloudData.links); } if (cloudData.physicalStock) setPhysicalStock(cloudData.physicalStock); if (cloudData.returnStock) setReturnStock(cloudData.returnStock); if (cloudData.referenceProducts) setReferenceProducts(cloudData.referenceProducts); } setLoading(false); await loadData(true); setToastMsg({ text: 'Full reset complete — all data re-synced from cloud', type: 'success' }); } catch(e: any) { setLoading(false); setToastMsg({ text: `Reset failed: ${e.message}`, type: 'error' }); } }} disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest text-red-500 hover:bg-red-50 border-l border-gray-100">
+                            <button onClick={async () => { if(!window.confirm("FULL RESET: This will wipe ALL local cached data and re-download everything from scratch (APIs + cloud mappings). All computers should do this to get in sync. Proceed?")) return; setSyncStatusMsg('Wiping local cache...'); setLoading(true); try { await clearLocalDB(); setRawShopifyOrders([]); setRawDecoJobs([]); setConfirmedMatches({}); setProductMappings({}); setItemJobLinks({}); setPhysicalStock([]); setReturnStock([]); setReferenceProducts([]); setSyncStatusMsg('Fetching cloud data...'); const cloudData = await fetchCloudData(apiSettings); if (cloudData) { if (cloudData.mappings) { setConfirmedMatches(cloudData.mappings); await setLocalItem('stash_confirmed_matches', cloudData.mappings); } if (cloudData.productMappings) { setProductMappings(cloudData.productMappings); await setLocalItem('stash_product_mappings', cloudData.productMappings); } if (cloudData.links) { setItemJobLinks(cloudData.links); await setLocalItem('stash_item_job_links', cloudData.links); } if (cloudData.decoJobs && cloudData.decoJobs.length > 0) { setRawDecoJobs(cloudData.decoJobs); await setLocalItem('stash_raw_deco_jobs', cloudData.decoJobs); } if (cloudData.orders && cloudData.orders.length > 0) { setRawShopifyOrders(cloudData.orders); await setLocalItem('stash_raw_shopify_orders', cloudData.orders); } if (cloudData.physicalStock) setPhysicalStock(cloudData.physicalStock); if (cloudData.returnStock) setReturnStock(cloudData.returnStock); if (cloudData.referenceProducts) setReferenceProducts(cloudData.referenceProducts); } setLoading(false); await loadData(true); setToastMsg({ text: 'Full reset complete — all data re-synced from cloud', type: 'success' }); } catch(e: any) { setLoading(false); setToastMsg({ text: `Reset failed: ${e.message}`, type: 'error' }); } }} disabled={loading} className="flex items-center gap-2 px-4 py-2 text-[10px] font-black transition-all uppercase tracking-widest text-red-500 hover:bg-red-50 border-l border-gray-100">
                                 <RefreshCw className="w-3.5 h-3.5" /> Full Reset
                             </button>
                         </div>
