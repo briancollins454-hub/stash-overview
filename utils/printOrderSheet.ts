@@ -58,9 +58,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 8px 10px 6px 10px; overflow: hidden; font-size: 12px; line-height: 1.25; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
-    '.sticker p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
-    '.sticker .note-text { font-size: 10px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
+    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 8px 10px 6px 10px; overflow: hidden; font-size: 11px; line-height: 1.2; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
+    '.sticker p { margin: 0; }',
+    '.sticker .note-text { font-size: 9px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
@@ -74,7 +74,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   // Two-column header: logo+barcode+details LEFT, shipping address RIGHT
   const addr = order.shopify.shippingAddress;
   const addrLines = addr
-    ? [addr.name, addr.address1, addr.address2, [addr.city, addr.zip].filter(Boolean).join(' '), addr.country].filter(Boolean).map(l => escapeHtml(l))
+    ? [addr.name, addr.address1, addr.address2, addr.city, addr.zip, addr.country].filter(Boolean).map(l => escapeHtml(l))
     : [];
   const noAddressWarning = addrLines.length === 0
     ? '<div style="background:#fef2f2;border:2px solid #dc2626;color:#dc2626;padding:6px 10px;font-weight:bold;font-size:12px;text-align:center;margin:4px 0;">\u26A0 NO SHIPPING ADDRESS ON FILE \u2014 Check Shopify / ShipStation</div>'
