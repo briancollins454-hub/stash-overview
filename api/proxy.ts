@@ -5,6 +5,7 @@ const ALLOWED_PROXY_DOMAINS = [
   '.shopify.com',
   '.secure-decoration.com',
   '.supabase.co',
+  'hooks.slack.com',
 ];
 
 const isAllowedProxyTarget = (targetUrl: string): boolean => {
@@ -18,7 +19,10 @@ const isAllowedProxyTarget = (targetUrl: string): boolean => {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin || '';
+  if (origin === 'https://stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

@@ -709,7 +709,7 @@ const StockManager: React.FC<StockManagerProps> = ({
                                                         ) : (
                                                             <>
                                                                 <button onClick={() => handleStartEdit(item)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all"><Edit className="w-4 h-4" /></button>
-                                                                <button onClick={() => { if(window.confirm("Remove this SKU row?")) setPhysicalStock(prev => prev.filter(i => i.id !== item.id)); }} className="p-2 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
+                                                                <button onClick={() => { if(window.confirm("Remove this SKU row? This will delete all matching records.")) { const key = `${item.ean}-${item.isEmbellished}-${item.isEmbellished ? item.clubName : 'plain'}-${item.size}-${item.colour}`; setPhysicalStock(prev => prev.filter(i => `${i.ean}-${i.isEmbellished}-${i.isEmbellished ? i.clubName : 'plain'}-${i.size}-${i.colour}` !== key)); } }} className="p-2 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition-all"><Trash2 className="w-4 h-4" /></button>
                                                             </>
                                                         )}
                                                     </div>

@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin || '';
+  if (origin === 'https://stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -20,10 +23,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'path is required' });
   }
 
-  // Only allow stash_ prefixed tables
+  // Only allow known stash_ table names (no query params in table name)
   const tableName = path.split('?')[0];
-  if (!tableName.startsWith('stash_') && tableName !== 'order_notes') {
-    return res.status(403).json({ error: 'Only stash_ and order_notes tables are allowed' });
+  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'order_notes'];
+  if (!ALLOWED_TABLES.includes(tableName)) {
+    return res.status(403).json({ error: 'Table not allowed' });
   }
 
   try {

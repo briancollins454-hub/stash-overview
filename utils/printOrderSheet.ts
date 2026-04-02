@@ -1,13 +1,17 @@
 import { UnifiedOrder } from '../types';
 import { getNotesForOrder } from '../services/notesService';
 
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
 function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const props = (i.properties || []).filter(p => p.value);
   const propsHtml = props.length > 0
-    ? props.map(p => '<br><small style="color:#555;font-size:8px;">' + p.name + ': ' + p.value + '</small>').join('')
+    ? props.map(p => '<br><small style="color:#555;font-size:8px;">' + escapeHtml(String(p.name)) + ': ' + escapeHtml(String(p.value)) + '</small>').join('')
     : '';
-  const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + i.sku + '</small>' : '';
-  const eanHtml = i.ean && i.ean !== '-' ? '<br><small style="color:#888;font-size:8px;">EAN: ' + i.ean + '</small>' : '';
+  const skuHtml = i.sku ? '<br><small style="color:#888;font-size:8px;">SKU: ' + escapeHtml(i.sku) + '</small>' : '';
+  const eanHtml = i.ean && i.ean !== '-' ? '<br><small style="color:#888;font-size:8px;">EAN: ' + escapeHtml(i.ean) + '</small>' : '';
   const imgHtml = i.imageUrl
     ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:32px;height:32px;object-fit:cover;" /><div style="display:none;width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>'
     : '<div style="width:32px;height:32px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:7px;color:#999;">No img</div>';
@@ -17,7 +21,7 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const qtyHtml = qty > 1 ? '<strong style="font-size:12px;">' + qty + '</strong>' : '' + qty;
   return '<tr>' +
     '<td style="width:36px;text-align:center;">' + imgHtml + '</td>' +
-    '<td>' + i.name + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td>' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
     '<td style="text-align:center;">' + qtyHtml + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
@@ -62,17 +66,17 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
-  const orderDate = new Date(order.shopify.date).toLocaleDateString('en-GB');
-  const shippingMethod = order.shopify.shippingMethod || '-';
-  const shippingCost = order.shopify.shippingCost ? '\u00A3' + parseFloat(order.shopify.shippingCost).toFixed(2) : '\u00A30.00';
+  const orderDate = escapeHtml(new Date(order.shopify.date).toLocaleDateString('en-GB'));
+  const shippingMethod = escapeHtml(order.shopify.shippingMethod || '-');
+  const shippingCost = order.shopify.shippingCost ? '\u00A3' + escapeHtml(parseFloat(order.shopify.shippingCost).toFixed(2)) : '\u00A30.00';
 
   // Order note
-  const orderNote = order.shopify.timelineComments && order.shopify.timelineComments[0] ? order.shopify.timelineComments[0] : '';
+  const orderNote = order.shopify.timelineComments && order.shopify.timelineComments[0] ? escapeHtml(order.shopify.timelineComments[0]) : '';
 
   // Two-column header: logo+barcode+details LEFT, shipping address RIGHT
   const addr = order.shopify.shippingAddress;
   const addrLines = addr
-    ? [addr.name, addr.address1, addr.address2, [addr.city, addr.zip].filter(Boolean).join(' '), addr.country].filter(Boolean)
+    ? [addr.name, addr.address1, addr.address2, [addr.city, addr.zip].filter(Boolean).join(' '), addr.country].filter(Boolean).map(l => escapeHtml(l))
     : [];
   const noAddressWarning = addrLines.length === 0
     ? '<div style="background:#fef2f2;border:2px solid #dc2626;color:#dc2626;padding:6px 10px;font-weight:bold;font-size:12px;text-align:center;margin:4px 0;">\u26A0 NO SHIPPING ADDRESS ON FILE \u2014 Check Shopify / ShipStation</div>'
@@ -92,12 +96,12 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '</td>' +
     '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
       '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:15px;margin-bottom:3px;">#' + order.shopify.orderNumber + ' ' + order.shopify.customerName + '</p>' +
+      '<p style="font-weight:bold;font-size:15px;margin-bottom:3px;">#' + escapeHtml(order.shopify.orderNumber) + ' ' + escapeHtml(order.shopify.customerName) + '</p>' +
       addrLines.map(function(l) { return '<p>' + l + '</p>'; }).join('') +
-      (addr && addr.phone ? '<p>' + addr.phone + '</p>' : '') +
+      (addr && addr.phone ? '<p>' + escapeHtml(addr.phone || '') + '</p>' : '') +
       (orderNote ? '<p style="margin-top:3px;font-weight:bold;">Note:</p><p class="note-text">' + orderNote + '</p>' : '') +
       '<p style="margin-top:2px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
-      (order.decoJobId ? '<p>Deco Job: <strong>' + order.decoJobId + '</strong></p>' : '') +
+      (order.decoJobId ? '<p>Deco Job: <strong>' + escapeHtml(order.decoJobId) + '</strong></p>' : '') +
       '</div>' +
     '</td>' +
     '</tr></table>';
@@ -105,8 +109,8 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   // Order heading with separator
   const orderHeadingHtml =
     '<table style="width:100%;border-top:2px solid #000;border-collapse:collapse;margin-bottom:2px;"><tr>' +
-    '<td><h2 style="margin:4px 0;font-size:13px;">Order #' + order.shopify.orderNumber + '</h2></td>' +
-    '<td style="text-align:right;"><h3 style="margin:4px 0;font-size:12px;">' + order.shopify.customerName + '</h3></td>' +
+    '<td><h2 style="margin:4px 0;font-size:13px;">Order #' + escapeHtml(order.shopify.orderNumber) + '</h2></td>' +
+    '<td style="text-align:right;"><h3 style="margin:4px 0;font-size:12px;">' + escapeHtml(order.shopify.customerName) + '</h3></td>' +
     '</tr></table>';
 
   // SLA Countdown
@@ -164,7 +168,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     decoHtml =
       '<div class="section-title">Production Details</div>' +
       '<table style="font-size:10px;margin-bottom:6px;border-collapse:collapse;">' +
-        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Deco Job</td><td>' + order.decoJobId + '</td></tr>' +
+        '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Est. Production</td><td>' + estDate + '</td></tr>' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' +
         '<tr><td style="padding:2px 12px 2px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' +
@@ -188,9 +192,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   if (notes.length > 0) {
     savedNotesHtml = '<div class="section-title" style="margin-top:16px">Internal Notes</div><div class="saved-notes">' +
       notes.map(function(n) {
-        const author = (n.author || 'Unknown').split('@')[0];
+        const author = escapeHtml((n.author || 'Unknown').split('@')[0]);
         const date = new Date(n.createdAt).toLocaleDateString('en-GB');
-        return '<div class="note"><strong>' + author + '</strong> (' + date + '): ' + n.text + '</div>';
+        return '<div class="note"><strong>' + author + '</strong> (' + date + '): ' + escapeHtml(n.text) + '</div>';
       }).join('') + '</div>';
   }
 

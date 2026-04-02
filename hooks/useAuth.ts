@@ -51,12 +51,8 @@ export function useAuth() {
             }
           })
           .catch(() => {
-            // Token verify failed — still set the stored user for offline/fast load
-            // It will re-verify on next API call
-            if (storedUser) {
-              setUser(storedUser);
-              setCustomToken(token);
-            }
+            // Token verify failed — clear stored auth; require re-login
+            localStorage.removeItem(CUSTOM_AUTH_KEY);
           })
           .finally(() => setIsAuthLoading(false));
       } catch {

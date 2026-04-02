@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UnifiedOrder } from '../types';
 import { Printer, Package, ChevronDown, ChevronRight, Filter, CheckSquare, Square } from 'lucide-react';
 
@@ -74,7 +74,7 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
   const allMethods = useMemo(() => [...new Set(lines.map(l => l.method))].sort(), [lines]);
 
   // Initialize selectedMethods with all methods
-  useState(() => { if (selectedMethods.size === 0 && allMethods.length > 0) setSelectedMethods(new Set(allMethods)); });
+  useEffect(() => { if (selectedMethods.size === 0 && allMethods.length > 0) setSelectedMethods(new Set(allMethods)); }, [allMethods]);
 
   const filteredLines = useMemo(() => {
     if (selectedMethods.size === 0) return lines;

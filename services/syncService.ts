@@ -184,25 +184,37 @@ export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrde
 export const savePhysicalStockItem = async (settings: ApiSettings, item: PhysicalStockItem) => {
     try {
         await fetchWithProxy('stash_stock', 'POST', item, 'resolution=merge-duplicates');
-    } catch (e) {}
+    } catch (e) {
+        console.error('savePhysicalStockItem failed:', e);
+        throw e;
+    }
 };
 
 export const deletePhysicalStockItem = async (settings: ApiSettings, id: string) => {
     try {
         await fetchWithProxy(`stash_stock?id=eq.${id}`, 'DELETE');
-    } catch (e) {}
+    } catch (e) {
+        console.error('deletePhysicalStockItem failed:', e);
+        throw e;
+    }
 };
 
 export const saveReturnStockItem = async (settings: ApiSettings, item: ReturnStockItem) => {
     try {
         await fetchWithProxy('stash_returns', 'POST', item, 'resolution=merge-duplicates');
-    } catch (e) {}
+    } catch (e) {
+        console.error('saveReturnStockItem failed:', e);
+        throw e;
+    }
 };
 
 export const deleteReturnStockItem = async (settings: ApiSettings, id: string) => {
     try {
         await fetchWithProxy(`stash_returns?id=eq.${id}`, 'DELETE');
-    } catch (e) {}
+    } catch (e) {
+        console.error('deleteReturnStockItem failed:', e);
+        throw e;
+    }
 };
 
 export const saveReferenceProducts = async (settings: ApiSettings, products: ReferenceProduct[]) => {

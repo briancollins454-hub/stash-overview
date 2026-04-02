@@ -8,7 +8,10 @@ const DB_NAME = 'StashShopSyncDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'app_state';
 
+let dbInstance: IDBDatabase | null = null;
+
 export const initDB = (): Promise<IDBDatabase> => {
+  if (dbInstance) return Promise.resolve(dbInstance);
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -20,7 +23,9 @@ export const initDB = (): Promise<IDBDatabase> => {
     };
 
     request.onsuccess = (event) => {
-      resolve((event.target as IDBOpenDBRequest).result);
+      dbInstance = (event.target as IDBOpenDBRequest).result;
+      dbInstance.onclose = () => { dbInstance = null; };
+      resolve(dbInstance);
     };
 
     request.onerror = (event) => {

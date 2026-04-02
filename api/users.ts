@@ -7,7 +7,10 @@ const FIREBASE_API_KEY = 'AIzaSyBCRGZHAAsD2y4Ns0KoJqIHQOGzJUJH5Y4';
 const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 const COLLECTION = 'stash_users';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || FIREBASE_API_KEY;
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+if (!SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET env var is required');
+}
 
 // ─── Password Hashing ──────────────────────────────────────────────────────
 function hashPassword(password: string): string {

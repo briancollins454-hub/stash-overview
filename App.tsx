@@ -1161,7 +1161,7 @@ const App: React.FC = () => {
     if (isScanning) return;
     setIsScanning(true); setScanProgress(0); setScanLog([]); setScanCount({ current: 0, total: orderIds.length });
     setShowScanConsole(true); stopScanRef.current = false;
-    
+    try {
     const concurrency = 5;
     let completed = 0;
     
@@ -1190,7 +1190,9 @@ const App: React.FC = () => {
             await new Promise(r => setTimeout(r, 300)); // Reduced delay
         }
     }
+    } finally {
     setIsScanning(false);
+    }
   };
 
   // Auto-link "Not On Deco" orders by matching customer names against cached Deco jobs + API search
@@ -1386,7 +1388,7 @@ const App: React.FC = () => {
           filtered = filtered.filter(o => o.shopify.orderNumber.includes(lower) || o.shopify.customerName.toLowerCase().includes(lower) || (o.decoJobId && o.decoJobId.includes(lower))); 
       }
       return filtered;
-  }, [unifiedOrders, debouncedSearch, showFulfilled, includeMto, activeQuickFilter, startDate, endDate, partialThreshold]);
+  }, [unifiedOrders, debouncedSearch, showFulfilled, includeMto, activeQuickFilter, startDate, endDate, partialThreshold, excludedTags]);
 
   const tableOrders = useMemo(() => {
       let filtered = [...baseFilteredOrders];

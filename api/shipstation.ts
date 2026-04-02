@@ -1,7 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin || '';
+  if (origin === 'https://stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -29,15 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  // Use server-side credentials if available, otherwise client-provided
-  let authHeader: string;
-  if (apiKey && apiSecret) {
-    authHeader = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
-  } else if (clientAuth && typeof clientAuth === 'string') {
-    authHeader = clientAuth;
-  } else {
-    return res.status(500).json({ error: 'ShipStation credentials not configured' });
+  // Use server-side credentials only — never accept client-provided auth
+  if (!apiKey || !apiSecret) {
+    return res.status(500).json({ error: 'ShipStation credentials not configured on server' });
   }
+  const authHeader = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
 
   const fetchMethod = (reqMethod || 'GET').toUpperCase();
   const allowedMethods = ['GET', 'POST', 'PUT'];

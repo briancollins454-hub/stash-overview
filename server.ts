@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fetch, { RequestInit as FetchRequestInit } from "node-fetch";
+import crypto from "crypto";
 
 // --- Structured Logger ---
 const log = {
@@ -33,7 +34,7 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '2mb' }));
   
   // Health check
   app.get("/api/health", (req, res) => {
@@ -50,10 +51,18 @@ async function startServer() {
     const topic = req.headers['x-shopify-topic'] as string || 'unknown';
     const shopDomain = req.headers['x-shopify-shop-domain'] as string || '';
 
-    // In production, verify HMAC signature here:
-    // const hmac = req.headers['x-shopify-hmac-sha256'];
-    // const computedHmac = crypto.createHmac('sha256', SHOPIFY_WEBHOOK_SECRET).update(rawBody).digest('base64');
-    // if (hmac !== computedHmac) return res.status(401).send('Unauthorized');
+    // Verify HMAC signature if secret is configured
+    const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const hmac = req.headers['x-shopify-hmac-sha256'] as string;
+      const computedHmac = crypto.createHmac('sha256', webhookSecret)
+        .update(JSON.stringify(req.body))
+        .digest('base64');
+      if (!hmac || hmac !== computedHmac) {
+        log.warn('Webhook HMAC verification failed', { topic, shop: shopDomain });
+        return res.status(401).send('Unauthorized');
+      }
+    }
 
     const event = {
       id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -114,6 +123,11 @@ async function startServer() {
       return res.status(400).send("Missing code or shop parameter");
     }
 
+    // Validate shop is a legitimate Shopify domain
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(String(shop))) {
+      return res.status(400).send("Invalid shop domain");
+    }
+
     try {
       const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
         method: "POST",
@@ -133,6 +147,8 @@ async function startServer() {
       }
 
       // Return a script that sends the token back to the main window and closes the popup
+      // Use JSON serialization to prevent XSS via token/shop injection
+      const safeData = JSON.stringify({ type: 'SHOPIFY_AUTH_SUCCESS', accessToken, shop: String(shop) });
       res.send(`
         <html>
           <head>
@@ -151,11 +167,7 @@ async function startServer() {
             </div>
             <script>
               if (window.opener) {
-                window.opener.postMessage({ 
-                  type: 'SHOPIFY_AUTH_SUCCESS', 
-                  accessToken: '${accessToken}',
-                  shop: '${shop}'
-                }, '*');
+                window.opener.postMessage(${safeData.replace(/</g, '\u003c')}, window.location.origin);
                 setTimeout(() => window.close(), 1000);
               } else {
                 window.location.href = '/';
