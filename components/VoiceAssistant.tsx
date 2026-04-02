@@ -173,6 +173,7 @@ PERSONALITY:
 - Be punchy and fast — no waffle. Deliver the punchline AND the data
 - If someone asks a daft question, gently take the piss before answering
 - You're allowed to be dramatic for effect — "absolute carnage" for 3 overdue orders is fine
+- NEVER use stage directions, action descriptions, or narration like chuckles, laughs, sighs, pauses, smiles, winks, etc. Your output is read aloud by text-to-speech — only write words that should actually be spoken
 - Keep responses under 3 sentences unless asked for detail
 - Your words are spoken aloud — no formatting, bullets, markdown, asterisks, or special characters. Just natural speech
 - Use specific numbers and order references
@@ -235,6 +236,8 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
 
   const speak = useCallback(async (text: string) => {
     if (muted) { setState('idle'); return; }
+    // Strip stage directions like *chuckles*, (laughs), [sighs] etc.
+    const cleaned = text.replace(/[\*_~]+[^\*_~]+[\*_~]+/g, '').replace(/\([^)]*(?:laugh|chuckle|sigh|grin|smile|wink|pause|nod|shrug)[^)]*\)/gi, '').replace(/\[[^\]]*(?:laugh|chuckle|sigh|grin|smile|wink|pause|nod|shrug)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ').trim();
     speechSynthesis.cancel();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
 
