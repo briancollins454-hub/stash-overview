@@ -113,8 +113,8 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   let countdownHtml = '';
   if (order.slaTargetDate) {
     const txt = isOverdue
-      ? '\u26A0 ' + Math.abs(daysLeft) + ' DAYS OVERDUE \u2014 Target: ' + order.slaTargetDate
-      : daysLeft + ' DAYS REMAINING \u2014 Target: ' + order.slaTargetDate;
+      ? '\u26A0 ' + Math.abs(daysLeft) + ' DAYS OVERDUE \u2014 Target: ' + (order.slaTargetDate?.split('-').reverse().join('/') || '')
+      : daysLeft + ' DAYS REMAINING \u2014 Target: ' + (order.slaTargetDate?.split('-').reverse().join('/') || '');
     const cls = isOverdue ? 'overdue' : 'ok';
     const col = isOverdue ? '#dc2626' : '#16a34a';
     countdownHtml = '<div class="countdown ' + cls + '" style="border-color:' + col + '">' + txt + '</div>';

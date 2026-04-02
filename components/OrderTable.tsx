@@ -904,7 +904,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                 </div>
                             )}
                             <div className="text-[10px] text-gray-400 mt-1 font-bold uppercase tracking-widest">
-                                DISPATCH: {order.slaTargetDate || '-'}
+                                DISPATCH: {order.slaTargetDate?.split('-').reverse().join('/') || '-'}
                             </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">

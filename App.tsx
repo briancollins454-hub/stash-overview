@@ -818,7 +818,7 @@ const App: React.FC = () => {
           const day = targetDate.getDay(); 
           if (day !== 0 && day !== 6 && !isDateInHolidaySet(targetDate, holidaySet)) addedDays++; 
       }
-      const targetDateStr = targetDate.toLocaleDateString('en-GB');
+      const targetDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
       const end = fulfillmentDate ? new Date(fulfillmentDate) : new Date(); end.setHours(0, 0, 0, 0);
       let daysPassed = 0; let counterDate = new Date(start);
       while (counterDate < end) { 

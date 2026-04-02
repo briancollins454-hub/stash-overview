@@ -177,7 +177,7 @@ export function buildTrackingData(order: any): TrackingData {
     status,
     progress: order.shopify.fulfillmentStatus === 'fulfilled' ? 100 : order.completionPercentage,
     stages,
-    estimatedShip: order.slaTargetDate,
+    estimatedShip: order.slaTargetDate?.split('-').reverse().join('/') || '',
     customerName: order.shopify.customerName,
   };
 }

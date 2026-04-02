@@ -17,6 +17,10 @@ interface CalendarDay {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+function toLocalDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function getMonday(d: Date): Date {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -46,11 +50,10 @@ const ProductionCalendar: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
   const calendarDays = useMemo<CalendarDay[]>(() => {
     const days: CalendarDay[] = [];
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = toLocalDateStr(today);
 
     if (view === 'month') {
       const firstOfMonth = new Date(year, month, 1);
-      const lastOfMonth = new Date(year, month + 1, 0);
       // Start from Monday before/on the 1st
       let startDay = firstOfMonth.getDay();
       if (startDay === 0) startDay = 7;
@@ -59,7 +62,7 @@ const ProductionCalendar: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
       for (let i = 0; i < 42; i++) {
         const d = new Date(start);
         d.setDate(start.getDate() + i);
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = toLocalDateStr(d);
         days.push({
           date: d,
           dateStr,
@@ -73,7 +76,7 @@ const ProductionCalendar: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
       for (let i = 0; i < 7; i++) {
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
-        const dateStr = d.toISOString().split('T')[0];
+        const dateStr = toLocalDateStr(d);
         days.push({
           date: d,
           dateStr,
@@ -99,12 +102,6 @@ const ProductionCalendar: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
   const goToday = () => setCurrentDate(new Date());
 
   const selectedOrders = selectedDay ? (ordersByDate.get(selectedDay) || []) : [];
-
-  // Daily workload summary
-  const totalUnitsToday = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    return (ordersByDate.get(todayStr) || []).reduce((sum, o) => sum + o.shopify.items.reduce((s, i) => s + i.quantity, 0), 0);
-  }, [ordersByDate]);
 
   const dayColor = (count: number) => {
     if (count === 0) return '';

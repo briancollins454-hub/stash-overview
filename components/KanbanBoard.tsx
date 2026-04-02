@@ -202,7 +202,7 @@ const KanbanBoard: React.FC<Props> = ({ orders, shopifyDomain, onManualLink, onN
                         </div>
                         <div>
                           <span className="font-black text-gray-400 uppercase">SLA Target</span>
-                          <span className="block font-bold text-gray-600">{order.slaTargetDate}</span>
+                          <span className="block font-bold text-gray-600">{order.slaTargetDate?.split('-').reverse().join('/') || '-'}</span>
                         </div>
                         <div>
                           <span className="font-black text-gray-400 uppercase">Status</span>
