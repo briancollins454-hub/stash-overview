@@ -756,8 +756,8 @@ const App: React.FC = () => {
                 ]).catch(e => console.warn('Local push failed:', e));
             }
 
-            setSyncStatusMsg('Fetching cloud mappings...');
-            const cloudData = await fetchCloudData(apiSettings);
+            setSyncStatusMsg('Fetching cloud data...');
+            const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
             if (cloudData) {
                 // REPLACE local with cloud — cloud is the single source of truth after push
                 const cloudMappings = cloudData.mappings || {};
