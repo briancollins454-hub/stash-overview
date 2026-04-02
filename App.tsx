@@ -2192,7 +2192,7 @@ const App: React.FC = () => {
             {activeTab === 'command' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <ErrorBoundary fallbackTitle="Command Center Error">
-                  <CommandCenter orders={unifiedOrders} excludedTags={excludedTags} />
+                  <CommandCenter orders={unifiedOrders} excludedTags={excludedTags} onExit={() => setActiveTab('dashboard')} onNavigateToOrder={(orderNum) => { setActiveTab('dashboard'); setSearchTerm(orderNum); }} />
                 </ErrorBoundary>
               </Suspense>
             )}
