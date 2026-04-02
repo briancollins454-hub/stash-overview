@@ -247,11 +247,37 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
     return [...map.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 12);
   }, [filtered]);
 
-  // Priority queue
-  const priorities = useMemo(() =>
-    filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled')
-      .sort((a, b) => a.daysRemaining - b.daysRemaining).slice(0, 10),
-  [filtered]);
+  // Week-by-week due out
+  const weeklyDueOut = useMemo(() => {
+    const unfulfilled = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dayOfWeek = (today.getDay() + 6) % 7; // Mon=0
+    const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - dayOfWeek);
+    const week1End = new Date(weekStart); week1End.setDate(week1End.getDate() + 7);
+    const week2End = new Date(weekStart); week2End.setDate(week2End.getDate() + 14);
+    const week3End = new Date(weekStart); week3End.setDate(week3End.getDate() + 21);
+
+    const buckets: { label: string; dateRange: string; orders: UnifiedOrder[]; color: string; borderColor: string }[] = [
+      { label: 'Overdue', dateRange: `Before ${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, orders: [], color: 'bg-red-500/10', borderColor: 'border-red-500/30' },
+      { label: 'This Week', dateRange: `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} \u2013 ${new Date(week1End.getTime() - 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, orders: [], color: 'bg-amber-500/10', borderColor: 'border-amber-500/30' },
+      { label: 'Next Week', dateRange: `${week1End.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} \u2013 ${new Date(week2End.getTime() - 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, orders: [], color: 'bg-blue-500/10', borderColor: 'border-blue-500/30' },
+      { label: 'Week After', dateRange: `${week2End.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} \u2013 ${new Date(week3End.getTime() - 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, orders: [], color: 'bg-indigo-500/10', borderColor: 'border-indigo-500/30' },
+      { label: 'Later', dateRange: `After ${new Date(week3End.getTime() - 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`, orders: [], color: 'bg-white/5', borderColor: 'border-white/10' },
+    ];
+
+    unfulfilled.forEach(o => {
+      const target = o.slaTargetDate ? new Date(o.slaTargetDate) : null;
+      if (!target || target < weekStart) buckets[0].orders.push(o);
+      else if (target < week1End) buckets[1].orders.push(o);
+      else if (target < week2End) buckets[2].orders.push(o);
+      else if (target < week3End) buckets[3].orders.push(o);
+      else buckets[4].orders.push(o);
+    });
+
+    // Sort each bucket by target date
+    buckets.forEach(b => b.orders.sort((a, b) => (a.daysRemaining ?? 999) - (b.daysRemaining ?? 999)));
+    return buckets;
+  }, [filtered]);
 
   // Fulfillment velocity (last 7 days vs previous 7)
   const velocity = useMemo(() => {
@@ -433,42 +459,68 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
               </div>
             </div>
 
-            {/* Row 3: Priority Queue + Activity Feed */}
+            {/* Row 3: Weekly Due Out + Activity Feed */}
             <div className="grid grid-cols-12 gap-4">
               <div className="col-span-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <Target className="w-4 h-4 text-red-400" />
-                  <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50">Priority Queue</h3>
-                  <span className="ml-auto text-[9px] text-white/25 font-bold uppercase tracking-widest">Click to view order</span>
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/50">Due Out — Week by Week</h3>
+                  <span className="ml-auto text-[9px] text-white/25 font-bold uppercase tracking-widest">Click row to view order</span>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {priorities.map((o, i) => {
-                    const overdue = o.daysRemaining < 0;
-                    const urgent = o.daysRemaining >= 0 && o.daysRemaining <= 3;
+                <div className="space-y-3">
+                  {weeklyDueOut.map(bucket => {
+                    if (bucket.orders.length === 0) return null;
+                    const total = bucket.orders.length;
+                    const readyCount = bucket.orders.filter(o => o.completionPercentage === 100 || o.isStockDispatchReady).length;
+                    const value = bucket.orders.reduce((s, o) => s + (parseFloat(o.shopify.totalPrice) || 0), 0);
+                    const shown = bucket.orders.slice(0, 6);
+                    const remaining = total - shown.length;
                     return (
-                      <div key={o.shopify.id}
-                        onClick={() => setSelectedOrder(selectedOrder?.shopify.id === o.shopify.id ? null : o)}
-                        className={`flex items-center gap-3 rounded-xl px-4 py-3 border cursor-pointer transition-all duration-200 hover:scale-[1.01] ${
-                          selectedOrder?.shopify.id === o.shopify.id ? 'border-indigo-500/50 bg-indigo-500/10 ring-1 ring-indigo-500/20' :
-                          overdue ? 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10' :
-                          urgent ? 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10' :
-                          'border-white/5 bg-white/[0.02] hover:bg-white/[0.05]'
-                        }`}>
-                        <span className={`text-lg font-black tabular-nums w-6 ${overdue ? 'text-red-400' : urgent ? 'text-amber-400' : 'text-white/30'}`}>{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold text-white truncate">#{o.shopify.orderNumber}</p>
-                          <p className="text-[10px] text-white/40 truncate">{o.shopify.customerName}{o.clubName ? ` \u00B7 ${o.clubName}` : ''}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <p className={`text-sm font-black tabular-nums ${overdue ? 'text-red-400' : urgent ? 'text-amber-400' : 'text-emerald-400'}`}>
-                            {overdue ? `${Math.abs(o.daysRemaining)}d late` : `${o.daysRemaining}d`}
-                          </p>
-                          <div className="w-16 h-1.5 bg-white/10 rounded-full mt-1 overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-700" style={{
-                              width: `${o.completionPercentage}%`,
-                              background: o.completionPercentage === 100 ? '#10b981' : o.completionPercentage > 50 ? '#f59e0b' : '#ef4444'
-                            }} />
+                      <div key={bucket.label} className={`rounded-xl border ${bucket.borderColor} ${bucket.color} p-4`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <h4 className="text-sm font-black text-white">{bucket.label}</h4>
+                            <span className="text-[9px] text-white/30 font-bold">{bucket.dateRange}</span>
                           </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-[9px] text-white/40"><span className="text-emerald-400 font-bold">{readyCount}</span> ready</span>
+                            <span className="text-[9px] text-white/40">\u00A3{value.toLocaleString('en-GB', { maximumFractionDigits: 0 })}</span>
+                            <span className="text-xl font-black text-white tabular-nums">{total}</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {shown.map(o => {
+                            const overdue = o.daysRemaining < 0;
+                            return (
+                              <div key={o.shopify.id}
+                                onClick={() => setSelectedOrder(selectedOrder?.shopify.id === o.shopify.id ? null : o)}
+                                className={`flex items-center gap-2 rounded-lg px-3 py-2 border cursor-pointer transition-all duration-200 hover:scale-[1.01] ${
+                                  selectedOrder?.shopify.id === o.shopify.id ? 'border-indigo-500/50 bg-indigo-500/10' :
+                                  'border-white/5 bg-white/[0.02] hover:bg-white/[0.06]'
+                                }`}>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-[11px] font-bold text-white truncate">#{o.shopify.orderNumber}</p>
+                                  <p className="text-[9px] text-white/35 truncate">{o.shopify.customerName}{o.clubName ? ` \u00B7 ${o.clubName}` : ''}</p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className={`text-[10px] font-black tabular-nums ${overdue ? 'text-red-400' : o.completionPercentage === 100 ? 'text-emerald-400' : 'text-white/50'}`}>
+                                    {o.completionPercentage}%
+                                  </p>
+                                  <div className="w-12 h-1 bg-white/10 rounded-full mt-0.5 overflow-hidden">
+                                    <div className="h-full rounded-full transition-all duration-700" style={{
+                                      width: `${o.completionPercentage}%`,
+                                      background: o.completionPercentage === 100 ? '#10b981' : o.completionPercentage > 50 ? '#f59e0b' : '#ef4444'
+                                    }} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {remaining > 0 && (
+                            <div className="flex items-center justify-center rounded-lg px-3 py-2 border border-white/5 bg-white/[0.01] text-[10px] text-white/30 font-bold">
+                              +{remaining} more
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -605,7 +657,7 @@ const CommandCenter: React.FC<Props> = ({ orders, excludedTags, onExit, onNaviga
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 text-center">
                     <p className="text-[9px] text-white/40 uppercase tracking-widest mb-1">Avg Days</p>
                     <p className="text-xl font-black text-white">
-                      {priorities.length > 0 ? Math.round(priorities.reduce((s, o) => s + o.daysInProduction, 0) / priorities.length) : 0}
+                      {(() => { const all = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled' && o.decoJobId); return all.length > 0 ? Math.round(all.reduce((s, o) => s + o.daysInProduction, 0) / all.length) : 0; })()}
                     </p>
                   </div>
                 </div>
