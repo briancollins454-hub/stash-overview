@@ -202,8 +202,10 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
   }, [stats, orders, currentUser, expression]);
 
   // ─── Speech Synthesis ──────────────────────────────────────────
-  const speak = useCallback((text: string) => {
-    if (muted) { setState('idle'); return; }
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [ttsAvailable, setTtsAvailable] = useState<boolean | null>(null);
+
+  const speakFallback = useCallback((text: string) => {
     speechSynthesis.cancel();
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'en-GB';
@@ -224,7 +226,59 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       }
     };
     speechSynthesis.speak(utt);
-  }, [muted, handsFree]);
+  }, [handsFree]);
+
+  const speak = useCallback(async (text: string) => {
+    if (muted) { setState('idle'); return; }
+    speechSynthesis.cancel();
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+
+    // Try ElevenLabs neural voice first
+    if (ttsAvailable !== false) {
+      try {
+        // Stop speech recognition while speaking to prevent feedback
+        if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
+
+        setState('speaking');
+        const res = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+
+        if (res.ok) {
+          setTtsAvailable(true);
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          audio.onended = () => {
+            URL.revokeObjectURL(url);
+            audioRef.current = null;
+            setState('idle');
+            if (handsFree && recogRef.current) {
+              try { recogRef.current.start(); } catch {}
+            }
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            audioRef.current = null;
+            speakFallback(text);
+          };
+          await audio.play();
+          return;
+        } else if (res.status === 501) {
+          // No API key configured — use fallback permanently
+          setTtsAvailable(false);
+        }
+      } catch {
+        // Network error — fall through to browser TTS
+      }
+    }
+
+    // Fallback to browser TTS
+    speakFallback(text);
+  }, [muted, handsFree, ttsAvailable, speakFallback]);
 
   // ─── Claude Query ──────────────────────────────────────────────
   const queryAssistant = useCallback(async (userMsg: string) => {
@@ -315,9 +369,10 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     recog.lang = 'en-GB';
 
     recog.onresult = (e: any) => {
-      // Interrupt speaking
+      // Interrupt speaking (both neural and browser TTS)
       if (stateRef.current === 'speaking') {
         speechSynthesis.cancel();
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
       }
 
       const last = e.results[e.results.length - 1];
@@ -651,6 +706,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
         stopCamera();
         stopListening();
         speechSynthesis.cancel();
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
       };
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
