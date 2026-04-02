@@ -325,6 +325,7 @@ const App: React.FC = () => {
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [lastSyncLabel, setLastSyncLabel] = useState<string>('');
   const syncAbortRef = useRef<AbortController | null>(null);
+  const autoRefreshRef = useRef<() => void>(() => {});
 
   // New feature state
   const { theme, isDark, setTheme } = useDarkMode();
@@ -562,30 +563,33 @@ const App: React.FC = () => {
     if (filters.partialThreshold !== undefined) setPartialThreshold(filters.partialThreshold);
   };
 
+  // Keep a ref to the latest auto-refresh callback so setInterval/visibility
+  // handlers never call a stale closure (which would merge against old state
+  // and wipe orders — the "103 → 3" bug).
+  autoRefreshRef.current = () => {
+    if (!loading && !isBulkRefreshing && !isScanning && user && !isConfigMissing) {
+      loadData(false);
+    }
+  };
+
   // Auto-refresh: delta sync on configurable interval
   useEffect(() => {
     if (!user || isConfigMissing || !apiSettings.autoRefreshInterval) return;
     const intervalMs = (apiSettings.autoRefreshInterval || 5) * 60 * 1000;
-    const interval = setInterval(() => {
-      if (!loading && !isBulkRefreshing && !isScanning) {
-        loadData(false);
-      }
-    }, intervalMs);
+    const interval = setInterval(() => autoRefreshRef.current(), intervalMs);
     return () => clearInterval(interval);
-  }, [user, isConfigMissing, loading, isBulkRefreshing, isScanning, apiSettings.autoRefreshInterval]);
+  }, [user, isConfigMissing, apiSettings.autoRefreshInterval]);
 
   // Visibility-aware refresh: sync when tab regains focus after >2 min
   useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden && lastSyncTime && Date.now() - lastSyncTime > 2 * 60 * 1000) {
-        if (!loading && !isBulkRefreshing && !isScanning && user && !isConfigMissing) {
-          loadData(false);
-        }
+        autoRefreshRef.current();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [lastSyncTime, loading, isBulkRefreshing, isScanning, user, isConfigMissing]);
+  }, [lastSyncTime]);
 
   // Update "last synced" label every 30 seconds
   useEffect(() => {
