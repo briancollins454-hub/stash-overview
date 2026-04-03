@@ -754,21 +754,23 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
             ts: Date.now(),
             toolName: tc.name,
           }]);
-          return { type: 'tool_result' as const, tool_use_id: tc.id, content: result };
+          return { role: 'tool' as const, tool_call_id: tc.id, content: result };
         });
 
-        // Build continuation messages with tool use + results
+        // Build continuation messages in OpenAI format
         const continuationMessages = [
           ...history,
           { role: 'user' as const, content: userMsg },
           {
             role: 'assistant' as const,
-            content: [
-              ...(fullText ? [{ type: 'text' as const, text: fullText }] : []),
-              ...pendingToolCalls.map(tc => ({ type: 'tool_use' as const, id: tc.id, name: tc.name, input: tc.input })),
-            ],
+            content: fullText || null,
+            tool_calls: pendingToolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function' as const,
+              function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+            })),
           },
-          { role: 'user' as const, content: toolResults },
+          ...toolResults,
         ];
 
         // Second call to synthesize tool results

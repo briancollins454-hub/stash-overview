@@ -1,7 +1,7 @@
 export const config = { runtime: 'edge' };
 
-// ─── Continue conversation after tool results ────────────────────
-// Client resolves tool calls locally, sends results back here for Claude to synthesize
+// ─── Continue conversation after tool results (OpenAI GPT-4.1) ───
+// Client resolves tool calls locally, sends results back here for GPT to synthesize
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
@@ -15,27 +15,29 @@ export default async function handler(req: Request) {
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
 
-  const apiKey = process.env.CLAUDE_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   try {
     const { system, messages } = await req.json();
-    // messages should include the full conversation including tool_use and tool_result blocks
-    
-    const model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const model = process.env.OPENAI_MODEL || 'gpt-4.1';
+
+    const oaiMessages = [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      ...messages,
+    ];
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         model,
         max_tokens: 1200,
-        system: system || '',
-        messages,
+        messages: oaiMessages,
         stream: true,
       }),
     });
@@ -65,8 +67,9 @@ export default async function handler(req: Request) {
               if (!json || json === '[DONE]') continue;
               try {
                 const d = JSON.parse(json);
-                if (d.type === 'content_block_delta' && d.delta?.text) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: d.delta.text })}\n\n`));
+                const token = d.choices?.[0]?.delta?.content;
+                if (token) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: token })}\n\n`));
                 }
               } catch {}
             }

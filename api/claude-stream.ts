@@ -12,7 +12,7 @@ export default async function handler(req: Request) {
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
 
-  const apiKey = process.env.CLAUDE_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   try {
@@ -21,18 +21,21 @@ export default async function handler(req: Request) {
       return new Response(JSON.stringify({ error: 'messages required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const oaiMessages = [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      ...messages,
+    ];
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
+        model: process.env.OPENAI_MODEL || 'gpt-4.1',
         max_tokens: 800,
-        system: system || '',
-        messages,
+        messages: oaiMessages,
         stream: true,
       }),
     });
@@ -62,8 +65,9 @@ export default async function handler(req: Request) {
               if (!json || json === '[DONE]') continue;
               try {
                 const d = JSON.parse(json);
-                if (d.type === 'content_block_delta' && d.delta?.text) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: d.delta.text })}\n\n`));
+                const token = d.choices?.[0]?.delta?.content;
+                if (token) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: token })}\n\n`));
                 }
               } catch {}
             }

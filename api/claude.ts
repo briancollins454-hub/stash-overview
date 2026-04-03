@@ -11,9 +11,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.CLAUDE_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: 'CLAUDE_API_KEY not configured in Vercel environment variables' });
+    return res.status(500).json({ error: 'OPENAI_API_KEY not configured in Vercel environment variables' });
   }
 
   try {
@@ -22,18 +22,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'messages array is required' });
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Build OpenAI messages array with system prompt
+    const oaiMessages = [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      ...messages,
+    ];
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.CLAUDE_MODEL || 'claude-haiku-4-5',
+        model: process.env.OPENAI_MODEL || 'gpt-4.1',
         max_tokens: 800,
-        system: system || '',
-        messages,
+        messages: oaiMessages,
       }),
     });
 
@@ -43,7 +47,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = await response.json();
-    return res.status(200).json(data);
+    // Map OpenAI response to same shape the frontend expects: { content: [{ text }] }
+    const text = data.choices?.[0]?.message?.content || '';
+    return res.status(200).json({ content: [{ type: 'text', text }] });
   } catch (e: any) {
     return res.status(500).json({ error: e.message || 'Internal error' });
   }
