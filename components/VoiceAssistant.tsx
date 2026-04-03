@@ -342,7 +342,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const pollVision = useCallback(async () => {
     if (stateRef.current === 'thinking' || stateRef.current === 'speaking' || stateRef.current === 'tool_calling') return;
     const snapshot = captureSnapshot();
-    if (!snapshot) return;
+    if (!snapshot) { console.log('[VISION POLL] No snapshot available'); return; }
+    console.log('[VISION POLL] Sending frame to /api/ai-vision...');
 
     try {
       const res = await fetch('/api/ai-vision', {
@@ -354,10 +355,11 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
           user_name: currentUser?.name || undefined,
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) { console.log('[VISION POLL] Error:', res.status); return; }
       const obs = await res.json();
-      if (obs.error) return;
+      if (obs.error) { console.log('[VISION POLL] API error:', obs.error); return; }
 
+      console.log('[VISION POLL] Observation:', obs);
       setVisionObservation(obs);
       lastVisionDescription.current = obs.description || '';
       const ctx = `[LIVE VISION — what you can see RIGHT NOW] People: ${obs.people_count || 0}. Expression: ${obs.expression || 'unknown'}. Gaze: ${obs.gaze || 'unknown'}. Scene: ${obs.description || 'unclear'}${obs.change && obs.change !== 'none' ? `. Change: ${obs.change}` : ''}`;
@@ -874,12 +876,18 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
     // Capture what the AI can see right now
     const snapshot = captureSnapshot();
+    console.log('[VISION] snapshot:', snapshot ? `${snapshot.length} chars, starts: ${snapshot.substring(0, 30)}` : 'NULL', '| cameraReady:', cameraReady, '| videoRef:', !!videoRef.current, '| readyState:', videoRef.current?.readyState, '| visionCtx:', visionContextRef.current ? 'YES' : 'no');
 
     // Add vision context to system prompt when camera is active
     const visionLive = visionContextRef.current;
-    const activeSystem = snapshot
-      ? system + `\n\nVISION: You have been CONTINUOUSLY watching the user through their camera. You can genuinely SEE them right now.${visionLive ? `\n\nYour ongoing visual awareness:\n${visionLive}` : ''}\n\nA fresh photo is also attached. React naturally to what you see — their expression, appearance, surroundings, energy, body language. Don't describe the image robotically. Just incorporate what you see like a human colleague sitting across from them. If they ask "can you see me", describe what you genuinely see.`
-      : system;
+    const hasVision = !!snapshot || !!visionLive;
+    let activeSystem = system;
+    if (hasVision) {
+      activeSystem += `\n\nVISION: You have been CONTINUOUSLY watching the user through their camera. You can genuinely SEE them right now.`;
+      if (visionLive) activeSystem += `\n\nYour ongoing visual awareness:\n${visionLive}`;
+      if (snapshot) activeSystem += `\n\nA fresh photo is also attached. React naturally to what you see — their expression, appearance, surroundings, energy, body language. Don't describe the image robotically. Just incorporate what you see like a human colleague sitting across from them. If they ask "can you see me", describe what you genuinely see.`;
+      else activeSystem += `\n\nNote: You couldn't capture a photo just now, but you still have your ongoing visual awareness above. Use what you know from your continuous watching.`;
+    }
 
     try {
       // Single unified endpoint — sends image + tools together via GPT-4o when camera active
