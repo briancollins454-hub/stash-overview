@@ -172,6 +172,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const ordersRef = useRef(orders);
   const activeTabRef = useRef(activeTab);
   const morningBriefingDone = useRef(false);
+  const snapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Keep refs synced
   useEffect(() => { convoRef.current = convo; }, [convo]);
@@ -269,6 +270,25 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       }
     } catch {}
     return null;
+  }, []);
+
+  // ─── Camera Snapshot for Vision ────────────────────────────────
+  // Captures a JPEG frame from the live camera feed as base64 data URL
+  const captureSnapshot = useCallback((): string | null => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || !video.videoWidth) return null;
+    if (!snapshotCanvasRef.current) {
+      snapshotCanvasRef.current = document.createElement('canvas');
+    }
+    const canvas = snapshotCanvasRef.current;
+    // Use smaller resolution for speed — 320px wide is enough for face/person recognition
+    const scale = Math.min(1, 320 / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.7); // Low quality = smaller payload = faster
   }, []);
 
   // ─── Tool Resolution (Client-Side) ────────────────────────────
@@ -758,8 +778,107 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       .slice(-30)
       .map(m => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: m.text }));
 
+    // Capture what the AI can see right now
+    const snapshot = captureSnapshot();
+
+    // Does this query benefit from vision? If camera is active, always let the AI see
+    const useVision = !!snapshot;
+    // Visual context hints for the system prompt when vision is active
+    const visionSystem = useVision
+      ? system + '\n\nVISION: You can SEE the user right now through their camera. A snapshot of what you see is attached. You can comment on their appearance, expression, surroundings, what they\'re wearing, if they look tired, if they\'re smiling, etc. React naturally like a human colleague who can see them. Don\'t describe the image robotically — just incorporate what you see into your response naturally. If they ask "can you see me" or "what do I look like", describe what you genuinely see.'
+      : system;
+
     try {
-      // Use new multi-agent endpoint with tool use
+      if (useVision) {
+        // ── Vision path: send snapshot to GPT-4o ──
+        const res = await fetch('/api/ai-vision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system: visionSystem,
+            messages: [...history, { role: 'user', content: userMsg }],
+            image: snapshot,
+          }),
+        });
+
+        if (!res.ok || !res.body) throw new Error(`Vision error ${res.status}`);
+
+        setConvo(prev => [...prev, { role: 'assistant', text: '\u2589', ts: Date.now(), id: `msg_${Date.now()}` }]);
+        setStatusText('');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        let fullText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          sseBuffer += decoder.decode(value, { stream: true });
+          const lines = sseBuffer.split('\n');
+          sseBuffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6).trim();
+            if (payload === '[DONE]') continue;
+            try {
+              const d = JSON.parse(payload);
+              if (d.t) {
+                fullText += d.t;
+                setConvo(prev => {
+                  const updated = [...prev];
+                  if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                    updated[updated.length - 1] = { ...updated[updated.length - 1], text: fullText + ' \u2589' };
+                  }
+                  return updated;
+                });
+              }
+            } catch {}
+          }
+        }
+
+        // If vision got a response, finalize it
+        if (fullText.trim()) {
+          const cleanText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '').trim();
+          const msgId = `msg_${Date.now()}`;
+          setConvo(prev => {
+            const updated = [...prev];
+            const lastAssistant = updated.findLastIndex(m => m.role === 'assistant');
+            if (lastAssistant >= 0) {
+              updated[lastAssistant] = { ...updated[lastAssistant], text: cleanText, id: msgId };
+            }
+            return updated;
+          });
+
+          // Progressive TTS
+          const sentences = cleanText.match(/[^.!?*]+[.!?]+\s*|\*[^*]+\*\s*/g) || [cleanText];
+          if (!muted && sentences.length > 1) {
+            speechSynthesis.cancel();
+            if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+            if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
+            setState('speaking');
+            stateRef.current = 'speaking';
+            const allSegments = sentences.flatMap(s => parseSegments(s.trim())).filter(s => s.text.trim());
+            for (const seg of allSegments) {
+              if (stateRef.current !== 'speaking') break;
+              const buf = await fetchTtsBuffer(seg.text);
+              if (buf) { await playTtsBuffer(buf); audioRef.current = null; }
+              else { speakFallback(cleanText); break; }
+            }
+            if (stateRef.current === 'speaking') setState('idle');
+            if (handsFree && recogRef.current) { try { recogRef.current.start(); } catch {} }
+          } else {
+            speak(cleanText);
+          }
+
+          storeKnowledge(`Q: ${userMsg}\nA: ${cleanText}`, 'conversations', { user: currentUser?.name, session: sessionId, vision: true });
+          return;
+        }
+        // If vision returned empty, fall through to agent path
+      }
+
+      // ── Agent path: tool-calling with GPT-4.1 ──
       const res = await fetch('/api/ai-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1008,7 +1127,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       setConvo(prev => [...prev, { role: 'assistant', text: fallback, ts: Date.now() }]);
       speak(fallback);
     }
-  }, [buildContext, speak, resolveToolCall, playThinkingSound, playToolSound, storeKnowledge, currentUser, sessionId]);
+  }, [buildContext, speak, resolveToolCall, playThinkingSound, playToolSound, storeKnowledge, currentUser, sessionId, captureSnapshot, muted, handsFree, parseSegments, fetchTtsBuffer, playTtsBuffer, speakFallback]);
 
   // ─── Handle Voice Input ────────────────────────────────────────
   const handleInput = useCallback(async (transcript: string) => {
