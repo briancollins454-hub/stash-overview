@@ -69,6 +69,7 @@ const RevenueDashboard = lazyRetry(() => import('./components/RevenueDashboard')
 const AutoJobLinker = lazyRetry(() => import('./components/AutoJobLinker'));
 const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment'));
 const FinancialDashboard = lazyRetry(() => import('./components/FinancialDashboard'));
+const SalesAnalytics = lazyRetry(() => import('./components/SalesAnalytics'));
 const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 const CommandCenter = lazyRetry(() => import('./components/CommandCenter'));
 const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
@@ -238,7 +239,7 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
     username: user.email || '',
     role: 'superuser',
     displayName: user.displayName || user.email || 'Admin',
-    allowedTabs: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts','settings'],
+    allowedTabs: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','sales','users','manual','alerts','settings'],
   };
 
   return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
@@ -248,7 +249,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'users', 'manual', 'command'];
+  const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -1702,7 +1703,7 @@ const App: React.FC = () => {
             {/* Desktop nav */}
             <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1">
                 <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'sales', label: 'SALES' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
                 </div>
@@ -1756,7 +1757,7 @@ const App: React.FC = () => {
         {mobileMenuOpen && (
             <div className="lg:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-1 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'sales', label: 'SALES' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
@@ -2257,6 +2258,18 @@ const App: React.FC = () => {
                     isDark={isDark}
                     settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Sales Analytics Tab */}
+            {activeTab === 'sales' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Sales Analytics Error">
+                  <SalesAnalytics
+                    settings={apiSettings}
+                    isDark={isDark}
                   />
                 </ErrorBoundary>
               </Suspense>
