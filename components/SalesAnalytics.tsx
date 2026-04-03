@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { ApiSettings } from './SettingsModal';
-import { BarChart3, Download, Loader2, RefreshCw, Filter, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Search } from 'lucide-react';
+import { BarChart3, Download, Loader2, RefreshCw, Filter, ChevronDown, ChevronUp, Search } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -159,7 +159,6 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     return d.toISOString().split('T')[0];
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
-  const [includeVat, setIncludeVat] = useState(true);
   const [keyword, setKeyword] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'grossSales' | 'netSales' | 'quantity' | 'vendor' | 'itemName' | 'profit'>('grossSales');
@@ -272,7 +271,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         const existing = map.get(key);
         if (existing) {
           existing.grossSales += gross;
-          existing.netSales += discounted - returnAmount;
+          existing.netSales += discounted - returnAmount - tax;
           existing.discounts += discount;
           existing.tax += tax;
           existing.cost = existing.cost !== null && totalCost !== null ? existing.cost + totalCost : (existing.cost ?? totalCost);
@@ -285,7 +284,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
             itemName: li.title,
             variant,
             grossSales: gross,
-            netSales: discounted - returnAmount,
+            netSales: discounted - returnAmount - tax,
             discounts: discount,
             tax,
             cost: totalCost,
@@ -321,15 +320,15 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
       if (sortBy === 'vendor') return sortDir === 'asc' ? a.vendor.localeCompare(b.vendor) : b.vendor.localeCompare(a.vendor);
       if (sortBy === 'itemName') return sortDir === 'asc' ? a.itemName.localeCompare(b.itemName) : b.itemName.localeCompare(a.itemName);
       if (sortBy === 'profit') {
-        av = a.cost !== null ? (includeVat ? a.netSales : a.netSales - a.tax) - a.cost : -Infinity;
-        bv = b.cost !== null ? (includeVat ? b.netSales : b.netSales - b.tax) - b.cost : -Infinity;
+        av = a.cost !== null ? a.netSales - a.cost : -Infinity;
+        bv = b.cost !== null ? b.netSales - b.cost : -Infinity;
       } else {
         av = a[sortBy];
         bv = b[sortBy];
       }
       return sortDir === 'asc' ? av - bv : bv - av;
     });
-  }, [aggregated, vendorFilter, searchTerm, sortBy, sortDir, includeVat]);
+  }, [aggregated, vendorFilter, searchTerm, sortBy, sortDir]);
 
   // ── Totals ───────────────────────────────────────────────────────────────────
 
@@ -348,28 +347,21 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     return t;
   }, [displayed]);
 
-  // ── Adjust for VAT toggle ────────────────────────────────────────────────────
-
-  const v = useCallback((amount: number, tax: number) => includeVat ? amount : amount - tax, [includeVat]);
-
   // ── CSV Export ───────────────────────────────────────────────────────────────
 
   const exportCSV = useCallback(() => {
-    const vatLabel = includeVat ? 'Inc VAT' : 'Exc VAT';
-    const headers = ['Vendor', 'Product', 'Variant', 'Quantity', 'Refunded Qty', `Gross Sales (${vatLabel})`, 'Discounts', `Net Sales (${vatLabel})`, 'Tax', 'Returns', 'Cost', `Profit (${vatLabel})`];
+    const headers = ['Vendor', 'Product', 'Variant', 'Quantity', 'Refunded Qty', 'Gross Sales (Inc VAT)', 'Discounts', 'VAT', 'Returns', 'Net Sales (Exc VAT)', 'Cost', 'Profit', 'Margin %'];
 
     const rows = displayed.map(r => {
-      const gross = includeVat ? r.grossSales : r.grossSales - r.tax;
-      const net = includeVat ? r.netSales : r.netSales - r.tax;
-      const profit = r.cost !== null ? net - r.cost : '';
-      return [r.vendor, r.itemName, r.variant, r.quantity, r.refundedQuantity, gross.toFixed(2), r.discounts.toFixed(2), net.toFixed(2), r.tax.toFixed(2), r.returns.toFixed(2), r.cost !== null ? r.cost.toFixed(2) : '', profit !== '' ? (profit as number).toFixed(2) : ''];
+      const profit = r.cost !== null ? r.netSales - r.cost : '';
+      const margin = r.cost !== null && r.netSales > 0 ? ((r.netSales - r.cost) / r.netSales * 100).toFixed(1) : '';
+      return [r.vendor, r.itemName, r.variant, r.quantity, r.refundedQuantity, r.grossSales.toFixed(2), r.discounts.toFixed(2), r.tax.toFixed(2), r.returns.toFixed(2), r.netSales.toFixed(2), r.cost !== null ? r.cost.toFixed(2) : '', profit !== '' ? (profit as number).toFixed(2) : '', margin];
     });
 
     // Totals row
-    const totalGross = includeVat ? totals.grossSales : totals.grossSales - totals.tax;
-    const totalNet = includeVat ? totals.netSales : totals.netSales - totals.tax;
-    const totalProfit = totals.hasCost ? totalNet - totals.cost : '';
-    rows.push(['TOTAL', '', '', String(totals.quantity), String(totals.refunded), totalGross.toFixed(2), totals.discounts.toFixed(2), totalNet.toFixed(2), totals.tax.toFixed(2), totals.returns.toFixed(2), totals.hasCost ? totals.cost.toFixed(2) : '', totalProfit !== '' ? (totalProfit as number).toFixed(2) : '']);
+    const totalProfit = totals.hasCost ? totals.netSales - totals.cost : '';
+    const totalMargin = totals.hasCost && totals.netSales > 0 ? ((totals.netSales - totals.cost) / totals.netSales * 100).toFixed(1) : '';
+    rows.push(['TOTAL', '', '', String(totals.quantity), String(totals.refunded), totals.grossSales.toFixed(2), totals.discounts.toFixed(2), totals.tax.toFixed(2), totals.returns.toFixed(2), totals.netSales.toFixed(2), totals.hasCost ? totals.cost.toFixed(2) : '', totalProfit !== '' ? (totalProfit as number).toFixed(2) : '', totalMargin]);
 
     const csv = [headers.join(','), ...rows.map(r => r.map(escapeCell).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -379,7 +371,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     link.download = `sales-analytics-${dateFrom}-to-${dateTo}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-  }, [displayed, totals, includeVat, dateFrom, dateTo]);
+  }, [displayed, totals, dateFrom, dateTo]);
 
   // ── Sort handler ─────────────────────────────────────────────────────────────
 
@@ -428,10 +420,6 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         {fetched && (
           <>
             <div className="h-4 w-px bg-gray-300 dark:bg-gray-600" />
-            <button onClick={() => setIncludeVat(!includeVat)} className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded border transition-colors ${includeVat ? (isDark ? 'border-emerald-700 bg-emerald-900/30 text-emerald-400' : 'border-emerald-300 bg-emerald-50 text-emerald-700') : (isDark ? 'border-gray-600 bg-gray-800 text-gray-400' : 'border-gray-200 bg-gray-50 text-gray-500')}`}>
-              {includeVat ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
-              VAT {includeVat ? 'Inc' : 'Exc'}
-            </button>
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-emerald-700 transition-colors">
               <Download className="w-3.5 h-3.5" /> CSV
             </button>
@@ -474,26 +462,30 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
 
       {/* Summary cards */}
       {fetched && (
-        <div className={`px-4 py-3 border-b ${isDark ? 'border-gray-700' : 'border-gray-50'} grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3`}>
+        <div className={`px-4 py-3 border-b ${isDark ? 'border-gray-700' : 'border-gray-50'} grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3`}>
           <div>
             <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Gross Sales</p>
-            <p className="text-lg font-black">£{fmt(v(totals.grossSales, totals.tax))}</p>
+            <p className="text-lg font-black">£{fmt(totals.grossSales)}</p>
           </div>
           <div>
             <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Discounts</p>
             <p className="text-lg font-black text-amber-500">-£{fmt(totals.discounts)}</p>
           </div>
           <div>
-            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Net Sales</p>
-            <p className="text-lg font-black text-emerald-600">£{fmt(v(totals.netSales, totals.tax))}</p>
-          </div>
-          <div>
-            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Tax (VAT)</p>
-            <p className="text-lg font-black text-blue-500">£{fmt(totals.tax)}</p>
+            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">VAT</p>
+            <p className="text-lg font-black text-blue-500">-£{fmt(totals.tax)}</p>
           </div>
           <div>
             <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Returns</p>
             <p className="text-lg font-black text-red-500">-£{fmt(totals.returns)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Net Sales</p>
+            <p className="text-lg font-black text-emerald-600">£{fmt(totals.netSales)}</p>
+          </div>
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Cost</p>
+            <p className="text-lg font-black text-orange-500">{totals.hasCost ? `£${fmt(totals.cost)}` : '—'}</p>
           </div>
           <div>
             <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Units Sold</p>
@@ -512,11 +504,11 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
                 <Th col="itemName" label="Product" sortBy={sortBy} sortDir={sortDir} onClick={handleSort} />
                 <th className="px-3 py-2 text-left font-black uppercase tracking-widest text-gray-500">Variant</th>
                 <Th col="quantity" label="Qty" sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="center" />
-                <Th col="grossSales" label={`Gross ${includeVat ? '(Inc)' : '(Exc)'}`} sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="right" />
+                <Th col="grossSales" label="Gross (Inc)" sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="right" />
                 <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">Discounts</th>
-                <Th col="netSales" label={`Net ${includeVat ? '(Inc)' : '(Exc)'}`} sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="right" />
-                <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">Tax</th>
+                <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">VAT</th>
                 <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">Returns</th>
+                <Th col="netSales" label="Net (Exc)" sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="right" />
                 <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">Cost</th>
                 <Th col="profit" label="Profit" sortBy={sortBy} sortDir={sortDir} onClick={handleSort} align="right" />
                 <th className="px-3 py-2 text-right font-black uppercase tracking-widest text-gray-500">Margin</th>
@@ -524,10 +516,8 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
             </thead>
             <tbody>
               {displayed.map((r, i) => {
-                const gross = v(r.grossSales, r.tax);
-                const net = v(r.netSales, r.tax);
-                const profit = r.cost !== null ? net - r.cost : null;
-                const margin = profit !== null && net > 0 ? (profit / net) * 100 : null;
+                const profit = r.cost !== null ? r.netSales - r.cost : null;
+                const margin = profit !== null && r.netSales > 0 ? (profit / r.netSales) * 100 : null;
                 return (
                   <tr key={i} className={`border-t ${isDark ? 'border-gray-700 hover:bg-gray-800/50' : 'border-gray-50 hover:bg-indigo-50/50'} transition-colors`}>
                     <td className="px-3 py-2 font-bold text-indigo-500 whitespace-nowrap">{r.vendor}</td>
@@ -536,15 +526,15 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
                     <td className="px-3 py-2 text-center font-bold">
                       {r.quantity}{r.refundedQuantity > 0 && <span className="text-red-500 ml-0.5">(-{r.refundedQuantity})</span>}
                     </td>
-                    <td className="px-3 py-2 text-right font-bold">£{fmt(gross)}</td>
+                    <td className="px-3 py-2 text-right font-bold">£{fmt(r.grossSales)}</td>
                     <td className={`px-3 py-2 text-right ${r.discounts > 0 ? 'text-amber-500 font-bold' : (isDark ? 'text-gray-600' : 'text-gray-300')}`}>
                       {r.discounts > 0 ? `-£${fmt(r.discounts)}` : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right font-black text-emerald-600">£{fmt(net)}</td>
-                    <td className={`px-3 py-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>£{fmt(r.tax)}</td>
+                    <td className={`px-3 py-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>-£{fmt(r.tax)}</td>
                     <td className={`px-3 py-2 text-right ${r.returns > 0 ? 'text-red-500 font-bold' : (isDark ? 'text-gray-600' : 'text-gray-300')}`}>
                       {r.returns > 0 ? `-£${fmt(r.returns)}` : '—'}
                     </td>
+                    <td className="px-3 py-2 text-right font-black text-emerald-600">£{fmt(r.netSales)}</td>
                     <td className={`px-3 py-2 text-right ${r.cost !== null ? '' : (isDark ? 'text-gray-600' : 'text-gray-300')}`}>
                       {r.cost !== null ? `£${fmt(r.cost)}` : '—'}
                     </td>
@@ -562,17 +552,17 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
               <tr className={`border-t-2 ${isDark ? 'border-gray-600 bg-gray-800' : 'border-gray-200 bg-gray-50'} font-black`}>
                 <td className="px-3 py-2" colSpan={3}>TOTAL ({displayed.length} lines)</td>
                 <td className="px-3 py-2 text-center">{totals.quantity.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right">£{fmt(v(totals.grossSales, totals.tax))}</td>
+                <td className="px-3 py-2 text-right">£{fmt(totals.grossSales)}</td>
                 <td className="px-3 py-2 text-right text-amber-500">-£{fmt(totals.discounts)}</td>
-                <td className="px-3 py-2 text-right text-emerald-600">£{fmt(v(totals.netSales, totals.tax))}</td>
-                <td className={`px-3 py-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>£{fmt(totals.tax)}</td>
+                <td className={`px-3 py-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>-£{fmt(totals.tax)}</td>
                 <td className="px-3 py-2 text-right text-red-500">-£{fmt(totals.returns)}</td>
+                <td className="px-3 py-2 text-right text-emerald-600">£{fmt(totals.netSales)}</td>
                 <td className="px-3 py-2 text-right">{totals.hasCost ? `£${fmt(totals.cost)}` : '—'}</td>
-                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
-                  {totals.hasCost ? `£${fmt(v(totals.netSales, totals.tax) - totals.cost)}` : '—'}
+                <td className={`px-3 py-2 text-right ${totals.hasCost ? (totals.netSales - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
+                  {totals.hasCost ? `£${fmt(totals.netSales - totals.cost)}` : '—'}
                 </td>
-                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
-                  {totals.hasCost && v(totals.netSales, totals.tax) > 0 ? `${(((v(totals.netSales, totals.tax) - totals.cost) / v(totals.netSales, totals.tax)) * 100).toFixed(1)}%` : '—'}
+                <td className={`px-3 py-2 text-right ${totals.hasCost ? (totals.netSales - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
+                  {totals.hasCost && totals.netSales > 0 ? `${(((totals.netSales - totals.cost) / totals.netSales) * 100).toFixed(1)}%` : '—'}
                 </td>
               </tr>
             </tfoot>
