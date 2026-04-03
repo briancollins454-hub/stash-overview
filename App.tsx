@@ -1167,9 +1167,11 @@ const App: React.FC = () => {
       });
   }, [rawShopifyOrders, rawDecoJobs, confirmedMatches, itemJobLinks, excludedTags, apiSettings.holidayRanges, shipStationData]);
 
-  // ── EAN Auto-Map: runs on data load, maps products with matching EAN barcodes ──
+  // ── EAN Auto-Map: DISABLED — was running on every data load and slowing things down ──
+  // Can be re-enabled by removing the early return below
   const eanAutoMapRanRef = useRef(new Set<string>());
   useEffect(() => {
+    return; // Disabled — auto-matching turned off
     if (unifiedOrders.length === 0) return;
     console.log(`[EAN Auto-Map] eanIndex size: ${eanIndex.size}, orders: ${unifiedOrders.length}`);
     // Debug: log sample items with EAN/SKU data

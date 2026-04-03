@@ -67,10 +67,10 @@ const AutoMatchPanel: React.FC<Props> = ({ orders, productMappings, physicalStoc
     setSelected(highConf);
   }, [orders, productMappings, eanIndex, onApplyMatches]);
 
-  // Auto-run on mount
-  useEffect(() => {
-    if (!hasRun && orders.length > 0) runAutoMatch();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-run on mount — disabled (user can manually trigger matching)
+  // useEffect(() => {
+  //   if (!hasRun && orders.length > 0) runAutoMatch();
+  // }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => results.filter(r => r.confidence >= minConfidence), [results, minConfidence]);
 

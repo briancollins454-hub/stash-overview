@@ -876,7 +876,9 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
     // Capture what the AI can see right now
     const snapshot = captureSnapshot();
-    console.log('[VISION] snapshot:', snapshot ? `${snapshot.length} chars, starts: ${snapshot.substring(0, 30)}` : 'NULL', '| cameraReady:', cameraReady, '| videoRef:', !!videoRef.current, '| readyState:', videoRef.current?.readyState, '| visionCtx:', visionContextRef.current ? 'YES' : 'no');
+    // Refresh vision context on each query (on-demand, not continuous)
+    await pollVision();
+    console.log('[VISION] snapshot:', snapshot ? `${snapshot.length} chars` : 'NULL', '| visionCtx:', visionContextRef.current ? 'YES' : 'no');
 
     // Add vision context to system prompt when camera is active
     const visionLive = visionContextRef.current;
@@ -1717,18 +1719,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     }
   }, [isOpen, drawOrb]);
 
-  // Live vision polling — continuously watch user every 8 seconds
+  // Single vision capture when camera becomes ready (no continuous polling)
   useEffect(() => {
     if (isOpen && cameraReady) {
-      // Start polling after short delay to let camera settle
-      const startDelay = setTimeout(() => {
-        pollVision();
-        visionTimerRef.current = window.setInterval(pollVision, 8000);
-      }, 3000);
-      return () => {
-        clearTimeout(startDelay);
-        if (visionTimerRef.current) clearInterval(visionTimerRef.current);
-      };
+      const timer = setTimeout(() => pollVision(), 3000);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, cameraReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
