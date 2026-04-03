@@ -15,6 +15,7 @@ import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
 import { UnifiedOrder, DecoJob, DecoItem, ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from './types';
+import { autoMatch } from './services/autoMatchService';
 import OrderTable from './components/OrderTable';
 import SettingsModal, { ApiSettings, HolidayRange } from './components/SettingsModal';
 import IntegrationGuide from './components/IntegrationGuide';
@@ -1139,6 +1140,39 @@ const App: React.FC = () => {
           } as UnifiedOrder;
       });
   }, [rawShopifyOrders, rawDecoJobs, confirmedMatches, itemJobLinks, excludedTags, apiSettings.holidayRanges, shipStationData]);
+
+  // ── EAN Auto-Map: runs on data load, maps products with matching EAN barcodes ──
+  const eanAutoMapRanRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (unifiedOrders.length === 0 || eanIndex.size === 0) return;
+    const results = autoMatch(unifiedOrders, productMappings, eanIndex);
+    const eanMatches = results.filter(r => r.isEanMatch);
+    if (eanMatches.length === 0) return;
+
+    // Deduplicate: skip items already confirmed or already auto-mapped this session
+    const newMappings: { itemKey: string; decoId: string }[] = [];
+    for (const m of eanMatches) {
+      const key = `${m.itemId}::${m.suggestedDecoItemId}`;
+      if (confirmedMatches[m.itemId]) continue;
+      if (eanAutoMapRanRef.current.has(key)) continue;
+      eanAutoMapRanRef.current.add(key);
+      newMappings.push({ itemKey: m.itemId, decoId: m.suggestedDecoItemId });
+    }
+    if (newMappings.length === 0) return;
+
+    // Group by job and apply
+    const byJob = new Map<string, { itemKey: string; decoId: string }[]>();
+    for (const m of newMappings) {
+      const match = eanMatches.find(r => r.itemId === m.itemKey);
+      const jobId = match?.suggestedJobId || '';
+      if (!byJob.has(jobId)) byJob.set(jobId, []);
+      byJob.get(jobId)!.push(m);
+    }
+    for (const [jobId, mappings] of byJob) {
+      handleBulkConfirmMatch(mappings, jobId || undefined);
+    }
+    console.log(`[EAN Auto-Map] Applied ${newMappings.length} EAN matches`);
+  }, [unifiedOrders, eanIndex, confirmedMatches, productMappings]);
 
   const allAvailableTags = useMemo(() => {
       const tags = new Set<string>();
