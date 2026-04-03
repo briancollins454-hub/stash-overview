@@ -609,11 +609,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     groan: 'Uggghh.', groans: 'Uggghh.',
     tut: 'Tsk tsk tsk.', tuts: 'Tsk tsk tsk.',
     whistles: 'Whew!', whistle: 'Whew!',
-    clears throat: 'Ahem.',
+    'clears throat': 'Ahem.',
     winces: 'Ooh.',
     exhales: 'Phew.',
     mutters: 'Mmm.',
-    clicks tongue: 'Tsk.',
+    'clicks tongue': 'Tsk.',
     pauses: '...',
   };
 
