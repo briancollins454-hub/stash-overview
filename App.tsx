@@ -2065,6 +2065,8 @@ const App: React.FC = () => {
                     <AutoMatchPanel
                       orders={unifiedOrders}
                       productMappings={productMappings}
+                      physicalStock={physicalStock}
+                      referenceProducts={referenceProducts}
                       onApplyMatches={(m, jobId, lp) => handleBulkConfirmMatch(m, jobId, lp)}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />

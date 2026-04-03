@@ -1,30 +1,71 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { UnifiedOrder } from '../types';
-import { autoMatch, AutoMatchResult } from '../services/autoMatchService';
-import { CheckCircle2, X, Zap, ChevronDown, ChevronRight, AlertTriangle, ExternalLink } from 'lucide-react';
+import { UnifiedOrder, PhysicalStockItem, ReferenceProduct } from '../types';
+import { autoMatch, AutoMatchResult, EanIndex } from '../services/autoMatchService';
+import { CheckCircle2, X, Zap, ChevronDown, ChevronRight, AlertTriangle, ExternalLink, Barcode } from 'lucide-react';
 
 interface Props {
   orders: UnifiedOrder[];
   productMappings: Record<string, string>;
+  physicalStock?: PhysicalStockItem[];
+  referenceProducts?: ReferenceProduct[];
   onApplyMatches: (matches: { itemKey: string; decoId: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => void;
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
-const AutoMatchPanel: React.FC<Props> = ({ orders, productMappings, onApplyMatches, onNavigateToOrder }) => {
+const AutoMatchPanel: React.FC<Props> = ({ orders, productMappings, physicalStock, referenceProducts, onApplyMatches, onNavigateToOrder }) => {
   const [results, setResults] = useState<AutoMatchResult[]>([]);
   const [hasRun, setHasRun] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [minConfidence, setMinConfidence] = useState(60);
+  const [eanAutoApplied, setEanAutoApplied] = useState(0);
+
+  // Build EAN enrichment index from reference products + physical stock
+  const eanIndex = useMemo<EanIndex>(() => {
+    const idx: EanIndex = new Map();
+    // Physical stock (barcode scanner — highest trust)
+    if (physicalStock) {
+      for (const s of physicalStock) {
+        if (s.ean && s.ean.trim().length >= 8 && s.productCode) {
+          idx.set(s.productCode.toLowerCase(), s.ean.trim());
+        }
+      }
+    }
+    // Reference products (supplier CSVs)
+    if (referenceProducts) {
+      for (const r of referenceProducts) {
+        if (r.ean && r.ean.trim().length >= 8 && r.productCode) {
+          const key = r.productCode.toLowerCase();
+          if (!idx.has(key)) idx.set(key, r.ean.trim());
+        }
+      }
+    }
+    return idx;
+  }, [physicalStock, referenceProducts]);
 
   const runAutoMatch = useCallback(() => {
-    const matches = autoMatch(orders, productMappings);
-    setResults(matches);
+    const matches = autoMatch(orders, productMappings, eanIndex);
+
+    // EAN matches are 100% certain — apply them immediately, no user intervention needed
+    const eanMatches = matches.filter(m => m.isEanMatch);
+    const manualMatches = matches.filter(m => !m.isEanMatch);
+
+    if (eanMatches.length > 0) {
+      const byJob = new Map<string, { itemKey: string; decoId: string }[]>();
+      eanMatches.forEach(r => {
+        if (!byJob.has(r.suggestedJobId)) byJob.set(r.suggestedJobId, []);
+        byJob.get(r.suggestedJobId)!.push({ itemKey: r.itemId, decoId: r.suggestedDecoItemId });
+      });
+      byJob.forEach((mappings, jobId) => onApplyMatches(mappings, jobId));
+    }
+    setEanAutoApplied(eanMatches.length);
+
+    // Only show non-EAN matches for manual review
+    setResults(manualMatches);
     setHasRun(true);
-    // Auto-select high-confidence matches
-    const highConf = new Set(matches.filter(m => m.confidence >= 80).map(m => m.itemId));
+    const highConf = new Set(manualMatches.filter(m => m.confidence >= 80).map(m => m.itemId));
     setSelected(highConf);
-  }, [orders, productMappings]);
+  }, [orders, productMappings, eanIndex, onApplyMatches]);
 
   // Auto-run on mount
   useEffect(() => {
@@ -102,10 +143,19 @@ const AutoMatchPanel: React.FC<Props> = ({ orders, productMappings, onApplyMatch
 
       {hasRun && (
         <div className="p-4">
+          {eanAutoApplied > 0 && (
+            <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+              <Barcode className="w-4 h-4 text-indigo-600" />
+              <span className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">
+                {eanAutoApplied} product{eanAutoApplied !== 1 ? 's' : ''} auto-mapped by EAN barcode
+              </span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            </div>
+          )}
           {filtered.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
-              <p className="text-xs font-bold uppercase tracking-widest">No unmapped items found — everything looks matched!</p>
+              <p className="text-xs font-bold uppercase tracking-widest">{eanAutoApplied > 0 ? 'All remaining items are matched!' : 'No unmapped items found — everything looks matched!'}</p>
             </div>
           ) : (
             <>
@@ -162,9 +212,11 @@ const AutoMatchPanel: React.FC<Props> = ({ orders, productMappings, onApplyMatch
                               <p className="text-[9px] text-gray-400 truncate">→ {m.suggestedDecoItemName}</p>
                               <p className="text-[8px] text-gray-400">{m.reason}</p>
                             </div>
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${confidenceColor(m.confidence)}`}>
-                              {m.confidence}%
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${confidenceColor(m.confidence)}`}>
+                                {m.confidence}%
+                              </span>
+                            </div>
                           </label>
                         ))}
                       </div>

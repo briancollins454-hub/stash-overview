@@ -9,7 +9,11 @@ export interface AutoMatchResult {
   suggestedDecoItemName: string;
   confidence: number;
   reason: string;
+  isEanMatch?: boolean;
 }
+
+/** Map of lowercase SKU/productCode → EAN barcode string. Built from reference products & physical stock. */
+export type EanIndex = Map<string, string>;
 
 /**
  * Normalizes a product name for fuzzy matching by removing noise words, 
@@ -57,12 +61,29 @@ function extractColour(str: string): string | null {
 }
 
 /**
+ * Resolves the best EAN for a SKU, checking the item's own EAN first,
+ * then falling back to the enrichment index (reference products + stock scans).
+ */
+function resolveEan(ownEan: string | undefined, sku: string | undefined, productCode: string | undefined, eanIndex?: EanIndex): string | undefined {
+  if (ownEan && ownEan !== '-' && ownEan.length >= 8) return ownEan;
+  if (!eanIndex) return undefined;
+  const skuKey = (sku || '').trim().toLowerCase();
+  if (skuKey && eanIndex.has(skuKey)) return eanIndex.get(skuKey);
+  const pcKey = (productCode || '').trim().toLowerCase();
+  if (pcKey && eanIndex.has(pcKey)) return eanIndex.get(pcKey);
+  return undefined;
+}
+
+/**
  * Auto-match engine: Suggests matches between Shopify order items and
- * Deco job items based on SKU, name similarity, size, and colour.
+ * Deco job items based on EAN barcode, SKU, name similarity, size, and colour.
+ * When an eanIndex is provided, items without their own EAN are enriched
+ * from reference products and physical stock scans.
  */
 export function autoMatch(
   orders: UnifiedOrder[],
-  productMappings: Record<string, string>
+  productMappings: Record<string, string>,
+  eanIndex?: EanIndex
 ): AutoMatchResult[] {
   const results: AutoMatchResult[] = [];
 
@@ -77,11 +98,12 @@ export function autoMatch(
       // Skip fulfilled items
       if (item.itemStatus === 'fulfilled') continue;
 
-      const candidates: { decoItem: DecoItem; score: number; reason: string; decoId: string }[] = [];
+      const candidates: { decoItem: DecoItem; score: number; reason: string; decoId: string; isEanMatch?: boolean }[] = [];
       const shopifySku = (item.sku || '').trim().toLowerCase();
       const shopifyName = normalize(item.name);
       const shopifySize = extractSize(item.name);
       const shopifyColour = extractColour(item.name);
+      const shopifyEan = resolveEan(item.ean, item.sku, undefined, eanIndex);
 
       // Check learned product mappings first
       if (productMappings) {
@@ -110,6 +132,7 @@ export function autoMatch(
 
         let score = 0;
         const reasons: string[] = [];
+        let isEanMatch = false;
 
         // SKU exact match: high confidence
         if (shopifySku && decoSku && shopifySku === decoSku) {
@@ -120,10 +143,12 @@ export function autoMatch(
           reasons.push('Partial SKU');
         }
 
-        // EAN match
-        if (item.ean && decoItem.ean && item.ean !== '-' && decoItem.ean !== '-' && item.ean === decoItem.ean) {
-          score += 0.4;
-          reasons.push('EAN match');
+        // EAN match (enriched from reference products + stock scans)
+        // Same EAN = same product. 100% confidence, skip all other scoring.
+        const decoEan = resolveEan(decoItem.ean, decoItem.vendorSku, decoItem.productCode, eanIndex);
+        if (shopifyEan && decoEan && shopifyEan === decoEan) {
+          candidates.push({ decoItem, score: 1.0, reason: 'EAN match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
         }
 
         // Word-level name matching (better than pure bigram for product names)
@@ -175,7 +200,7 @@ export function autoMatch(
         }
 
         if (score > 0.3) {
-          candidates.push({ decoItem, score: Math.min(1, score), reason: reasons.join(', '), decoId: `${decoId}@@@${idx}` });
+          candidates.push({ decoItem, score: Math.min(1, score), reason: reasons.join(', '), decoId: `${decoId}@@@${idx}`, isEanMatch });
         }
       }
 
@@ -192,6 +217,7 @@ export function autoMatch(
           suggestedDecoItemName: best.decoItem.name,
           confidence: Math.round(best.score * 100),
           reason: best.reason,
+          isEanMatch: best.isEanMatch,
         });
       }
     }
