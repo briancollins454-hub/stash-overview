@@ -2374,7 +2374,7 @@ const App: React.FC = () => {
 
         {/* Voice AI Assistant */}
         <Suspense fallback={null}>
-          <VoiceAssistant stats={stats} orders={unifiedOrders} onNavigate={setActiveTab} onSync={(deep) => loadData(!!deep)} />
+          <VoiceAssistant stats={stats} orders={unifiedOrders} onNavigate={setActiveTab} onSync={(deep) => loadData(!!deep)} activeTab={activeTab} />
         </Suspense>
     </div>
   );
