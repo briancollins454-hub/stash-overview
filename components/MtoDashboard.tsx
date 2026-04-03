@@ -347,7 +347,7 @@ const MtoDashboard: React.FC<MtoDashboardProps> = ({ orders, excludedTags, shopi
                                         <div className="text-[10px] text-purple-600 font-mono font-bold mt-1 uppercase tracking-widest">SKU: {item.sku} <span className="text-gray-400 mx-1">•</span> QTY: {item.quantity}</div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2 group" onClick={(e) => { e.stopPropagation(); window.open(`https://${shopifyDomain}/admin/orders/${item.orderId.split('/').pop()}`, '_blank'); }}>
+                                        <div className={`flex items-center gap-2 group ${shopifyDomain ? 'cursor-pointer' : ''}`} onClick={(e) => { e.stopPropagation(); if (shopifyDomain) window.open(`https://${shopifyDomain}/admin/orders/${item.orderId.split('/').pop()}`, '_blank'); }}>
                                             <span className="font-black text-slate-900 hover:text-indigo-600 hover:underline">#{item.orderNumber}</span>
                                             <ExternalLink className="w-3 h-3 text-gray-300 group-hover:text-indigo-400" />
                                         </div>

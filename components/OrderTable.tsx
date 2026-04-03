@@ -773,7 +773,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                     const liveProductionStatus = order.productionStatus;
                     const isReadyToShip = ['Ready for Shipping', 'Shipped', 'Completed'].includes(liveProductionStatus);
                     const isLate = order.daysRemaining < 0;
-                    const shopifyLink = `https://${shopifyDomain}/admin/orders/${order.shopify.id.split('/').pop()}`;
+                    const shopifyLink = shopifyDomain ? `https://${shopifyDomain}/admin/orders/${order.shopify.id.split('/').pop()}` : '';
                     
                     const statusBadgeClass = getProductionStatusBadge(liveProductionStatus);
                     const sliderColor = getProgressColor(order.daysRemaining);
@@ -801,12 +801,12 @@ const OrderTable: React.FC<OrderTableProps> = ({
                             />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="inline-flex items-center gap-2 group cursor-pointer" onClick={(e) => {
+                            <div className={`inline-flex items-center gap-2 group ${shopifyLink ? 'cursor-pointer' : ''}`} onClick={(e) => {
                                 e.stopPropagation();
-                                window.open(shopifyLink, '_blank');
+                                if (shopifyLink) window.open(shopifyLink, '_blank');
                             }}>
-                                <span className="text-sm font-bold text-gray-900 group-hover:text-indigo-600 group-hover:underline">#{order.shopify.orderNumber}</span>
-                                <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-indigo-500" />
+                                <span className={`text-sm font-bold text-gray-900 ${shopifyLink ? 'group-hover:text-indigo-600 group-hover:underline' : ''}`}>#{order.shopify.orderNumber}</span>
+                                {shopifyLink && <ExternalLink className="w-3 h-3 text-gray-400 group-hover:text-indigo-500" />}
                             </div>
                             {onOpenNotes && (
                                 <button
@@ -909,9 +909,9 @@ const OrderTable: React.FC<OrderTableProps> = ({
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                              <div className={`inline-flex px-2 py-1 text-[10px] font-bold rounded border capitalize uppercase tracking-widest ${shopifyStatusClass}`}>
-                                <span className="inline-flex items-center gap-2 cursor-pointer" onClick={(e) => {e.stopPropagation(); window.open(shopifyLink, '_blank')}}>
+                                <span className={`inline-flex items-center gap-2 ${shopifyLink ? 'cursor-pointer' : ''}`} onClick={(e) => {e.stopPropagation(); if (shopifyLink) window.open(shopifyLink, '_blank')}}>
                                     {order.shopify.fulfillmentStatus}
-                                    <ExternalLink className="w-3 h-3 opacity-50" />
+                                    {shopifyLink && <ExternalLink className="w-3 h-3 opacity-50" />}
                                 </span>
                              </div>
                              {order.shipStationTracking && (
