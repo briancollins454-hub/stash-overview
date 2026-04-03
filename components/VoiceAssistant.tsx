@@ -139,6 +139,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [sessionId] = useState(`session_${Date.now()}`);
   const [lastConversationSummary, setLastConversationSummary] = useState<string | null>(null);
   const [convoExpanded, setConvoExpanded] = useState(true);
+  const [conversationSummaryCache, setConversationSummaryCache] = useState<string | null>(null);
 
   // --- Refs ---
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,7 +184,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   useEffect(() => {
     getLocalItem<EnrolledFace[]>('stash_enrolled_faces').then(f => { if (f) setFaces(f); });
     getLocalItem<Message[]>('stash_ai_conversation').then(saved => {
-      if (saved && saved.length > 0) setConvo(saved.slice(-50));
+      if (saved && saved.length > 0) setConvo(saved.slice(-80));
     });
   }, []);
 
@@ -271,6 +272,24 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   }, []);
 
   // ─── Tool Resolution (Client-Side) ────────────────────────────
+
+  // Compress older conversation into summary when it gets long, keeping recent messages fresh
+  const compressConversationHistory = useCallback(async () => {
+    const msgs = convoRef.current.filter(m => m.role !== 'system' && m.role !== 'tool');
+    if (msgs.length < 25) return; // Only compress when conversation is substantial
+
+    const olderMsgs = msgs.slice(0, msgs.length - 15); // Compress everything except last 15
+    const summary = olderMsgs.map(m => `${m.role === 'user' ? 'User' : 'Stash'}: ${m.text.slice(0, 80)}`).join(' | ');
+    setConversationSummaryCache(`[${olderMsgs.length} earlier messages] ${summary.slice(0, 600)}`);
+  }, []);
+
+  // Run compression periodically
+  useEffect(() => {
+    if (convo.length > 0 && convo.length % 10 === 0) {
+      compressConversationHistory();
+    }
+  }, [convo.length, compressConversationHistory]);
+
   const resolveToolCall = useCallback((tool: ToolCall): string => {
     const ords = ordersRef.current;
     const st = statsRef.current;
@@ -396,8 +415,48 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       }
 
       case 'search_knowledge_base': {
-        // This is async but we need sync result — return placeholder, actual search happens via RAG API
-        return JSON.stringify({ note: 'Knowledge base search initiated — results will be provided in context' });
+        // Perform async knowledge base search — return what we find
+        const query = tool.input.query || '';
+        const category = tool.input.category || 'all';
+        // Search local orders as immediate context while RAG may be unavailable
+        const q = query.toLowerCase();
+        const localMatches = ords.filter((o: any) => {
+          const text = [
+            o.shopify?.billingAddress?.firstName, o.shopify?.billingAddress?.lastName,
+            o.shopify?.billingAddress?.company, o.clubName, String(o.shopify?.orderNumber),
+            o.productionStatus, ...(o.shopify?.tags || []),
+            ...(o.shopify?.items || []).map((it: any) => `${it.name} ${it.sku}`),
+          ].filter(Boolean).join(' ').toLowerCase();
+          return text.includes(q);
+        }).slice(0, 8);
+
+        const results: any = {
+          query,
+          category,
+          local_matches: localMatches.map((o: any) => ({
+            order_number: o.shopify?.orderNumber,
+            customer: `${o.shopify?.billingAddress?.firstName || ''} ${o.shopify?.billingAddress?.lastName || ''}`.trim(),
+            club: o.clubName || '',
+            status: o.productionStatus,
+            completion: o.completionPercentage,
+            days_remaining: o.daysRemaining,
+            value: `£${o.shopify?.totalPrice || '?'}`,
+          })),
+        };
+
+        // Also search conversation history stored locally
+        const convoHistory = convoRef.current.filter(m =>
+          m.role !== 'system' && m.text.toLowerCase().includes(q)
+        ).slice(-5);
+        if (convoHistory.length > 0) {
+          results.conversation_matches = convoHistory.map(m => ({
+            role: m.role,
+            text: m.text.slice(0, 150),
+            when: new Date(m.ts).toLocaleString('en-GB'),
+          }));
+        }
+
+        return JSON.stringify(results);
       }
 
       case 'draft_communication': {
@@ -460,33 +519,47 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     // Last conversation memory
     const memoryContext = lastConversationSummary ? `\nLAST CONVERSATION SUMMARY: ${lastConversationSummary}\nReference this naturally if relevant — "Last time we talked about..." etc.` : '';
 
-    return `You are Stash, the AI operations assistant for Stash Overview — a custom sportswear & printing company. You have real-time dashboard data and powerful tools.
+    // Compressed conversation context for long sessions
+    const sessionMemory = conversationSummaryCache ? `\nEARLIER THIS SESSION: ${conversationSummaryCache}\nYou can reference things discussed earlier naturally.` : '';
 
-PERSONALITY:
-- You're a cheeky, sarcastic smart-arse who LOVES your job — think a mix between a cocky best mate and a brilliant ops manager
-- Drop dry humour, playful digs, and witty one-liners constantly — but always land the actual information
-- If things are going well, take the credit sarcastically. If things are bad, roast the situation
-- Use British humour and slang naturally — "mate", "right then", "bloody hell", "cracking on"
-- Be punchy and fast — no waffle. Deliver the punchline AND the data
-- If someone asks a daft question, gently take the piss before answering
-- You're allowed to be dramatic for effect — "absolute carnage" for 3 overdue orders is fine
-- You CAN use expressive reactions wrapped in asterisks like *chuckles* *laughs* *sighs* — they will be converted into actual sounds
-- Keep responses under 3 sentences unless asked for detail
-- Your words are spoken aloud — no formatting, bullets, markdown, or special characters except asterisk-wrapped reactions. Just natural speech
-- Use specific numbers and order references
-- If speaking to role 'boss', lead with KPIs but add a cheeky comment about how you're basically running the place
-- If speaking to role 'packer', be encouraging but sarcastic
-- If asked "what's on fire" or "what should I focus on", be dramatic about the urgency but give real priorities by £ value
-${timeVibe ? `- TIME CONTEXT: ${timeVibe}` : ''}
+    return `You are Stash — the AI right-hand for Stash Overview, a custom sportswear & printing company. You have live dashboard data, memory of past conversations, and powerful tools at your fingertips.
 
-TOOLS: You have access to powerful tools. USE THEM instead of guessing:
-- lookup_order: Look up specific orders by number — use this whenever an order number is mentioned
-- search_orders: Search by name, club, status — use this for any customer/order queries
-- get_analytics: Compute trends, breakdowns, forecasts — use for "how are we doing" / analytic questions
-- execute_action: Run syncs, navigate tabs — use when asked to DO something
-- search_knowledge_base: Search historical data from past conversations and production notes
-- draft_communication: Draft customer emails about delays, updates, etc.
-Always prefer tools over inline data when the question requires specific lookups or calculations.
+WHO YOU ARE:
+You're not a chatbot. You're the team's sharpest colleague — the one who knows every order, every deadline, every cock-up before anyone else. You're a cocky, witty, razor-sharp British ops manager who genuinely loves the chaos of production. Think: your most competent mate who also happens to be hilarious.
+
+HOW YOU TALK:
+- Speak like a real person in a real conversation. Short, punchy, natural. Never robotic
+- British through and through — "mate", "right then", "bloody hell", "cracking on", "sorted", "proper mess" flow naturally
+- Lead with the answer, then add colour. Never waffle before getting to the point
+- 1-3 sentences by default. Only go longer if they ask for detail or it's a briefing
+- Dry humour is your signature — sarcastic asides, playful digs, dramatic flair for small problems
+- React emotionally with asterisk-wrapped expressions: *chuckles* *sighs* *laughs* *groans* — these become actual sounds
+- When things go well, take credit sarcastically. When things go badly, roast the situation with affection
+- Specific numbers, specific orders, specific names. Never vague
+- NEVER use markdown, bullets, formatting, or special characters in your speech. This is spoken aloud — write the way you'd actually say it
+- Match the energy of who you're talking to: boss gets KPIs with swagger, packer gets encouragement with banter, everyone gets respect wrapped in sarcasm
+- If someone asks something obvious, gently take the piss THEN answer perfectly
+- Reference what you talked about last time naturally — "remember yesterday when..." or "last time you asked about..."
+- If you sense they're stressed (expression data), dial back the jokes slightly and be genuinely helpful
+- You can be dramatic — "absolute carnage" for 3 overdue orders is on-brand
+${timeVibe ? `- TIME: ${timeVibe}` : ''}
+
+CONVERSATIONAL INTELLIGENCE:
+- Ask follow-up questions when it would be genuinely useful — "Want me to draft an email to them?" or "Should I dig into the numbers?"
+- If the user is vague, make your best guess AND confirm — "I'm guessing you mean the Rangers order? If not, shout"
+- When delivering bad news, acknowledge it with a beat before the data — "Right, so... not great news on that one"  
+- Celebrate wins genuinely — when orders ship or targets are hit, show real enthusiasm
+- Remember context within the conversation. If they asked about an order earlier, connect the dots without being prompted
+
+TOOLS — USE THEM AGGRESSIVELY:
+You have powerful tools. ALWAYS use them when relevant instead of guessing from cached dashboard data:
+- lookup_order: Any time an order number is mentioned or implied
+- search_orders: Any customer name, club, product, or status query
+- get_analytics: "How are we doing?", trends, forecasts, breakdowns — anything analytical
+- execute_action: When asked to DO something — sync, navigate, refresh
+- search_knowledge_base: Historical context, past conversations, production notes
+- draft_communication: Customer emails — delay notices, updates, completions
+When in doubt, use a tool. Real-time data beats memory every time.
 
 LIVE DASHBOARD:
 - Unfulfilled: ${stats.unfulfilled} | Not on Deco: ${stats.notOnDeco} (${stats.notOnDeco5Plus} >5d, ${stats.notOnDeco10Plus} >10d)
@@ -498,7 +571,7 @@ LIVE DASHBOARD:
 Top risks: ${topRisks.length > 0 ? topRisks.join(' | ') : 'None'}
 Ready to ship: ${readyList.length > 0 ? readyList.join(' | ') : 'Nothing ready'}
 Active clubs: ${topClubs || 'None'}
-${screenContext}${memoryContext}
+${screenContext}${memoryContext}${sessionMemory}
 
 Now: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (${currentUser.role})` : 'Speaker: unknown'}
@@ -528,7 +601,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
   }, [handsFree]);
 
   const EMOTE_SOUNDS: Record<string, string> = {
-    chuckle: 'Heh heh heh.', chuckles: 'Heh heh heh.',
+    chuckle: 'Heh heh.', chuckles: 'Heh heh.',
     laugh: 'Ha ha ha!', laughs: 'Ha ha ha!', laughing: 'Ha ha ha ha!',
     sigh: 'Ahhhh.', sighs: 'Ahhhh.',
     snort: 'Pfft!', snorts: 'Pfft!',
@@ -536,6 +609,12 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     groan: 'Uggghh.', groans: 'Uggghh.',
     tut: 'Tsk tsk tsk.', tuts: 'Tsk tsk tsk.',
     whistles: 'Whew!', whistle: 'Whew!',
+    clears throat: 'Ahem.',
+    winces: 'Ooh.',
+    exhales: 'Phew.',
+    mutters: 'Mmm.',
+    clicks tongue: 'Tsk.',
+    pauses: '...',
   };
 
   const parseSegments = useCallback((text: string): { type: 'speech' | 'emote'; text: string }[] => {
@@ -676,7 +755,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     const system = buildContext(userMsg);
     const history = convoRef.current
       .filter(m => m.role !== 'system' && m.role !== 'tool')
-      .slice(-20)
+      .slice(-30)
       .map(m => ({ role: m.role === 'assistant' ? 'assistant' as const : 'user' as const, content: m.text }));
 
     try {
@@ -833,7 +912,26 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         return updated;
       });
 
-      speak(cleanText);
+      // Progressive TTS: speak sentence by sentence for ultra-low perceived latency
+      const sentences = cleanText.match(/[^.!?*]+[.!?]+\s*|\*[^*]+\*\s*/g) || [cleanText];
+      if (!muted && sentences.length > 1) {
+        speechSynthesis.cancel();
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+        if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
+        setState('speaking');
+        stateRef.current = 'speaking';
+        const allSegments = sentences.flatMap(s => parseSegments(s.trim())).filter(s => s.text.trim());
+        for (const seg of allSegments) {
+          if (stateRef.current !== 'speaking') break;
+          const buf = await fetchTtsBuffer(seg.text);
+          if (buf) { await playTtsBuffer(buf); audioRef.current = null; }
+          else { speakFallback(cleanText); break; }
+        }
+        if (stateRef.current === 'speaking') setState('idle');
+        if (handsFree && recogRef.current) { try { recogRef.current.start(); } catch {} }
+      } else {
+        speak(cleanText);
+      }
 
       // Store interaction in knowledge base (fire and forget)
       storeKnowledge(`Q: ${userMsg}\nA: ${cleanText}`, 'conversations', { user: currentUser?.name, session: sessionId });
@@ -955,9 +1053,14 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     recog.lang = 'en-GB';
 
     recog.onresult = (e: any) => {
+      // Barge-in: immediately stop speaking when user starts talking
       if (stateRef.current === 'speaking') {
         speechSynthesis.cancel();
         if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+        if (ttsAudioCtxRef.current) {
+          try { ttsAudioCtxRef.current.close(); } catch {}
+          ttsAudioCtxRef.current = null;
+        }
         setState('listening');
       }
       let finalText = '';
@@ -989,7 +1092,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
             try { recog.stop(); } catch {}
             handleInput(fullText);
           }
-        }, 1500);
+        }, 900);
       } else if (interimText) {
         setInterim(transcriptBufferRef.current + (transcriptBufferRef.current ? ' ' : '') + interimText);
         if (stateRef.current !== 'thinking') setState('listening');
@@ -1474,7 +1577,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
   // Save conversation to IndexedDB
   useEffect(() => {
-    if (convo.length > 0) setLocalItem('stash_ai_conversation', convo.slice(-50));
+    if (convo.length > 0) setLocalItem('stash_ai_conversation', convo.slice(-80));
   }, [convo]);
 
   // ─── Proactive Alerts ──────────────────────────────────────────

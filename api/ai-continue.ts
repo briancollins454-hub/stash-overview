@@ -36,7 +36,11 @@ export default async function handler(req: Request) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1200,
+        max_tokens: 2048,
+        temperature: 0.75,
+        top_p: 0.95,
+        frequency_penalty: 0.15,
+        presence_penalty: 0.1,
         messages: oaiMessages,
         stream: true,
       }),

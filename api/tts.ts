@@ -1,61 +1,123 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+export const config = { runtime: 'edge' };
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const origin = req.headers.origin || '';
-  if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+// ─── TTS: OpenAI (primary) + ElevenLabs (premium fallback) ───────
+// OpenAI TTS-1 for low-latency, natural voice. ElevenLabs if key exists for premium quality.
+
+export default async function handler(req: Request) {
+  const origin = req.headers.get('origin') || '';
+  const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
+  const corsHeaders: Record<string, string> = {};
+  if (allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+    corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
+  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
 
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) {
-    return res.status(501).json({ error: 'ELEVENLABS_API_KEY not configured' });
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+
+  if (!elevenLabsKey && !openaiKey) {
+    return new Response(JSON.stringify({ error: 'No TTS API key configured' }), {
+      status: 501,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
-    const { text, voiceId } = req.body || {};
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'text is required' });
+    const { text, voice: reqVoice, speed: reqSpeed } = await req.json();
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      return new Response(JSON.stringify({ error: 'text is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // Default: "George" — warm, confident British male — perfect for cheeky smart-arse character
-    // Alternatives: "Charlie" (Aus male), "Callum" (transatlantic male), "Daniel" (authoritative British)
-    const voice = voiceId || process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb';
+    const cleanText = text.slice(0, 2000).trim();
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'xi-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        text,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: {
-          stability: 0.35,
-          similarity_boost: 0.85,
-          style: 0.55,
-          use_speaker_boost: true,
+    // ── Try ElevenLabs first (premium quality) ──
+    if (elevenLabsKey) {
+      try {
+        const voice = reqVoice || process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb';
+        const elResp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'xi-api-key': elevenLabsKey,
+          },
+          body: JSON.stringify({
+            text: cleanText,
+            model_id: 'eleven_multilingual_v2',
+            voice_settings: {
+              stability: 0.35,
+              similarity_boost: 0.85,
+              style: 0.55,
+              use_speaker_boost: true,
+            },
+            optimize_streaming_latency: 3,
+          }),
+        });
+
+        if (elResp.ok && elResp.body) {
+          return new Response(elResp.body, {
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'audio/mpeg',
+              'Cache-Control': 'no-cache',
+            },
+          });
+        }
+      } catch {
+        // Fall through to OpenAI
+      }
+    }
+
+    // ── OpenAI TTS (reliable fallback, still natural) ──
+    if (openaiKey) {
+      const ttsVoice = reqVoice || process.env.TTS_VOICE || 'nova';
+      const ttsSpeed = Math.min(Math.max(reqSpeed || 1.05, 0.25), 4.0);
+
+      const resp = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiKey}`,
         },
-        speed: 1.4,
-      }),
-    });
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: cleanText,
+          voice: ttsVoice,
+          speed: ttsSpeed,
+          response_format: 'mp3',
+        }),
+      });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(response.status).json({ error: errText });
+      if (resp.ok && resp.body) {
+        return new Response(resp.body, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'audio/mpeg',
+            'Cache-Control': 'no-cache',
+          },
+        });
+      }
+
+      const err = await resp.text();
+      return new Response(JSON.stringify({ error: 'TTS generation failed', detail: err }), {
+        status: resp.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // Stream audio back
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Cache-Control', 'no-cache');
-    const arrayBuffer = await response.arrayBuffer();
-    res.send(Buffer.from(arrayBuffer));
+    return new Response(JSON.stringify({ error: 'No TTS provider available' }), {
+      status: 501,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   } catch (e: any) {
-    return res.status(500).json({ error: e.message || 'TTS error' });
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 }
