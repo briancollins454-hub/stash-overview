@@ -722,6 +722,26 @@ const App: React.FC = () => {
             if (cachedJobLinks) setItemJobLinks(cachedJobLinks);
 
             // Load settings from Firestore (tied to user account)
+            // Fetch shared system config FIRST — these are system-wide values, not per-user
+            try {
+                const cfgRes = await fetch('/api/config');
+                if (cfgRes.ok) {
+                    const serverCfg = await cfgRes.json();
+                    setApiSettings(prev => {
+                        const merged = {
+                            ...prev,
+                            // Server is authoritative for system-wide settings
+                            shopifyDomain: serverCfg.shopifyDomain || prev.shopifyDomain || '',
+                            decoDomain: serverCfg.decoDomain || prev.decoDomain || '',
+                            supabaseUrl: serverCfg.supabaseUrl || prev.supabaseUrl || '',
+                            supabaseAnonKey: serverCfg.supabaseAnonKey || prev.supabaseAnonKey || '',
+                        };
+                        localStorage.setItem('stash_api_settings', JSON.stringify(merged));
+                        return merged;
+                    });
+                }
+            } catch {}
+
             if (user?.uid) {
                 try {
                     setSyncStatusMsg('Loading your settings...');
@@ -730,8 +750,9 @@ const App: React.FC = () => {
                     if (settingsDoc.exists()) {
                         const cloudSettings = settingsDoc.data().settings as Partial<ApiSettings>;
                         if (cloudSettings) {
-                            // Only merge non-credential settings from Firestore
-                            const { shopifyAccessToken, decoPassword, supabaseAnonKey, shipStationApiSecret, ...safeSettings } = cloudSettings as any;
+                            // Only merge non-credential, non-system settings from Firestore
+                            const { shopifyAccessToken, decoPassword, supabaseAnonKey, shipStationApiSecret,
+                                    shopifyDomain, decoDomain, supabaseUrl, ...safeSettings } = cloudSettings as any;
                             setApiSettings(prev => {
                                 const merged = { ...prev, ...safeSettings };
                                 localStorage.setItem('stash_api_settings', JSON.stringify(merged));
@@ -739,26 +760,6 @@ const App: React.FC = () => {
                             });
                         }
                     }
-
-                    // Fetch shared system config from server — fills in any blanks
-                    // Runs AFTER Firestore so server values act as final fallback
-                    try {
-                        const cfgRes = await fetch('/api/config');
-                        if (cfgRes.ok) {
-                            const serverCfg = await cfgRes.json();
-                            setApiSettings(prev => {
-                                const merged = {
-                                    ...prev,
-                                    shopifyDomain: prev.shopifyDomain || serverCfg.shopifyDomain || '',
-                                    decoDomain: prev.decoDomain || serverCfg.decoDomain || '',
-                                    supabaseUrl: prev.supabaseUrl || serverCfg.supabaseUrl || '',
-                                    supabaseAnonKey: prev.supabaseAnonKey || serverCfg.supabaseAnonKey || '',
-                                };
-                                localStorage.setItem('stash_api_settings', JSON.stringify(merged));
-                                return merged;
-                            });
-                        }
-                    } catch {}
                 } catch (e) {
                     console.warn('Failed to load cloud settings:', e);
                 }
