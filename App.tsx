@@ -8,7 +8,7 @@ import { exportOrdersToCSV } from './services/exportService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, fetchDecoProductEans } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
 import { db } from './firebase';
@@ -328,6 +328,7 @@ const App: React.FC = () => {
   const [physicalStock, setPhysicalStock] = useState<PhysicalStockItem[]>([]);
   const [returnStock, setReturnStock] = useState<ReturnStockItem[]>([]);
   const [referenceProducts, setReferenceProducts] = useState<ReferenceProduct[]>([]);
+  const [decoProductEans, setDecoProductEans] = useState<Map<string, string>>(new Map());
   const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [missingCloudTables, setMissingCloudTables] = useState<string[]>([]);
@@ -937,7 +938,7 @@ const App: React.FC = () => {
   const holidaySet = useMemo(() => getHolidayDateSet(apiSettings.holidayRanges), [apiSettings.holidayRanges]);
 
   // EAN enrichment index: maps lowercase identifier → EAN barcode
-  // Built from physical stock, reference products, AND deco job items (bridging productCode→vendorSku)
+  // Built from physical stock, reference products, Deco product catalog, AND deco job items
   const eanIndex = useMemo(() => {
     const idx = new Map<string, string>();
     // 1. Physical stock scans (barcode scanner — highest trust)
@@ -953,7 +954,11 @@ const App: React.FC = () => {
         if (!idx.has(key)) idx.set(key, r.ean.trim());
       }
     }
-    // 3. Bridge: Deco jobs link productCode to vendorSku.
+    // 3. Deco product catalog EANs (fetched from Deco admin)
+    for (const [k, v] of decoProductEans) {
+      if (!idx.has(k)) idx.set(k, v);
+    }
+    // 4. Bridge: Deco jobs link productCode to vendorSku.
     //    If we have an EAN for a productCode, also index its vendorSku
     //    so Shopify items (which use vendorSku-like SKUs) can match.
     for (const job of rawDecoJobs) {
@@ -978,7 +983,39 @@ const App: React.FC = () => {
       }
     }
     return idx;
-  }, [physicalStock, referenceProducts, rawDecoJobs]);
+  }, [physicalStock, referenceProducts, decoProductEans, rawDecoJobs]);
+
+  // Fetch EANs from Deco product catalog for all product codes in current jobs
+  const decoEanFetchedRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (rawDecoJobs.length === 0) return;
+    // Collect all unique product codes from deco jobs
+    const codes: string[] = [];
+    for (const job of rawDecoJobs) {
+      if (!job.items) continue;
+      for (const item of job.items) {
+        const pc = (item.productCode || '').trim();
+        if (pc && !decoEanFetchedRef.current.has(pc.toLowerCase())) {
+          codes.push(pc);
+          decoEanFetchedRef.current.add(pc.toLowerCase());
+        }
+      }
+    }
+    if (codes.length === 0) return;
+    console.log(`[EAN] Fetching EANs from Deco product catalog for ${codes.length} product codes...`);
+    fetchDecoProductEans(apiSettings, codes).then(eanMap => {
+      if (eanMap.size > 0) {
+        console.log(`[EAN] Got ${eanMap.size} EANs from Deco catalog:`, Object.fromEntries(eanMap));
+        setDecoProductEans(prev => {
+          const merged = new Map(prev);
+          for (const [k, v] of eanMap) merged.set(k, v);
+          return merged;
+        });
+      } else {
+        console.log('[EAN] No EANs returned from Deco product catalog');
+      }
+    }).catch(e => console.error('[EAN] Failed to fetch Deco product EANs:', e));
+  }, [rawDecoJobs, apiSettings]);
 
   const calculateWorkingDays = (startStr: string, endStr: string, holidaySet: Set<string>) => {
       const start = new Date(startStr);

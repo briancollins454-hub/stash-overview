@@ -528,6 +528,56 @@ export const fetchOrderTimeline = async (settings: ApiSettings, orderId: string)
     } catch (e) { return { comments: [] }; }
 };
 
+/**
+ * Fetch product EANs from Deco product catalog.
+ * Looks up products by product code and extracts barcode/EAN/GTIN fields.
+ * Returns a Map of lowercase productCode → EAN string.
+ */
+export const fetchDecoProductEans = async (settings: ApiSettings, productCodes: string[]): Promise<Map<string, string>> => {
+    const eanMap = new Map<string, string>();
+    if (!productCodes.length) return eanMap;
+
+    // Deduplicate and batch
+    const uniqueCodes = [...new Set(productCodes.map(c => c.trim()).filter(Boolean))];
+    const BATCH = 10;
+
+    for (let i = 0; i < uniqueCodes.length; i += BATCH) {
+        const batch = uniqueCodes.slice(i, i + BATCH);
+        const promises = batch.map(async (code) => {
+            try {
+                const data = await robustDecoFetch(settings, 'api/json/manage_products/find', {
+                    field: '3', // product code field
+                    condition: '1', // exact match
+                    string: code,
+                    limit: '5',
+                });
+                const products = data.products || data.items || [];
+                for (const p of (Array.isArray(products) ? products : [])) {
+                    const ean = p.barcode || p.ean || p.gtin || p.upc || '';
+                    const pc = (p.product_code || p.code || code || '').trim().toLowerCase();
+                    if (ean && ean.trim().length >= 8 && pc) {
+                        eanMap.set(pc, ean.trim());
+                    }
+                    // Also check variants/options for EANs
+                    const variants = p.variants || p.options || p.skus || [];
+                    for (const v of (Array.isArray(variants) ? variants : [])) {
+                        const vEan = v.barcode || v.ean || v.gtin || v.upc || '';
+                        const vSku = (v.vendor_sku || v.sku || v.code || '').trim().toLowerCase();
+                        if (vEan && vEan.trim().length >= 8) {
+                            if (vSku) eanMap.set(vSku, vEan.trim());
+                            if (pc && !eanMap.has(pc)) eanMap.set(pc, vEan.trim());
+                        }
+                    }
+                }
+            } catch (e) {
+                // Product lookup failed — skip silently
+            }
+        });
+        await Promise.all(promises);
+    }
+    return eanMap;
+};
+
 export const updateShopifyVariantBarcode = async (settings: ApiSettings, variantId: string, barcode: string): Promise<{ success: boolean; error?: string }> => {
     if (!variantId || !variantId.startsWith('gid://')) return { success: false, error: 'Invalid variant ID' };
     if (!barcode || barcode.trim().length === 0) return { success: false, error: 'Empty barcode' };

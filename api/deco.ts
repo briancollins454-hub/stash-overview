@@ -65,9 +65,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'endpoint is required' });
   }
 
-  // Only allow the manage_orders API path
-  if (!endpoint.startsWith('api/json/manage_orders/')) {
-    return res.status(403).json({ error: 'Only manage_orders API endpoints are allowed' });
+  // Only allow safe Deco API paths
+  if (!endpoint.startsWith('api/json/manage_orders/') && !endpoint.startsWith('api/json/manage_products/')) {
+    return res.status(403).json({ error: 'Only manage_orders and manage_products API endpoints are allowed' });
   }
 
   try {
