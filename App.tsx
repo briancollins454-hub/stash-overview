@@ -936,23 +936,49 @@ const App: React.FC = () => {
 
   const holidaySet = useMemo(() => getHolidayDateSet(apiSettings.holidayRanges), [apiSettings.holidayRanges]);
 
-  // EAN enrichment index: maps lowercase SKU/productCode → EAN barcode
-  // Built from physical stock scans (highest trust) and reference products (supplier CSVs)
+  // EAN enrichment index: maps lowercase identifier → EAN barcode
+  // Built from physical stock, reference products, AND deco job items (bridging productCode→vendorSku)
   const eanIndex = useMemo(() => {
     const idx = new Map<string, string>();
+    // 1. Physical stock scans (barcode scanner — highest trust)
     for (const s of physicalStock) {
       if (s.ean && s.ean.trim().length >= 8 && s.productCode) {
         idx.set(s.productCode.toLowerCase(), s.ean.trim());
       }
     }
+    // 2. Reference products (supplier CSVs) — productCode → EAN
     for (const r of referenceProducts) {
       if (r.ean && r.ean.trim().length >= 8 && r.productCode) {
         const key = r.productCode.toLowerCase();
         if (!idx.has(key)) idx.set(key, r.ean.trim());
       }
     }
+    // 3. Bridge: Deco jobs link productCode to vendorSku.
+    //    If we have an EAN for a productCode, also index its vendorSku
+    //    so Shopify items (which use vendorSku-like SKUs) can match.
+    for (const job of rawDecoJobs) {
+      if (!job.items) continue;
+      for (const item of job.items) {
+        const pc = (item.productCode || '').trim().toLowerCase();
+        const vs = (item.vendorSku || '').trim().toLowerCase();
+        // If productCode has an EAN, also register vendorSku
+        if (pc && vs && vs !== pc && idx.has(pc) && !idx.has(vs)) {
+          idx.set(vs, idx.get(pc)!);
+        }
+        // If vendorSku has an EAN but productCode doesn't, register productCode too
+        if (pc && vs && idx.has(vs) && !idx.has(pc)) {
+          idx.set(pc, idx.get(vs)!);
+        }
+        // If the deco item itself carries an EAN, register both codes
+        const decoEan = (item.ean || '').trim();
+        if (decoEan.length >= 8) {
+          if (pc && !idx.has(pc)) idx.set(pc, decoEan);
+          if (vs && !idx.has(vs)) idx.set(vs, decoEan);
+        }
+      }
+    }
     return idx;
-  }, [physicalStock, referenceProducts]);
+  }, [physicalStock, referenceProducts, rawDecoJobs]);
 
   const calculateWorkingDays = (startStr: string, endStr: string, holidaySet: Set<string>) => {
       const start = new Date(startStr);
@@ -1144,8 +1170,14 @@ const App: React.FC = () => {
   // ── EAN Auto-Map: runs on data load, maps products with matching EAN barcodes ──
   const eanAutoMapRanRef = useRef(new Set<string>());
   useEffect(() => {
-    if (unifiedOrders.length === 0 || eanIndex.size === 0) return;
+    if (unifiedOrders.length === 0) return;
+    console.log(`[EAN Auto-Map] eanIndex size: ${eanIndex.size}, orders: ${unifiedOrders.length}`);
+    if (eanIndex.size === 0) {
+      console.log('[EAN Auto-Map] No EAN data in index — check reference products / physical stock');
+      return;
+    }
     const results = autoMatch(unifiedOrders, productMappings, eanIndex);
+    console.log(`[EAN Auto-Map] autoMatch returned ${results.length} results, ${results.filter(r => r.isEanMatch).length} EAN matches`);
     const eanMatches = results.filter(r => r.isEanMatch);
     if (eanMatches.length === 0) return;
 
