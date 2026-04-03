@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, X, UserPlus, Volume2, VolumeX, Radio, User, Sparkles } from 'lucide-react';
+import { Mic, MicOff, X, UserPlus, Volume2, VolumeX, Radio, User, Sparkles, Trash2, Hand } from 'lucide-react';
 import { getItem as getLocalItem, setItem as setLocalItem } from '../services/localStore';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -101,6 +101,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [cameraReady, setCameraReady] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [textInput, setTextInput] = useState('');
+  const [pushToTalk, setPushToTalk] = useState(false);
 
   // --- Refs ---
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -121,15 +122,22 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const particles = useRef<Particle[]>([]);
   const stateRef = useRef<AssistantState>('idle');
   const convoEndRef = useRef<HTMLDivElement>(null);
+  const prevStatsRef = useRef<typeof stats | null>(null);
+  const statsRef = useRef(stats);
 
   // Keep refs synced
   useEffect(() => { convoRef.current = convo; }, [convo]);
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { statsRef.current = stats; }, [stats]);
 
   // Load enrolled faces on mount
   useEffect(() => {
     getLocalItem<EnrolledFace[]>('stash_enrolled_faces').then(f => {
       if (f) setFaces(f);
+    });
+    // Load saved conversation
+    getLocalItem<Message[]>('stash_ai_conversation').then(saved => {
+      if (saved && saved.length > 0) setConvo(saved.slice(-20));
     });
   }, []);
 
@@ -166,6 +174,34 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       orderDetail = `\n\nSpecific orders requested:\n${details.join('\n')}`;
     }
 
+    // Customer / club name search
+    let customerDetail = '';
+    const nameWords = userMsg.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    if (nameWords.length > 0) {
+      const matches = orders.filter(o => {
+        const first = (o.shopify?.billingAddress?.firstName || '').toLowerCase();
+        const last = (o.shopify?.billingAddress?.lastName || '').toLowerCase();
+        const company = (o.shopify?.billingAddress?.company || '').toLowerCase();
+        const club = (o.clubName || '').toLowerCase();
+        return nameWords.some(w => first.includes(w) || last.includes(w) || company.includes(w) || club.includes(w));
+      });
+      if (matches.length > 0 && matches.length <= 15) {
+        customerDetail = `\n\nOrders matching name/club "${nameWords.join(' ')}":\n${matches.slice(0, 8).map(o =>
+          `#${o.shopify.orderNumber} ${o.shopify.billingAddress?.firstName || ''} ${o.shopify.billingAddress?.lastName || ''} (${o.clubName || 'N/A'}) — ${o.productionStatus}, ${o.completionPercentage}% done, ${o.daysRemaining}d remaining, £${o.shopify.totalPrice || '?'}`
+        ).join('\n')}${matches.length > 8 ? `\n...and ${matches.length - 8} more` : ''}`;
+      }
+    }
+
+    // Time-aware context
+    const now = new Date();
+    const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+    const hour = now.getHours();
+    const timeVibe = hour < 9 ? "It's early — be surprised they're in already" :
+                     hour >= 12 && hour < 14 ? "It's lunchtime — maybe mention they should eat" :
+                     hour >= 18 ? "They're working late — acknowledge it" :
+                     dayName === 'Monday' ? "It's Monday — commiserate about the start of the week" :
+                     dayName === 'Friday' ? "It's Friday — be upbeat about the weekend" : '';
+
     return `You are Stash, the AI operations assistant for Stash Overview — a custom sportswear & printing company. You have real-time dashboard data below.
 
 PERSONALITY:
@@ -180,9 +216,23 @@ PERSONALITY:
 - Keep responses under 3 sentences unless asked for detail
 - Your words are spoken aloud — no formatting, bullets, markdown, or special characters except asterisk-wrapped reactions. Just natural speech
 - Use specific numbers and order references
+- When users mention customer names or club names, look them up in the data and give specifics
 - If speaking to role 'boss', lead with KPIs but add a cheeky comment about how you're basically running the place
 - If speaking to role 'packer', be encouraging but sarcastic — like a mate who helps but won't let you forget when you mess up
 - If asked "what's on fire" or "what should I focus on", be dramatic about the urgency but give real priorities by £ value
+${timeVibe ? `- TIME CONTEXT: ${timeVibe}` : ''}
+
+AVAILABLE ACTIONS — append at the END of your response when the user asks you to DO something:
+- [ACTION:sync] — run a data sync
+- [ACTION:deep_sync] — run a full deep sync
+- [ACTION:navigate:dashboard] — open dashboard
+- [ACTION:navigate:stock] — open stock manager
+- [ACTION:navigate:deco] — open deco tracking
+- [ACTION:navigate:production] — open production calendar
+- [ACTION:navigate:finance] — open finance dashboard
+- [ACTION:navigate:alerts] — open alerts
+- [ACTION:navigate:kanban] — open kanban board
+Only use actions when the user explicitly asks you to do something. Never include actions unless requested.
 
 LIVE DASHBOARD:
 - Unfulfilled orders: ${stats.unfulfilled}
@@ -203,9 +253,9 @@ Ready to ship now:
 ${readyList.length > 0 ? readyList.join('\n') : 'Nothing ready yet.'}
 
 Active orders by club: ${topClubs || 'None'}
-${orderDetail}
+${orderDetail}${customerDetail}
 
-Current time: ${new Date().toLocaleString('en-GB')}
+Current time: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (role: ${currentUser.role})` : 'Speaker not identified'}
 ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''}`;
   }, [stats, orders, currentUser, expression]);
@@ -352,10 +402,51 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
   }, [muted, handsFree, ttsAvailable, speakFallback]);
 
-  // ─── Claude Query ──────────────────────────────────────────────
+  // ─── Sound Effects ─────────────────────────────────────────────
+  const playNotificationSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      [523.25, 659.25].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = freq; osc.type = 'sine';
+        const t = ctx.currentTime + i * 0.15;
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+        osc.start(t); osc.stop(t + 0.4);
+      });
+    } catch {}
+  }, []);
+
+  const playThinkingSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 440; osc.type = 'sine';
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.start(); osc.stop(ctx.currentTime + 0.2);
+    } catch {}
+  }, []);
+
+  // ─── Action Execution ──────────────────────────────────────────
+  const executeAction = useCallback((action: string) => {
+    const [cmd, ...args] = action.split(':');
+    switch (cmd) {
+      case 'sync': onSync(false); break;
+      case 'deep_sync': onSync(true); break;
+      case 'navigate': if (args[0]) onNavigate(args[0]); break;
+    }
+  }, [onSync, onNavigate]);
+
+  // ─── Claude Query (Streaming) ──────────────────────────────────
   const queryAssistant = useCallback(async (userMsg: string) => {
     setState('thinking');
     setStatusText('Thinking...');
+    playThinkingSound();
 
     const system = buildContext(userMsg);
     const history = convoRef.current
@@ -364,7 +455,8 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       .map(m => ({ role: m.role, content: m.text }));
 
     try {
-      const res = await fetch('/api/claude', {
+      // Try streaming endpoint first
+      const res = await fetch('/api/claude-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -373,24 +465,93 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `API error ${res.status}`);
+      if (!res.ok || !res.body) throw new Error(`Stream error ${res.status}`);
+
+      // Add typing indicator message
+      setConvo(prev => [...prev, { role: 'assistant', text: '\u2589', ts: Date.now() }]);
+      setStatusText('');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let sseBuffer = '';
+      let fullText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const { t } = JSON.parse(payload);
+            if (t) {
+              fullText += t;
+              // Update typing message in real-time
+              setConvo(prev => {
+                const updated = [...prev];
+                if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], text: fullText + ' \u2589' };
+                }
+                return updated;
+              });
+            }
+          } catch {}
+        }
       }
 
-      const data = await res.json();
-      const reply = data.content?.[0]?.text || "Sorry, I couldn't process that.";
+      // Parse and execute actions
+      const actions = fullText.match(/\[ACTION:[^\]]+\]/g);
+      let cleanText = fullText;
+      if (actions) {
+        for (const a of actions) {
+          const cmd = a.match(/\[ACTION:([^\]]+)\]/)?.[1];
+          if (cmd) executeAction(cmd);
+        }
+        cleanText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '').trim();
+      }
 
-      setConvo(prev => [...prev, { role: 'assistant', text: reply, ts: Date.now() }]);
-      setStatusText('');
-      speak(reply);
+      // Finalize message (remove cursor, clean action tags)
+      setConvo(prev => {
+        const updated = [...prev];
+        if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+          updated[updated.length - 1] = { ...updated[updated.length - 1], text: cleanText };
+        }
+        return updated;
+      });
+
+      // Speak the response
+      speak(cleanText);
+
     } catch (e: any) {
-      console.error('Claude error:', e);
-      const fallback = `Sorry, I couldn't connect to my brain. ${e.message || 'Try again.'}`;
+      console.error('Stream error, trying fallback:', e);
+      // Fallback to non-streaming endpoint
+      try {
+        const res = await fetch('/api/claude', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system: buildContext(userMsg),
+            messages: [...history, { role: 'user', content: userMsg }]
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const reply = data.content?.[0]?.text || "Brain's offline.";
+          setConvo(prev => [...prev, { role: 'assistant', text: reply, ts: Date.now() }]);
+          speak(reply);
+          return;
+        }
+      } catch {}
+      const fallback = "Sorry, couldn't connect to my brain right now.";
       setConvo(prev => [...prev, { role: 'assistant', text: fallback, ts: Date.now() }]);
       speak(fallback);
     }
-  }, [buildContext, speak]);
+  }, [buildContext, speak, executeAction, playThinkingSound]);
 
   // ─── Handle Voice Input ────────────────────────────────────────
   const handleInput = useCallback(async (transcript: string) => {
@@ -817,6 +978,45 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     convoEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [convo]);
 
+  // Save conversation to IndexedDB
+  useEffect(() => {
+    if (convo.length > 0) {
+      setLocalItem('stash_ai_conversation', convo.slice(-30));
+    }
+  }, [convo]);
+
+  // ─── Proactive Alerts ──────────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen) return;
+    prevStatsRef.current = { ...statsRef.current };
+
+    const timer = setInterval(() => {
+      const prev = prevStatsRef.current;
+      const current = statsRef.current;
+      if (!prev) { prevStatsRef.current = { ...current }; return; }
+      const alerts: string[] = [];
+
+      if (current.late > prev.late) {
+        const n = current.late - prev.late;
+        alerts.push(`Oi, ${n} order${n > 1 ? 's have' : ' has'} just gone overdue. ${current.late} total now.`);
+      }
+      if (current.readyForShipping > prev.readyForShipping + 1) {
+        alerts.push(`Nice, ${current.readyForShipping - prev.readyForShipping} more orders ready to ship. ${current.readyForShipping} total waiting.`);
+      }
+
+      prevStatsRef.current = { ...current };
+
+      if (alerts.length > 0 && stateRef.current === 'idle') {
+        playNotificationSound();
+        const alert = alerts.join(' ');
+        setConvo(p => [...p, { role: 'system', text: '\u26A1 Alert', ts: Date.now() }, { role: 'assistant', text: alert, ts: Date.now() }]);
+        speak(alert);
+      }
+    }, 30000);
+
+    return () => clearInterval(timer);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Enrollment ────────────────────────────────────────────────
   const startEnrollment = () => {
     enrollDescs.current = [];
@@ -960,7 +1160,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
                   {msg.role === 'system' ? (
                     <span className="text-[10px] text-amber-400/60 font-medium tracking-wider uppercase">{msg.text}</span>
                   ) : (
-                    <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${
+                    <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm whitespace-pre-wrap ${
                       msg.role === 'user'
                         ? 'bg-indigo-600/30 text-indigo-100 border border-indigo-500/20'
                         : 'bg-white/5 text-gray-200 border border-white/10'
@@ -1067,11 +1267,20 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
                   <Radio className="w-4 h-4" />
                   <span className="text-[9px] font-bold tracking-wider uppercase hidden sm:inline">{handsFree ? 'HANDS-FREE ON' : 'HANDS-FREE'}</span>
                 </button>
+                <button
+                  onClick={() => setPushToTalk(!pushToTalk)}
+                  className={`p-2.5 rounded-xl transition-colors flex items-center gap-1.5 ${pushToTalk ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-gray-400 hover:text-white'}`}
+                  title={pushToTalk ? 'Switch to click-to-talk' : 'Switch to push-to-talk (hold mic)'}
+                >
+                  <Hand className="w-4 h-4" />
+                  <span className="text-[9px] font-bold tracking-wider uppercase hidden sm:inline">{pushToTalk ? 'PUSH-TO-TALK' : 'CLICK'}</span>
+                </button>
               </div>
 
               {/* Main mic button */}
               <button
                 onClick={() => {
+                  if (pushToTalk) return; // push-to-talk uses pointer events
                   if (state === 'listening') {
                     clearTimeout(silenceTimerRef.current);
                     const buffered = transcriptBufferRef.current.trim();
@@ -1082,6 +1291,28 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
                   } else if (state !== 'thinking') {
                     startListening();
                   }
+                }}
+                onPointerDown={() => {
+                  if (!pushToTalk || state === 'thinking' || state === 'speaking') return;
+                  startListening();
+                }}
+                onPointerUp={() => {
+                  if (!pushToTalk || state !== 'listening') return;
+                  clearTimeout(silenceTimerRef.current);
+                  const buffered = transcriptBufferRef.current.trim();
+                  transcriptBufferRef.current = '';
+                  setInterim('');
+                  stopListening();
+                  if (buffered.length > 2) handleInput(buffered);
+                }}
+                onPointerLeave={() => {
+                  if (!pushToTalk || state !== 'listening') return;
+                  clearTimeout(silenceTimerRef.current);
+                  const buffered = transcriptBufferRef.current.trim();
+                  transcriptBufferRef.current = '';
+                  setInterim('');
+                  stopListening();
+                  if (buffered.length > 2) handleInput(buffered);
                 }}
                 className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
                   state === 'listening'
@@ -1102,6 +1333,15 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
 
               {/* Right controls */}
               <div className="flex items-center gap-2">
+                {convo.length > 0 && (
+                  <button
+                    onClick={() => { setConvo([]); setLocalItem('stash_ai_conversation', []); }}
+                    className="p-2.5 rounded-xl bg-white/5 text-gray-400 hover:text-red-400 transition-colors"
+                    title="Clear conversation"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={startEnrollment}
                   className="p-2.5 rounded-xl bg-white/5 text-gray-400 hover:text-white transition-colors"
