@@ -3,8 +3,10 @@ import {
   DollarSign, AlertTriangle, Clock, Download, ChevronDown, ChevronUp,
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
-  ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap
+  ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
+  FileSpreadsheet
 } from 'lucide-react';
+import ExcelJS from 'exceljs';
 import { DecoJob } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
 import { getItem, setItem } from '../services/localStore';
@@ -426,27 +428,159 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     URL.revokeObjectURL(url);
   }, [filteredAccounts, selectedCustomers, priorityNotes]);
 
-  const exportDetailedCSV = useCallback(() => {
-    const headers = ['Customer', 'Job Number', 'PO Number', 'Job Name', 'Order Date', 'Invoice Date', 'Billable', 'Outstanding', 'Payment Status', 'Account Terms', 'Aging Days', 'Payments Made', 'Payment Methods', 'Notes'];
-    const escapeCell = (v: any) => {
-      const s = String(v ?? '');
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-    };
+  const exportDetailedCSV = useCallback(async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Financial Detail');
+
+    // Headers
+    const headers = [
+      'Customer', 'Job Number', 'PO Number', 'Job Name', 'Order Date',
+      'Invoice Date', 'Billable', 'Outstanding', 'Payment Status',
+      'Account Terms', 'Aging Days',
+      'Payment Amount', 'Payment Date', 'Days to Payment', 'Payment Status Colour',
+      'Payment Methods', 'Notes'
+    ];
+
+    const headerRow = sheet.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, size: 10 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4338CA' } };
+      cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF999999' } } };
+    });
+
     const targetAccounts = selectedCustomers.size > 0 ? filteredAccounts.filter(a => selectedCustomers.has(a.customerId)) : filteredAccounts;
-    const rows = targetAccounts.flatMap(a => a.jobs.filter(j => (j.billableAmount || 0) > 0 || (j.outstandingBalance || 0) > 0).map(j => [
-      a.name, j.jobNumber, j.poNumber, j.jobName, formatDate(j.dateOrdered), formatDate(j.dateInvoiced),
-      (j.billableAmount || 0).toFixed(2), (j.outstandingBalance || 0).toFixed(2),
-      paymentStatusLabel(j.paymentStatus), j.accountTerms || a.accountTerms,
-      daysSince(j.dateInvoiced || j.dateOrdered),
-      (j.payments || []).map(p => `${formatCurrency(p.amount)} on ${formatDate(p.datePaid)}`).join('; '),
-      (j.payments || []).map(p => p.method).join('; '),
-      priorityNotes[a.customerId] || ''
-    ]));
-    const csv = [headers.join(','), ...rows.map(r => r.map(escapeCell).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+    for (const a of targetAccounts) {
+      const jobs = a.jobs.filter(j => (j.billableAmount || 0) > 0 || (j.outstandingBalance || 0) > 0);
+
+      for (const j of jobs) {
+        const invoiceDate = j.dateInvoiced || j.dateOrdered || null;
+        const invoiceDateObj = invoiceDate ? new Date(invoiceDate) : null;
+        const terms = parseInt(j.accountTerms || a.accountTerms || '30') || 30;
+        const payments = j.payments || [];
+        const totalBillable = j.billableAmount || 0;
+
+        // Calculate when balance was fully cleared
+        // Sort payments by date, accumulate until total >= billable
+        const sortedPayments = [...payments].sort((a, b) => new Date(a.datePaid).getTime() - new Date(b.datePaid).getTime());
+        let runningTotal = 0;
+        let clearanceDate: Date | null = null;
+        for (const p of sortedPayments) {
+          runningTotal += p.amount - (p.refundedAmount || 0);
+          if (runningTotal >= totalBillable - 0.01 && !clearanceDate) {
+            clearanceDate = new Date(p.datePaid);
+          }
+        }
+
+        // Days to payment = clearance date - invoice date
+        let daysToPayment: number | null = null;
+        if (clearanceDate && invoiceDateObj && !isNaN(invoiceDateObj.getTime()) && !isNaN(clearanceDate.getTime())) {
+          daysToPayment = Math.floor((clearanceDate.getTime() - invoiceDateObj.getTime()) / 86400000);
+        }
+
+        // Determine color: ≤31 green, 32-37 orange, 38+ red
+        let daysCellColor: string | null = null;
+        let daysFontColor: string = 'FF000000';
+        if (daysToPayment !== null) {
+          if (daysToPayment <= 31) {
+            daysCellColor = 'FF22C55E'; // green
+            daysFontColor = 'FF15803D';
+          } else if (daysToPayment <= 37) {
+            daysCellColor = 'FFFBBF24'; // orange/amber
+            daysFontColor = 'FF92400E';
+          } else {
+            daysCellColor = 'FFEF4444'; // red
+            daysFontColor = 'FF991B1B';
+          }
+        }
+
+        // If multiple payments, list all amounts and dates separated by newlines
+        const paymentAmounts = payments.length > 0
+          ? payments.map(p => formatCurrency(p.amount)).join('\n')
+          : '—';
+        const paymentDates = payments.length > 0
+          ? payments.map(p => formatDate(p.datePaid)).join('\n')
+          : '—';
+        const payMethods = payments.length > 0
+          ? payments.map(p => p.method).join('\n')
+          : '—';
+
+        const row = sheet.addRow([
+          a.name,
+          j.jobNumber,
+          j.poNumber || '',
+          j.jobName || '',
+          formatDate(j.dateOrdered),
+          formatDate(j.dateInvoiced),
+          totalBillable,
+          j.outstandingBalance || 0,
+          paymentStatusLabel(j.paymentStatus),
+          j.accountTerms || a.accountTerms || '',
+          daysSince(invoiceDate),
+          paymentAmounts,
+          paymentDates,
+          daysToPayment !== null ? daysToPayment : '—',
+          daysToPayment !== null ? (daysToPayment <= 31 ? 'On Time' : daysToPayment <= 37 ? 'Slightly Late' : 'Late') : '—',
+          payMethods,
+          priorityNotes[a.customerId] || ''
+        ]);
+
+        // Format currency columns
+        row.getCell(7).numFmt = '£#,##0.00';
+        row.getCell(8).numFmt = '£#,##0.00';
+
+        // Wrap text for multi-line payment cells
+        row.getCell(12).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(13).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(16).alignment = { wrapText: true, vertical: 'top' };
+
+        // Color code the "Days to Payment" cell (column 14)
+        if (daysCellColor && daysToPayment !== null) {
+          row.getCell(14).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: daysCellColor },
+          };
+          row.getCell(14).font = { bold: true, color: { argb: daysFontColor } };
+          row.getCell(14).alignment = { horizontal: 'center' };
+        }
+
+        // Also color the status text column (15)
+        if (daysToPayment !== null) {
+          row.getCell(15).fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: daysCellColor! },
+          };
+          row.getCell(15).font = { bold: true, color: { argb: daysFontColor } };
+          row.getCell(15).alignment = { horizontal: 'center' };
+        }
+      }
+    }
+
+    // Auto-width columns
+    sheet.columns.forEach((col) => {
+      let maxLen = 10;
+      col.eachCell?.({ includeEmpty: false }, (cell) => {
+        const val = String(cell.value || '');
+        const lines = val.split('\n');
+        const longest = lines.reduce((mx, l) => Math.max(mx, l.length), 0);
+        if (longest > maxLen) maxLen = longest;
+      });
+      col.width = Math.min(maxLen + 2, 35);
+    });
+
+    // Freeze header row
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+    // Generate and download
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `financial-detail-${new Date().toISOString().split('T')[0]}.csv`; a.click();
+    a.href = url; a.download = `financial-detail-${new Date().toISOString().split('T')[0]}.xlsx`; a.click();
     URL.revokeObjectURL(url);
   }, [filteredAccounts, selectedCustomers, priorityNotes]);
 
@@ -487,7 +621,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             <Download className="w-3.5 h-3.5" /> Export Summary
           </button>
           <button onClick={exportDetailedCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700 dark:hover:bg-emerald-900/50 transition-colors">
-            <FileText className="w-3.5 h-3.5" /> Export Detailed
+            <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
           </button>
         </div>
       </div>
@@ -809,7 +943,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     <Download className="w-3.5 h-3.5" /> Export Selected
                   </button>
                   <button onClick={exportDetailedCSV} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-white/20 hover:bg-white/30 transition-colors">
-                    <FileText className="w-3.5 h-3.5" /> Detail Export
+                    <FileSpreadsheet className="w-3.5 h-3.5" /> Excel Export
                   </button>
                   <button onClick={() => setSelectedCustomers(new Set())} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-white/10 hover:bg-white/20 transition-colors">
                     <X className="w-3.5 h-3.5" /> Clear
