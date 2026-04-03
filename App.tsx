@@ -725,6 +725,27 @@ const App: React.FC = () => {
             if (user?.uid) {
                 try {
                     setSyncStatusMsg('Loading your settings...');
+
+                    // Fetch shared system config from server (shopifyDomain, decoDomain, etc.)
+                    try {
+                        const cfgRes = await fetch('/api/config');
+                        if (cfgRes.ok) {
+                            const serverCfg = await cfgRes.json();
+                            setApiSettings(prev => {
+                                const merged = {
+                                    ...prev,
+                                    // Server config fills in blanks — never overwrites user-entered values
+                                    shopifyDomain: prev.shopifyDomain || serverCfg.shopifyDomain || '',
+                                    decoDomain: prev.decoDomain || serverCfg.decoDomain || '',
+                                    supabaseUrl: prev.supabaseUrl || serverCfg.supabaseUrl || '',
+                                    supabaseAnonKey: prev.supabaseAnonKey || serverCfg.supabaseAnonKey || '',
+                                };
+                                localStorage.setItem('stash_api_settings', JSON.stringify(merged));
+                                return merged;
+                            });
+                        }
+                    } catch {}
+
                     const settingsDoc = await getDoc(doc(db, 'user_settings', user.uid));
                     if (settingsDoc.exists()) {
                         const cloudSettings = settingsDoc.data().settings as Partial<ApiSettings>;
