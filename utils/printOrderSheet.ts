@@ -6,9 +6,9 @@ function escapeHtml(str: string): string {
 }
 
 function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
-  const props = (i.properties || []).filter(p => p.value && !String(p.name).startsWith('_'));
+  const props = (i.properties || []).filter(p => p.value && !String(p.name).startsWith('_') && !String(p.name).toLowerCase().includes('dispatch'));
   const propsHtml = props.length > 0
-    ? props.map(p => '<br><span style="color:#555;font-size:12px;">' + escapeHtml(String(p.name)) + ': ' + escapeHtml(String(p.value)) + '</span>').join('')
+    ? props.map(p => '<br><span style="color:#555;font-size:14px;">' + escapeHtml(String(p.name)) + ': <strong>' + escapeHtml(String(p.value)) + '</strong></span>').join('')
     : '';
   const skuHtml = i.sku ? '<br><span style="color:#888;font-size:11px;">SKU: ' + escapeHtml(i.sku) + '</span>' : '';
   const eanHtml = i.ean && i.ean !== '-' ? '<br><span style="color:#888;font-size:11px;">EAN: ' + escapeHtml(i.ean) + '</span>' : '';
@@ -21,7 +21,7 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const qtyHtml = qty > 1 ? '<strong style="font-size:16px;">' + qty + '</strong>' : '' + qty;
   return '<tr>' +
     '<td style="width:85px;text-align:center;vertical-align:middle;padding:4px;">' + imgHtml + '</td>' +
-    '<td style="font-size:14px;font-weight:600;padding:6px;">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td style="font-size:16px;font-weight:700;padding:6px;">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
     '<td style="text-align:center;">' + qtyHtml + '</td>' +
     '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +

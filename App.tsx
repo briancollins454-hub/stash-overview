@@ -282,7 +282,7 @@ const App: React.FC = () => {
           decoPassword: '',
           syncLookbackDays: 365,
           connectionMethod: 'proxy',
-          autoRefreshInterval: 5,
+          autoRefreshInterval: 60,
           holidayRanges: [
               { id: 'xmas-2025', start: '2025-12-22', end: '2026-01-04', label: 'Christmas Closure' }
           ],
@@ -487,9 +487,16 @@ const App: React.FC = () => {
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
             
-            const existingJobNumbers = new Set(dRecentJobs.map(j => j.jobNumber));
-            const mergedDecoJobs = [...dRecentJobs];
-            rawDecoJobs.forEach(p => { if (!existingJobNumbers.has(p.jobNumber)) mergedDecoJobs.push(p); });
+            // Merge deco jobs: preserve existing cached jobs (may have fresher status from Status Refresh)
+            // Only overwrite if the freshly-fetched job has a different status (real update) or is brand new
+            const cachedJobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
+            dRecentJobs.forEach(j => {
+              const cached = cachedJobMap.get(j.jobNumber);
+              if (!cached || cached.status !== j.status || cached.itemsProduced !== j.itemsProduced || cached.totalItems !== j.totalItems) {
+                cachedJobMap.set(j.jobNumber, j);
+              }
+            });
+            const mergedDecoJobs = Array.from(cachedJobMap.values());
             setRawDecoJobs(mergedDecoJobs);
             setLocalItem('stash_raw_deco_jobs', mergedDecoJobs).catch(console.error);
 
