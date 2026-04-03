@@ -336,7 +336,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     return segments;
   }, []);
 
-  const fetchTtsAudio = useCallback(async (text: string): Promise<HTMLAudioElement | null> => {
+  const fetchTtsBuffer = useCallback(async (text: string): Promise<ArrayBuffer | null> => {
     try {
       const res = await fetch('/api/tts', {
         method: 'POST',
@@ -345,12 +345,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       });
       if (res.ok) {
         setTtsAvailable(true);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.onended = () => URL.revokeObjectURL(url);
-        audio.onerror = () => URL.revokeObjectURL(url);
-        return audio;
+        return await res.arrayBuffer();
       } else if (res.status === 501) {
         setTtsAvailable(false);
       }
@@ -358,21 +353,45 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     return null;
   }, []);
 
-  // Unlock browser audio policy — call on ANY user gesture before delayed audio
-  const unlockAudio = useCallback(() => {
+  // Ensure AudioContext is alive and unlocked
+  const getAudioCtx = useCallback((): AudioContext => {
     if (!ttsAudioCtxRef.current || ttsAudioCtxRef.current.state === 'closed') {
       ttsAudioCtxRef.current = new AudioContext();
     }
     if (ttsAudioCtxRef.current.state === 'suspended') {
       ttsAudioCtxRef.current.resume();
     }
-    // Play silent buffer to fully unlock audio on Safari/iOS
-    const buf = ttsAudioCtxRef.current.createBuffer(1, 1, 22050);
-    const src = ttsAudioCtxRef.current.createBufferSource();
-    src.buffer = buf;
-    src.connect(ttsAudioCtxRef.current.destination);
-    src.start(0);
+    return ttsAudioCtxRef.current;
   }, []);
+
+  // Unlock browser audio policy — call on ANY user gesture before delayed audio
+  const unlockAudio = useCallback(() => {
+    const ctx = getAudioCtx();
+    const buf = ctx.createBuffer(1, 1, 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+  }, [getAudioCtx]);
+
+  // Play an ArrayBuffer through Web Audio API (bypasses autoplay restrictions)
+  const playTtsBuffer = useCallback((buffer: ArrayBuffer): Promise<void> => {
+    return new Promise(async (resolve) => {
+      try {
+        const ctx = getAudioCtx();
+        const audioBuffer = await ctx.decodeAudioData(buffer.slice(0));
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        source.onended = () => resolve();
+        source.start(0);
+        // Store source so we can stop it on interrupt
+        audioRef.current = { pause: () => { try { source.stop(); } catch {} } } as any;
+      } catch {
+        resolve();
+      }
+    });
+  }, [getAudioCtx]);
 
   const speak = useCallback(async (text: string) => {
     if (muted) { setState('idle'); return; }
@@ -387,27 +406,13 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
         if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
         setState('speaking');
 
-        // Play segments sequentially
+        // Play segments sequentially via Web Audio API
         for (const seg of segments) {
           if (stateRef.current !== 'speaking') break; // interrupted
-          const audio = await fetchTtsAudio(seg.text);
-          if (audio) {
-            audioRef.current = audio;
-            await new Promise<void>((resolve) => {
-              audio.onended = () => { audioRef.current = null; resolve(); };
-              audio.onerror = () => {
-                audioRef.current = null;
-                // Audio element failed — try browser TTS for this segment
-                speakFallback(seg.text);
-                resolve();
-              };
-              audio.play().catch(() => {
-                audioRef.current = null;
-                // Autoplay blocked — fall back to browser TTS
-                speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
-                resolve();
-              });
-            });
+          const buf = await fetchTtsBuffer(seg.text);
+          if (buf) {
+            await playTtsBuffer(buf);
+            audioRef.current = null;
           } else {
             // TTS not available, fall through to browser
             speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
