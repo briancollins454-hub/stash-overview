@@ -7,7 +7,7 @@ import {
     ChevronDown, ChevronUp, ShoppingBag, ArrowUpDown, ExternalLink, 
     Link as LinkIcon, Copy, Search, Loader2, Zap, Mail, Box, Cog, X, 
     HelpCircle, RefreshCw, Scissors, Filter, ArrowUp, ArrowDown, Check, Pencil, ClipboardList, Shirt, Hash, ShieldOff,
-    Download, Unlink, Calendar, Printer, MessageSquare
+    Download, Unlink, Calendar, Printer, MessageSquare, Barcode
 } from 'lucide-react';
 import OrderMappingModal from './OrderMappingModal';
 import JobIdBadge from './JobIdBadge';
@@ -788,6 +788,31 @@ const OrderTable: React.FC<OrderTableProps> = ({
 
                     const linkedPct = order.mappedPercentage ?? 0;
 
+                    // Check if any mapped items in this order were matched by EAN barcode
+                    const hasEanMatch = eanIndex && eanIndex.size > 0 && order.shopify.items.some(sItem => {
+                        if (!sItem.linkedDecoItemId || sItem.itemStatus === 'fulfilled') return false;
+                        let sEan = (sItem.ean || '').trim();
+                        if ((!sEan || sEan === '-' || sEan.length < 8)) {
+                            const skuKey = (sItem.sku || '').trim().toLowerCase();
+                            if (skuKey && eanIndex.has(skuKey)) sEan = eanIndex.get(skuKey)!;
+                        }
+                        if (!sEan || sEan === '-' || sEan.length < 8) return false;
+                        // Check if the linked deco item has a matching EAN
+                        if (order.deco?.items) {
+                            return order.deco.items.some(d => {
+                                let dEan = (d.ean || '').trim();
+                                if ((!dEan || dEan === '-' || dEan.length < 8)) {
+                                    const vSku = (d.vendorSku || '').trim().toLowerCase();
+                                    const pCode = (d.productCode || '').trim().toLowerCase();
+                                    if (vSku && eanIndex.has(vSku)) dEan = eanIndex.get(vSku)!;
+                                    else if (pCode && eanIndex.has(pCode)) dEan = eanIndex.get(pCode)!;
+                                }
+                                return dEan && dEan !== '-' && dEan.length >= 8 && dEan === sEan;
+                            });
+                        }
+                        return false;
+                    });
+
                     const estProdDate = order.deco?.productionDueDate || order.productionDueDate;
                     const isLateProduction = estProdDate && order._rawDispatchDate && new Date(estProdDate) > new Date(order._rawDispatchDate);
 
@@ -941,6 +966,11 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                             <span className="text-[8px] opacity-60 font-bold">[{order.mappedCount || 0}/{order.eligibleCount || 0}]</span>
                                         </div>
                                     </div>
+                                    {hasEanMatch && (
+                                        <span className="inline-flex items-center gap-1 text-[8px] font-black text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full uppercase tracking-widest w-fit">
+                                            <Barcode className="w-3 h-3" /> EAN Auto-Mapped
+                                        </span>
+                                    )}
                                 </div>
 
                                 {order.hasStockItems && (
