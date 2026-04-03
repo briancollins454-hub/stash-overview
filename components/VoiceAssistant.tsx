@@ -117,7 +117,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const faceapiRef = useRef<any>(null);
   const enrollDescs = useRef<number[][]>([]);
   const lastGreeted = useRef<string | null>(null);
-  const greetedTimestamp = useRef<number>(0);
+  const greetedTimestamps = useRef<Record<string, number>>({});
   const lastExpressionComment = useRef<number>(0);
   const lastExpression = useRef<string>('neutral');
   const visibleFaces = useRef<Set<string>>(new Set());
@@ -970,9 +970,10 @@ People visible: ${visibleFaces.current.size || 'unknown'}`;
           // Greeting: only once per person per 5 minutes
           const now = Date.now();
           const greetCooldown = 5 * 60 * 1000;
-          if (match.id !== lastGreeted.current || (now - greetedTimestamp.current > greetCooldown)) {
+          const lastGreetTime = greetedTimestamps.current[match.id] || 0;
+          if (now - lastGreetTime > greetCooldown) {
+            greetedTimestamps.current[match.id] = now;
             lastGreeted.current = match.id;
-            greetedTimestamp.current = now;
             const hour = new Date().getHours();
             const timeGreet = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
             const moodComment = topExpr[0] === 'happy' ? "Looking cheerful! " :
