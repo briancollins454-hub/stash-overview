@@ -128,10 +128,10 @@ export default async function handler(req: Request) {
       return new Response(JSON.stringify({ error: 'messages required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Use GPT-4o when vision is needed (supports both vision AND tools)
-    // Fall back to gpt-4.1 for text-only (faster, cheaper)
+    // Use GPT-4o-mini when vision is needed (confirmed working, supports vision + tools)
+    // Fall back to configurable model for text-only
     const hasImage = !!image;
-    const model = hasImage ? 'gpt-4o' : (process.env.OPENAI_MODEL || 'gpt-4.1');
+    const model = hasImage ? 'gpt-4o-mini' : (process.env.OPENAI_MODEL || 'gpt-4o-mini');
 
     const oaiMessages: any[] = [
       ...(system ? [{ role: 'system' as const, content: system }] : []),

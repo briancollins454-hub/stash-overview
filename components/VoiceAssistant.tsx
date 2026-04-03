@@ -901,7 +901,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         }),
       });
 
-      if (!res.ok || !res.body) throw new Error(`Agent error ${res.status}`);
+      if (!res.ok || !res.body) {
+        const errBody = !res.ok ? await res.text().catch(() => '') : '';
+        console.error('[VISION] Agent endpoint failed:', res.status, errBody);
+        throw new Error(`Agent error ${res.status}`);
+      }
 
       setConvo(prev => [...prev, { role: 'assistant', text: '\u2589', ts: Date.now(), id: `msg_${Date.now()}` }]);
       setStatusText('');
@@ -1073,13 +1077,14 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
     } catch (e: any) {
       console.error('Agent error, trying fallback:', e);
-      // Fallback to original claude-stream endpoint
+      // Fallback to original claude-stream endpoint — include vision context
+      const fallbackSystem = activeSystem; // Keep the vision-enriched system prompt
       try {
         const res = await fetch('/api/claude-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            system: buildContext(userMsg),
+            system: fallbackSystem,
             messages: [...history, { role: 'user', content: userMsg }],
           }),
         });
