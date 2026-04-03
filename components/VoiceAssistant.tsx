@@ -117,6 +117,10 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const faceapiRef = useRef<any>(null);
   const enrollDescs = useRef<number[][]>([]);
   const lastGreeted = useRef<string | null>(null);
+  const greetedTimestamp = useRef<number>(0);
+  const lastExpressionComment = useRef<number>(0);
+  const lastExpression = useRef<string>('neutral');
+  const visibleFaces = useRef<Set<string>>(new Set());
   const transcriptBufferRef = useRef('');
   const silenceTimerRef = useRef<number>(0);
   const particles = useRef<Particle[]>([]);
@@ -258,7 +262,8 @@ ${orderDetail}${customerDetail}
 
 Current time: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (role: ${currentUser.role})` : 'Speaker not identified'}
-${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''}`;
+${expression && expression !== 'neutral' ? `Speaker's facial expression: ${expression}. React naturally to their mood if relevant.` : ''}
+People visible: ${visibleFaces.current.size || 'unknown'}`;
   }, [stats, orders, currentUser, expression]);
 
   // ─── Speech Synthesis ──────────────────────────────────────────
@@ -914,64 +919,122 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
         ctx.clearRect(0, 0, fc.width, fc.height);
         const resized = faceapi.resizeResults(detections, displaySize);
 
-        resized.forEach((det: any) => {
+        resized.forEach((det: any, idx: number) => {
           const { x, y, width, height } = det.detection.box;
-          ctx.strokeStyle = currentUser ? '#10b981' : '#6366f1';
+          // Try to identify this specific face
+          const desc = detections[idx]?.descriptor ? Array.from(detections[idx].descriptor as Float32Array) : null;
+          const person = desc ? findMatch(desc, faces) : null;
+          const color = person ? '#10b981' : '#6366f1';
+          ctx.strokeStyle = color;
           ctx.lineWidth = 2;
           ctx.strokeRect(x, y, width, height);
-          if (currentUser) {
-            ctx.fillStyle = '#10b981';
+          if (person) {
+            ctx.fillStyle = color;
             ctx.font = 'bold 11px system-ui';
-            ctx.fillText(currentUser.name, x + 2, y - 4);
+            ctx.fillText(person.name, x + 2, y - 4);
+          }
+          // Show expression label
+          const topExpr = det.expressions ? Object.entries(det.expressions).sort((a: any, b: any) => b[1] - a[1])[0] : null;
+          if (topExpr && topExpr[0] !== 'neutral' && (topExpr[1] as number) > 0.5) {
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.font = '9px system-ui';
+            ctx.fillText(topExpr[0], x + 2, y + height + 12);
           }
         });
       }
 
-      if (detections.length > 0) {
-        const det = detections[0];
+      // Track who's visible this frame
+      const currentlyVisible = new Set<string>();
+
+      for (const det of detections) {
         // Expression
         const exprs = det.expressions;
         const topExpr = Object.entries(exprs).sort((a: any, b: any) => b[1] - a[1])[0];
-        if (topExpr && (topExpr[1] as number) > 0.5) {
-          setExpression(topExpr[0]);
-        }
 
         // Recognition
         const descriptor = Array.from(det.descriptor as Float32Array);
         const match = findMatch(descriptor, faces);
 
-        if (match && match.id !== lastGreeted.current) {
-          setCurrentUser(match);
-          lastGreeted.current = match.id;
-          // Personalized greeting
-          const hour = new Date().getHours();
-          const timeGreet = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
-          const moodComment = topExpr[0] === 'happy' ? "You're looking good today. " :
-                              topExpr[0] === 'sad' ? "Rough day? " :
-                              topExpr[0] === 'angry' ? "Something bothering you? " : '';
-          let greeting = '';
-          if (match.role === 'boss') {
-            greeting = `${timeGreet} ${match.name}. ${moodComment}${stats.late > 0 ? `${stats.late} orders overdue, ${stats.readyForShipping} ready to ship.` : `All on track. ${stats.readyForShipping} ready to ship, ${stats.unfulfilled} in production.`}`;
-          } else if (match.role === 'packer') {
-            greeting = `${timeGreet} ${match.name}. ${stats.readyForShipping} orders ready to pack. ${stats.orderComplete} at 100% complete.`;
-          } else {
-            greeting = `${timeGreet} ${match.name}. ${moodComment}What do you need?`;
-          }
-          setState('greeting');
-          setConvo(prev => [...prev, { role: 'system', text: `${match.name} identified`, ts: Date.now() }]);
-          setTimeout(() => speak(greeting), 500);
-        } else if (!match) {
-          setCurrentUser(null);
-        }
+        if (match) {
+          currentlyVisible.add(match.id);
 
-        // Enrollment capture
-        if (enrolling === 'capture') {
-          enrollDescs.current.push(descriptor);
-          setEnrollProgress(enrollDescs.current.length);
-          if (enrollDescs.current.length >= 5) {
-            setEnrolling('info');
-            speak("Got your face. What's your name?");
+          // Set primary user (first recognised face)
+          if (!currentUser || currentUser.id === match.id) {
+            setCurrentUser(match);
+            if (topExpr && (topExpr[1] as number) > 0.5) {
+              setExpression(topExpr[0]);
+              lastExpression.current = topExpr[0];
+            }
           }
+
+          // Greeting: only once per person per 5 minutes
+          const now = Date.now();
+          const greetCooldown = 5 * 60 * 1000;
+          if (match.id !== lastGreeted.current || (now - greetedTimestamp.current > greetCooldown)) {
+            lastGreeted.current = match.id;
+            greetedTimestamp.current = now;
+            const hour = new Date().getHours();
+            const timeGreet = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
+            const moodComment = topExpr[0] === 'happy' ? "Looking cheerful! " :
+                                topExpr[0] === 'sad' ? "You look a bit down. Everything alright? " :
+                                topExpr[0] === 'angry' ? "You look stressed. " :
+                                topExpr[0] === 'surprised' ? "Something caught you off guard? " :
+                                topExpr[0] === 'fearful' ? "You look worried. " :
+                                topExpr[0] === 'disgusted' ? "That bad, eh? " : '';
+            let greeting = '';
+            if (match.role === 'boss') {
+              greeting = `${timeGreet} ${match.name}. ${moodComment}${stats.late > 0 ? `${stats.late} orders overdue, ${stats.readyForShipping} ready to ship.` : `All on track. ${stats.readyForShipping} ready to ship, ${stats.unfulfilled} in production.`}`;
+            } else if (match.role === 'packer') {
+              greeting = `${timeGreet} ${match.name}. ${stats.readyForShipping} orders ready to pack. ${stats.orderComplete} at 100% complete.`;
+            } else {
+              greeting = `${timeGreet} ${match.name}. ${moodComment}What do you need?`;
+            }
+            setState('greeting');
+            setConvo(prev => [...prev, { role: 'system', text: `${match.name} identified`, ts: Date.now() }]);
+            setTimeout(() => speak(greeting), 500);
+          }
+
+          // Newcomer joins mid-conversation
+          if (!visibleFaces.current.has(match.id) && visibleFaces.current.size > 0 && match.id !== lastGreeted.current) {
+            setConvo(prev => [...prev, { role: 'system', text: `${match.name} joined`, ts: Date.now() }]);
+            if (stateRef.current === 'idle') {
+              speak(`Oh, ${match.name}'s here too. Alright?`);
+            }
+          }
+        }
+      }
+
+      visibleFaces.current = currentlyVisible;
+
+      // Emotion commentary — react to sustained mood changes (max once per 2 min)
+      if (detections.length > 0 && currentUser) {
+        const now = Date.now();
+        const exprCooldown = 2 * 60 * 1000;
+        const expr = lastExpression.current;
+        if (expr !== 'neutral' && expr !== 'happy' && (now - lastExpressionComment.current > exprCooldown) && stateRef.current === 'idle') {
+          lastExpressionComment.current = now;
+          const comments: Record<string, string[]> = {
+            sad: ["You look a bit down. Need anything?", "Everything okay? You seem off.", "Chin up, things could be worse. Probably."],
+            angry: ["You look like you're about to lamp someone.", "Deep breaths. What's annoyed you?", "Who's upset you? Point me at them."],
+            fearful: ["You look worried. What's going on?", "Something stressing you out?"],
+            surprised: ["Something surprise you?", "What's caught your eye?"],
+            disgusted: ["That face says it all.", "What's disgusted you now?"]
+          };
+          const options = comments[expr] || [];
+          if (options.length > 0) {
+            speak(options[Math.floor(Math.random() * options.length)]);
+          }
+        }
+      }
+
+      // Enrollment capture — use first detected face
+      if (enrolling === 'capture' && detections.length > 0) {
+        const descriptor = Array.from(detections[0].descriptor as Float32Array);
+        enrollDescs.current.push(descriptor);
+        setEnrollProgress(enrollDescs.current.length);
+        if (enrollDescs.current.length >= 5) {
+          setEnrolling('info');
+          speak("Got your face. What's your name?");
         }
       }
     } catch (e) {
