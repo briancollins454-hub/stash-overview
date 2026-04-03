@@ -29,7 +29,7 @@ export default async function handler(req: Request) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: process.env.CLAUDE_MODEL || 'claude-3-5-sonnet-latest',
+        model: process.env.CLAUDE_MODEL || 'claude-3-haiku-20240307',
         max_tokens: 800,
         system: system || '',
         messages,
