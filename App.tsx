@@ -661,16 +661,17 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [user, isConfigMissing, apiSettings.autoRefreshInterval]);
 
-  // Visibility-aware refresh: sync when tab regains focus after >2 min
+  // Visibility-aware refresh: sync when tab regains focus after configured interval (not just 2 min)
   useEffect(() => {
+    const refreshMs = (apiSettings.autoRefreshInterval || 60) * 60 * 1000;
     const handleVisibility = () => {
-      if (!document.hidden && lastSyncTime && Date.now() - lastSyncTime > 2 * 60 * 1000) {
+      if (!document.hidden && lastSyncTime && Date.now() - lastSyncTime > refreshMs) {
         autoRefreshRef.current();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [lastSyncTime]);
+  }, [lastSyncTime, apiSettings.autoRefreshInterval]);
 
   // Update "last synced" label every 30 seconds
   useEffect(() => {

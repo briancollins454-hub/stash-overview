@@ -130,21 +130,13 @@ query getOrdersFinancial($cursor: String, $query: String) {
           }
           pageInfo { hasNextPage endCursor }
         }
-        returns(first: 20) {
-          edges {
-            node {
-              id
-              returnLineItems(first: 50) {
-                edges {
-                  node {
-                    id
-                    quantity
-                    refundedQuantity
-                    fulfillmentLineItem {
-                      lineItem { id }
-                    }
-                  }
-                }
+        refunds(first: 20) {
+          refundLineItems(first: 50) {
+            edges {
+              node {
+                quantity
+                lineItem { id }
+                priceSet { shopMoney { amount currencyCode } }
               }
             }
           }
@@ -238,14 +230,20 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
   const aggregated = useMemo<AggregatedLineItem[]>(() => {
     if (orders.length === 0) return [];
 
-    // Build return map: lineItem GID → total refunded qty
-    const returnMap = new Map<string, number>();
+    // Build refund map: lineItem GID → { refunded qty, refund amount }
+    const returnMap = new Map<string, { qty: number; amount: number }>();
     for (const order of orders) {
-      for (const re of order.returns.edges) {
-        for (const rli of re.node.returnLineItems.edges) {
-          const lineItemId = rli.node.fulfillmentLineItem?.lineItem?.id;
+      const refunds = (order as any).refunds || [];
+      for (const refund of refunds) {
+        const edges = refund?.refundLineItems?.edges || [];
+        for (const edge of edges) {
+          const rli = edge.node;
+          const lineItemId = rli?.lineItem?.id;
           if (lineItemId) {
-            returnMap.set(lineItemId, (returnMap.get(lineItemId) || 0) + rli.node.refundedQuantity);
+            const existing = returnMap.get(lineItemId) || { qty: 0, amount: 0 };
+            existing.qty += rli.quantity || 0;
+            existing.amount += money(rli.priceSet?.shopMoney);
+            returnMap.set(lineItemId, existing);
           }
         }
       }
@@ -267,7 +265,9 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         const tax = li.taxLines.reduce((s, t) => s + money(t.priceSet?.shopMoney), 0);
         const unitCost = li.variant?.inventoryItem?.unitCost ? money(li.variant.inventoryItem.unitCost) : null;
         const totalCost = unitCost !== null ? unitCost * li.quantity : null;
-        const refunded = returnMap.get(li.id) || 0;
+        const refundData = returnMap.get(li.id) || { qty: 0, amount: 0 };
+        const refunded = refundData.qty;
+        const returnAmount = refundData.amount > 0 ? refundData.amount : (refunded > 0 && li.quantity > 0 ? (gross / li.quantity) * refunded : 0);
 
         const existing = map.get(key);
         if (existing) {
@@ -278,7 +278,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
           existing.cost = existing.cost !== null && totalCost !== null ? existing.cost + totalCost : (existing.cost ?? totalCost);
           existing.quantity += li.quantity;
           existing.refundedQuantity += refunded;
-          existing.returns += refunded > 0 && li.quantity > 0 ? (gross / li.quantity) * refunded : 0;
+          existing.returns += returnAmount;
         } else {
           map.set(key, {
             vendor,
@@ -291,7 +291,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
             cost: totalCost,
             quantity: li.quantity,
             refundedQuantity: refunded,
-            returns: refunded > 0 && li.quantity > 0 ? (gross / li.quantity) * refunded : 0,
+            returns: returnAmount,
           });
         }
       }
