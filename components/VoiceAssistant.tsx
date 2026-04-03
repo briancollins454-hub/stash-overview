@@ -417,6 +417,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       try {
         if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
         setState('speaking');
+        stateRef.current = 'speaking'; // sync ref immediately so the for-loop guard works
 
         // Play segments sequentially via Web Audio API
         for (const seg of segments) {
