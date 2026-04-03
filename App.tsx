@@ -656,22 +656,24 @@ const App: React.FC = () => {
   // Auto-refresh: delta sync on configurable interval
   useEffect(() => {
     if (!user || isConfigMissing || !apiSettings.autoRefreshInterval) return;
-    const intervalMs = (apiSettings.autoRefreshInterval || 5) * 60 * 1000;
+    const intervalMs = (apiSettings.autoRefreshInterval || 60) * 60 * 1000;
     const interval = setInterval(() => autoRefreshRef.current(), intervalMs);
     return () => clearInterval(interval);
   }, [user, isConfigMissing, apiSettings.autoRefreshInterval]);
 
-  // Visibility-aware refresh: sync when tab regains focus after configured interval (not just 2 min)
+  // Visibility-aware refresh: sync when tab regains focus after configured interval
+  const lastSyncRef = useRef(lastSyncTime);
+  lastSyncRef.current = lastSyncTime;
   useEffect(() => {
     const refreshMs = (apiSettings.autoRefreshInterval || 60) * 60 * 1000;
     const handleVisibility = () => {
-      if (!document.hidden && lastSyncTime && Date.now() - lastSyncTime > refreshMs) {
+      if (!document.hidden && lastSyncRef.current && Date.now() - lastSyncRef.current > refreshMs) {
         autoRefreshRef.current();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [lastSyncTime, apiSettings.autoRefreshInterval]);
+  }, [apiSettings.autoRefreshInterval]);
 
   // Update "last synced" label every 30 seconds
   useEffect(() => {
