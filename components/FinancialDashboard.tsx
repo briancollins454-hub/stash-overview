@@ -106,6 +106,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('outstanding');
   const [agingFilter, setAgingFilter] = useState<AgingBucket | 'all'>('all');
+  const [orderDateFrom, setOrderDateFrom] = useState('');
+  const [orderDateTo, setOrderDateTo] = useState('');
+  const [paymentDateFrom, setPaymentDateFrom] = useState('');
+  const [paymentDateTo, setPaymentDateTo] = useState('');
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
@@ -225,7 +229,35 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, [settings, isLoading]);
 
   // Use finance-fetched jobs if available, otherwise fall back to cached decoJobs
-  const allJobs = hasLoaded ? financeJobs : decoJobs;
+  const allJobsRaw = hasLoaded ? financeJobs : decoJobs;
+
+  // Filter by order date and payment date ranges
+  const allJobs = useMemo(() => {
+    if (!orderDateFrom && !orderDateTo && !paymentDateFrom && !paymentDateTo) return allJobsRaw;
+    return allJobsRaw.filter(j => {
+      // Order date filter
+      const od = (j.dateOrdered || '').split('T')[0];
+      if (orderDateFrom && od && od < orderDateFrom) return false;
+      if (orderDateTo && od && od > orderDateTo) return false;
+      if (orderDateFrom && !od) return false; // exclude jobs without order date when filtering
+
+      // Payment date filter — check if any payment falls within range
+      if (paymentDateFrom || paymentDateTo) {
+        const payments = j.payments || [];
+        if (payments.length === 0) return !paymentDateFrom; // show unpaid only if no 'from' set
+        const hasMatchingPayment = payments.some(p => {
+          const pd = (p.datePaid || '').split('T')[0];
+          if (!pd) return false;
+          if (paymentDateFrom && pd < paymentDateFrom) return false;
+          if (paymentDateTo && pd > paymentDateTo) return false;
+          return true;
+        });
+        if (!hasMatchingPayment) return false;
+      }
+
+      return true;
+    });
+  }, [allJobsRaw, orderDateFrom, orderDateTo, paymentDateFrom, paymentDateTo]);
 
   // Build customer accounts from ALL Deco jobs
   const customerAccounts = useMemo<CustomerAccount[]>(() => {
@@ -434,8 +466,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
     // Headers
     const headers = [
-      'Customer', 'Job Number', 'PO Number', 'Job Name', 'Order Date',
-      'Invoice Date', 'Billable', 'Outstanding', 'Payment Status',
+      'Customer', 'Job Number', 'PO Number', 'Job Name', 'Job Status', 'Order Date',
+      'Invoice Date', 'Billable', 'Outstanding', 'Tax/VAT', 'Payment Status',
       'Account Terms', 'Aging Days',
       'Payment Amount', 'Payment Date', 'Days to Payment', 'Payment Status Colour',
       'Payment Methods', 'Notes'
@@ -512,10 +544,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           j.jobNumber,
           j.poNumber || '',
           j.jobName || '',
+          j.status || '',
           formatDate(j.dateOrdered),
           formatDate(j.dateInvoiced),
           totalBillable,
           j.outstandingBalance || 0,
+          j.orderTax || 0,
           paymentStatusLabel(j.paymentStatus),
           j.accountTerms || a.accountTerms || '',
           daysSince(invoiceDate),
@@ -528,34 +562,35 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         ]);
 
         // Format currency columns
-        row.getCell(7).numFmt = '£#,##0.00';
         row.getCell(8).numFmt = '£#,##0.00';
+        row.getCell(9).numFmt = '£#,##0.00';
+        row.getCell(10).numFmt = '£#,##0.00';
 
         // Wrap text for multi-line payment cells
-        row.getCell(12).alignment = { wrapText: true, vertical: 'top' };
-        row.getCell(13).alignment = { wrapText: true, vertical: 'top' };
-        row.getCell(16).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(14).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(15).alignment = { wrapText: true, vertical: 'top' };
+        row.getCell(18).alignment = { wrapText: true, vertical: 'top' };
 
-        // Color code the "Days to Payment" cell (column 14)
+        // Color code the "Days to Payment" cell (column 16)
         if (daysCellColor && daysToPayment !== null) {
-          row.getCell(14).fill = {
+          row.getCell(16).fill = {
             type: 'pattern',
             pattern: 'solid',
             fgColor: { argb: daysCellColor },
           };
-          row.getCell(14).font = { bold: true, color: { argb: daysFontColor } };
-          row.getCell(14).alignment = { horizontal: 'center' };
+          row.getCell(16).font = { bold: true, color: { argb: daysFontColor } };
+          row.getCell(16).alignment = { horizontal: 'center' };
         }
 
-        // Also color the status text column (15)
+        // Also color the status text column (17)
         if (daysToPayment !== null) {
-          row.getCell(15).fill = {
+          row.getCell(17).fill = {
             type: 'pattern',
             pattern: 'solid',
             fgColor: { argb: daysCellColor! },
           };
-          row.getCell(15).font = { bold: true, color: { argb: daysFontColor } };
-          row.getCell(15).alignment = { horizontal: 'center' };
+          row.getCell(17).font = { bold: true, color: { argb: daysFontColor } };
+          row.getCell(17).alignment = { horizontal: 'center' };
         }
       }
     }
@@ -752,6 +787,36 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             <button onClick={() => setAgingFilter('all')} className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
               <X className="w-3 h-3" /> {agingBucketLabel[agingFilter]}
             </button>
+          )}
+        </div>
+
+        {/* Date range filters */}
+        <div className={`flex items-center flex-wrap gap-3 mt-3 pt-3 border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+          <Calendar className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          <div className="flex items-center gap-1.5">
+            <label className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Order From</label>
+            <input type="date" value={orderDateFrom} onChange={e => setOrderDateFrom(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-slate-700 border-slate-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Order To</label>
+            <input type="date" value={orderDateTo} onChange={e => setOrderDateTo(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-slate-700 border-slate-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          <div className={`h-4 w-px ${isDark ? 'bg-slate-600' : 'bg-gray-300'}`} />
+          <div className="flex items-center gap-1.5">
+            <label className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Payment From</label>
+            <input type="date" value={paymentDateFrom} onChange={e => setPaymentDateFrom(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-slate-700 border-slate-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className={`text-[9px] font-black uppercase tracking-widest ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Payment To</label>
+            <input type="date" value={paymentDateTo} onChange={e => setPaymentDateTo(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-slate-700 border-slate-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          {(orderDateFrom || orderDateTo || paymentDateFrom || paymentDateTo) && (
+            <button onClick={() => { setOrderDateFrom(''); setOrderDateTo(''); setPaymentDateFrom(''); setPaymentDateTo(''); }} className="text-[9px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors">
+              Clear Dates
+            </button>
+          )}
+          {(orderDateFrom || orderDateTo || paymentDateFrom || paymentDateTo) && allJobsRaw.length !== allJobs.length && (
+            <span className={`text-[9px] font-bold ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>{allJobs.length}/{allJobsRaw.length} orders</span>
           )}
         </div>
       </div>
