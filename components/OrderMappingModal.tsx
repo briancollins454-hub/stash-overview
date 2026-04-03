@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShopifyOrder, DecoJob, DecoItem } from '../types';
 import { standardizeSize, isEligibleForMapping } from '../services/apiService';
 import { suggestMapping } from '../services/geminiService';
-import { Search, Loader2, Save, X, CheckCircle2, AlertCircle, Box, Cog, Truck, ArrowRight, Trash2, ShieldOff, Sparkles, Info, Layers, Wand2 } from 'lucide-react';
+import { Search, Loader2, Save, X, CheckCircle2, AlertCircle, Box, Cog, Truck, ArrowRight, Trash2, ShieldOff, Sparkles, Info, Layers, Wand2, Barcode } from 'lucide-react';
 
 interface OrderMappingModalProps {
   isOpen: boolean;
@@ -59,6 +59,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<{[key: string]: string}>({});
   const [mirroredKeys, setMirroredKeys] = useState<Set<string>>(new Set());
+  const [autoMappedKeys, setAutoMappedKeys] = useState<Set<string>>(new Set());
 
   const targetOrders = orders || (order ? [order] : []);
 
@@ -68,6 +69,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           setDecoJob(null);
           setMappings({});
           setMirroredKeys(new Set());
+          setAutoMappedKeys(new Set());
           setError(null);
           if (currentDecoJobId) {
               handleSearch(currentDecoJobId);
@@ -109,6 +111,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
               setMappings(prev => {
                   const next = { ...prev };
                   let autoMappedCount = 0;
+                  const newAutoKeys = new Set<string>();
                   
                   targetOrders.forEach(o => {
                       o.items.forEach(sItem => {
@@ -138,6 +141,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                   const decoId = eanMatch.vendorSku || eanMatch.productCode || eanMatch.name;
                                   const idx = job.items.indexOf(eanMatch);
                                   next[sItem.id] = `${decoId}@@@${idx}`;
+                                  newAutoKeys.add(sItem.id);
                                   autoMappedCount++;
                                   return;
                               }
@@ -159,6 +163,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                       });
                   });
                   
+                  if (newAutoKeys.size > 0) setAutoMappedKeys(prev => new Set([...prev, ...newAutoKeys]));
                   return next;
               });
           }
@@ -525,6 +530,11 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                                     <div className="flex flex-wrap gap-2 mt-1">
                                                         <span className="text-[10px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 font-bold uppercase tracking-widest">{sSize}</span>
                                                         <span className="text-[10px] text-gray-400 font-bold self-center uppercase tracking-widest">SKU: {sItem.sku}</span>
+                                                        {autoMappedKeys.has(itemKey) && (
+                                                            <span className="text-[9px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1 shadow-sm animate-in fade-in">
+                                                                <Barcode className="w-3 h-3" /> EAN Auto-Mapped
+                                                            </span>
+                                                        )}
                                                         {isMappedToOtherBatch && (
                                                             <span className="text-[9px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded border border-purple-200 font-black uppercase tracking-widest flex items-center gap-1 shadow-sm">
                                                                 <Layers className="w-3 h-3" /> Batch #{otherBatchId || 'Previous'}
