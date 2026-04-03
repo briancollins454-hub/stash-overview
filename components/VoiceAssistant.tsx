@@ -124,6 +124,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const convoEndRef = useRef<HTMLDivElement>(null);
   const prevStatsRef = useRef<typeof stats | null>(null);
   const statsRef = useRef(stats);
+  const ttsAudioCtxRef = useRef<AudioContext | null>(null);
 
   // Keep refs synced
   useEffect(() => { convoRef.current = convo; }, [convo]);
@@ -357,6 +358,22 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     return null;
   }, []);
 
+  // Unlock browser audio policy — call on ANY user gesture before delayed audio
+  const unlockAudio = useCallback(() => {
+    if (!ttsAudioCtxRef.current || ttsAudioCtxRef.current.state === 'closed') {
+      ttsAudioCtxRef.current = new AudioContext();
+    }
+    if (ttsAudioCtxRef.current.state === 'suspended') {
+      ttsAudioCtxRef.current.resume();
+    }
+    // Play silent buffer to fully unlock audio on Safari/iOS
+    const buf = ttsAudioCtxRef.current.createBuffer(1, 1, 22050);
+    const src = ttsAudioCtxRef.current.createBufferSource();
+    src.buffer = buf;
+    src.connect(ttsAudioCtxRef.current.destination);
+    src.start(0);
+  }, []);
+
   const speak = useCallback(async (text: string) => {
     if (muted) { setState('idle'); return; }
     speechSynthesis.cancel();
@@ -378,8 +395,18 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
             audioRef.current = audio;
             await new Promise<void>((resolve) => {
               audio.onended = () => { audioRef.current = null; resolve(); };
-              audio.onerror = () => { audioRef.current = null; resolve(); };
-              audio.play().catch(() => resolve());
+              audio.onerror = () => {
+                audioRef.current = null;
+                // Audio element failed — try browser TTS for this segment
+                speakFallback(seg.text);
+                resolve();
+              };
+              audio.play().catch(() => {
+                audioRef.current = null;
+                // Autoplay blocked — fall back to browser TTS
+                speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
+                resolve();
+              });
             });
           } else {
             // TTS not available, fall through to browser
@@ -1231,7 +1258,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
           {/* Text input */}
           <div className="px-4 sm:px-8 mb-2">
             <div className="max-w-2xl mx-auto">
-              <form onSubmit={(e) => { e.preventDefault(); const t = textInput.trim(); if (t) { setTextInput(''); handleInput(t); } }} className="flex gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); unlockAudio(); const t = textInput.trim(); if (t) { setTextInput(''); handleInput(t); } }} className="flex gap-2">
                 <input
                   type="text"
                   value={textInput}
@@ -1381,7 +1408,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
                 ].map(q => (
                   <button
                     key={q}
-                    onClick={() => { setConvo([]); handleInput(q); }}
+                    onClick={() => { unlockAudio(); setConvo([]); handleInput(q); }}
                     className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
                   >
                     {q}
