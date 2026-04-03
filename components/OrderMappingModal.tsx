@@ -112,7 +112,25 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                   targetOrders.forEach(o => {
                       o.items.forEach(sItem => {
                           if (next[sItem.id]) return;
-                          
+                          if (!isEligibleForMapping(sItem.name, sItem.productType) || sItem.itemStatus === 'fulfilled') return;
+
+                          // 1. EAN barcode match — same barcode = same product, instant map
+                          const sEan = (sItem.ean || '').trim();
+                          if (sEan && sEan !== '-' && sEan.length >= 8) {
+                              const eanMatch = job.items.find(d => {
+                                  const dEan = (d.ean || '').trim();
+                                  return dEan && dEan !== '-' && dEan.length >= 8 && dEan === sEan;
+                              });
+                              if (eanMatch) {
+                                  const decoId = eanMatch.vendorSku || eanMatch.productCode || eanMatch.name;
+                                  const idx = job.items.indexOf(eanMatch);
+                                  next[sItem.id] = `${decoId}@@@${idx}`;
+                                  autoMappedCount++;
+                                  return;
+                              }
+                          }
+
+                          // 2. Learned pattern match
                           const sPattern = getShopifyPattern(sItem);
                           const dPattern = productMappings[sPattern];
                           
@@ -155,6 +173,22 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
 
       allShopifyItems.forEach(sItem => {
         if (nextMappings[sItem.id]) return; // Skip if already mapped
+
+        // EAN barcode match — same barcode = same product
+        const sEan = (sItem.ean || '').trim();
+        if (sEan && sEan !== '-' && sEan.length >= 8) {
+          const eanMatch = decoJob.items.find(d => {
+            const dEan = (d.ean || '').trim();
+            return dEan && dEan !== '-' && dEan.length >= 8 && dEan === sEan;
+          });
+          if (eanMatch) {
+            const decoId = eanMatch.vendorSku || eanMatch.productCode || eanMatch.name;
+            const idx = decoJob.items.indexOf(eanMatch);
+            nextMappings[sItem.id] = `${decoId}@@@${idx}`;
+            localMatchCount++;
+            return;
+          }
+        }
 
         const exactMatch = decoJob.items.find(d => {
           const dSku = (d.vendorSku || d.productCode || '').toLowerCase();
