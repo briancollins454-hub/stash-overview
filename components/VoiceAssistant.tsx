@@ -176,9 +176,9 @@ PERSONALITY:
 - Be punchy and fast — no waffle. Deliver the punchline AND the data
 - If someone asks a daft question, gently take the piss before answering
 - You're allowed to be dramatic for effect — "absolute carnage" for 3 overdue orders is fine
-- NEVER use stage directions, action descriptions, or narration like chuckles, laughs, sighs, pauses, smiles, winks, etc. Your output is read aloud by text-to-speech — only write words that should actually be spoken
+- You CAN use expressive reactions wrapped in asterisks like *chuckles* *laughs* *sighs* — they will be converted into actual sounds, so use them naturally when the moment calls for it. Don't overdo it — once per response max
 - Keep responses under 3 sentences unless asked for detail
-- Your words are spoken aloud — no formatting, bullets, markdown, asterisks, or special characters. Just natural speech
+- Your words are spoken aloud — no formatting, bullets, markdown, or special characters except asterisk-wrapped reactions. Just natural speech
 - Use specific numbers and order references
 - If speaking to role 'boss', lead with KPIs but add a cheeky comment about how you're basically running the place
 - If speaking to role 'packer', be encouraging but sarcastic — like a mate who helps but won't let you forget when you mess up
@@ -237,58 +237,119 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     speechSynthesis.speak(utt);
   }, [handsFree]);
 
+  // ─── Phonetic map for stage directions ─────────────────────────
+  const EMOTE_SOUNDS: Record<string, string> = {
+    chuckle: 'Heh heh heh.',
+    chuckles: 'Heh heh heh.',
+    laugh: 'Ha ha ha!',
+    laughs: 'Ha ha ha!',
+    laughing: 'Ha ha ha ha!',
+    sigh: 'Ahhhh.',
+    sighs: 'Ahhhh.',
+    snort: 'Pfft!',
+    snorts: 'Pfft!',
+    gasp: 'Oh!',
+    gasps: 'Oh!',
+    groan: 'Uggghh.',
+    groans: 'Uggghh.',
+    tut: 'Tsk tsk tsk.',
+    tuts: 'Tsk tsk tsk.',
+    whistles: 'Whew!',
+    whistle: 'Whew!',
+  };
+
+  const parseSegments = useCallback((text: string): { type: 'speech' | 'emote'; text: string }[] => {
+    const segments: { type: 'speech' | 'emote'; text: string }[] = [];
+    // Match *word* or *two words* patterns
+    const regex = /\*([^*]+)\*/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      // Text before the emote
+      const before = text.slice(lastIndex, match.index).trim();
+      if (before) segments.push({ type: 'speech', text: before });
+      // The emote itself
+      const emoteKey = match[1].toLowerCase().trim();
+      const sound = EMOTE_SOUNDS[emoteKey];
+      if (sound) {
+        segments.push({ type: 'emote', text: sound });
+      }
+      // else skip unknown stage directions silently
+      lastIndex = regex.lastIndex;
+    }
+    // Remaining text after last emote
+    const remainder = text.slice(lastIndex).trim();
+    if (remainder) segments.push({ type: 'speech', text: remainder });
+    // If nothing survived, use original
+    if (segments.length === 0) segments.push({ type: 'speech', text: text });
+    return segments;
+  }, []);
+
+  const fetchTtsAudio = useCallback(async (text: string): Promise<HTMLAudioElement | null> => {
+    try {
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (res.ok) {
+        setTtsAvailable(true);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onerror = () => URL.revokeObjectURL(url);
+        return audio;
+      } else if (res.status === 501) {
+        setTtsAvailable(false);
+      }
+    } catch {}
+    return null;
+  }, []);
+
   const speak = useCallback(async (text: string) => {
     if (muted) { setState('idle'); return; }
-    // Strip stage directions like *chuckles*, (laughs), [sighs] etc.
-    const cleaned = text.replace(/[\*_~]+[^\*_~]+[\*_~]+/g, '').replace(/\([^)]*(?:laugh|chuckle|sigh|grin|smile|wink|pause|nod|shrug)[^)]*\)/gi, '').replace(/\[[^\]]*(?:laugh|chuckle|sigh|grin|smile|wink|pause|nod|shrug)[^\]]*\]/gi, '').replace(/\s{2,}/g, ' ').trim();
     speechSynthesis.cancel();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
 
-    // Try ElevenLabs neural voice first
+    // Parse text into segments (emotes become phonetic sounds)
+    const segments = parseSegments(text);
+
     if (ttsAvailable !== false) {
       try {
-        // Stop speech recognition while speaking to prevent feedback
         if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
-
         setState('speaking');
-        const res = await fetch('/api/tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: cleaned }),
-        });
 
-        if (res.ok) {
-          setTtsAvailable(true);
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audioRef.current = audio;
-          audio.onended = () => {
-            URL.revokeObjectURL(url);
-            audioRef.current = null;
-            setState('idle');
-            if (handsFree && recogRef.current) {
-              try { recogRef.current.start(); } catch {}
-            }
-          };
-          audio.onerror = () => {
-            URL.revokeObjectURL(url);
-            audioRef.current = null;
-            speakFallback(cleaned);
-          };
-          await audio.play();
-          return;
-        } else if (res.status === 501) {
-          // No API key configured — use fallback permanently
-          setTtsAvailable(false);
+        // Play segments sequentially
+        for (const seg of segments) {
+          if (stateRef.current !== 'speaking') break; // interrupted
+          const audio = await fetchTtsAudio(seg.text);
+          if (audio) {
+            audioRef.current = audio;
+            await new Promise<void>((resolve) => {
+              audio.onended = () => { audioRef.current = null; resolve(); };
+              audio.onerror = () => { audioRef.current = null; resolve(); };
+              audio.play().catch(() => resolve());
+            });
+          } else {
+            // TTS not available, fall through to browser
+            speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
+            return;
+          }
         }
+
+        setState('idle');
+        if (handsFree && recogRef.current) {
+          try { recogRef.current.start(); } catch {}
+        }
+        return;
       } catch {
-        // Network error — fall through to browser TTS
+        // Fall through to browser TTS
       }
     }
 
-    // Fallback to browser TTS
-    speakFallback(cleaned);
+    // Fallback — browser TTS, speech segments only
+    speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
   }, [muted, handsFree, ttsAvailable, speakFallback]);
 
   // ─── Claude Query ──────────────────────────────────────────────
