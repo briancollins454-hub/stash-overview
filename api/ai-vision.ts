@@ -1,8 +1,9 @@
 export const config = { runtime: 'edge' };
 
-// ─── Vision: Send camera frames to GPT-4o for real visual understanding ───
-// Accepts a base64 JPEG snapshot + text query, returns streaming response
-// The AI can genuinely SEE the user — their face, expression, surroundings, clothing, etc.
+// ─── Live Vision Watch: Continuous camera awareness via GPT-4o-mini ──────
+// Lightweight endpoint called every ~8s to analyze what the AI sees.
+// Returns a brief JSON observation — NOT a full conversation response.
+// Uses gpt-4o-mini for speed and cost (vision-capable, very fast).
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
@@ -17,49 +18,17 @@ export default async function handler(req: Request) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
 
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 501, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   try {
-    const { system, messages, image } = await req.json();
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: 'messages required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { image, previous_observation, user_name } = await req.json();
+    if (!image) {
+      return new Response(JSON.stringify({ error: 'image required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Build messages — if image is provided, attach it to the last user message as vision content
-    const oaiMessages: any[] = [];
-    if (system) {
-      oaiMessages.push({ role: 'system', content: system });
-    }
-
-    for (const msg of messages) {
-      oaiMessages.push(msg);
-    }
-
-    // Attach the camera frame to the last user message
-    if (image && oaiMessages.length > 0) {
-      const lastIdx = oaiMessages.length - 1;
-      const lastMsg = oaiMessages[lastIdx];
-      if (lastMsg.role === 'user') {
-        // Convert text content to multimodal content array
-        const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : '';
-        oaiMessages[lastIdx] = {
-          role: 'user',
-          content: [
-            { type: 'text', text: textContent },
-            {
-              type: 'image_url',
-              image_url: {
-                url: image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`,
-                detail: 'low', // low detail = fast + cheap, enough for face/person recognition
-              },
-            },
-          ],
-        };
-      }
-    }
-
-    // Use gpt-4o for vision (gpt-4.1 doesn't support vision)
-    const model = image ? 'gpt-4o' : (process.env.OPENAI_MODEL || 'gpt-4.1');
+    const previousContext = previous_observation
+      ? `\nYour previous observation was: "${previous_observation}"\nNote any CHANGES from what you saw before.`
+      : '';
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -68,14 +37,38 @@ export default async function handler(req: Request) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model,
-        max_tokens: 2048,
-        temperature: 0.75,
-        top_p: 0.95,
-        frequency_penalty: 0.15,
-        presence_penalty: 0.1,
-        messages: oaiMessages,
-        stream: true,
+        model: 'gpt-4o-mini',
+        max_tokens: 150,
+        temperature: 0.3,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a visual observer for an AI assistant. Analyze the camera frame and return a brief JSON observation. Be specific about what you see — this feeds into a conversational AI that reacts to the person naturally.${previousContext}
+
+Return ONLY valid JSON with these fields:
+{
+  "people_count": number,
+  "expression": "happy|neutral|focused|tired|surprised|confused|stressed|amused|bored",
+  "gaze": "at_camera|away|down|phone",
+  "description": "Brief natural description of what you see — person, clothing, setting, posture, anything notable",
+  "change": "What changed since last observation, or 'none' if nothing notable",
+  "notable": true/false — true if something interesting happened worth commenting on (big expression change, left/returned, doing something unusual, looking stressed, laughing, etc)
+}${user_name ? `\nThe person's name is ${user_name}.` : ''}`,
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What do you see right now?' },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`,
+                  detail: 'low',
+                },
+              },
+            ],
+          },
+        ],
       }),
     });
 
@@ -84,41 +77,20 @@ export default async function handler(req: Request) {
       return new Response(JSON.stringify({ error: err }), { status: resp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content || '{}';
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        const reader = resp.body!.getReader();
-        let buf = '';
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop() || '';
-            for (const line of lines) {
-              if (!line.startsWith('data: ')) continue;
-              const json = line.slice(6).trim();
-              if (!json || json === '[DONE]') continue;
-              try {
-                const d = JSON.parse(json);
-                const token = d.choices?.[0]?.delta?.content;
-                if (token) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ t: token })}\n\n`));
-                }
-              } catch {}
-            }
-          }
-        } catch {}
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        controller.close();
-      },
-    });
+    // Parse the JSON observation (handle markdown-wrapped JSON)
+    let observation;
+    try {
+      const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+      observation = JSON.parse(cleaned);
+    } catch {
+      observation = { description: content, expression: 'neutral', notable: false, change: 'none', people_count: 0, gaze: 'unknown' };
+    }
 
-    return new Response(stream, {
-      headers: { ...corsHeaders, 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    return new Response(JSON.stringify(observation), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {
     return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

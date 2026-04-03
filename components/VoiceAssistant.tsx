@@ -140,6 +140,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [lastConversationSummary, setLastConversationSummary] = useState<string | null>(null);
   const [convoExpanded, setConvoExpanded] = useState(true);
   const [conversationSummaryCache, setConversationSummaryCache] = useState<string | null>(null);
+  const [liveVisionContext, setLiveVisionContext] = useState<string>('');
+  const [visionObservation, setVisionObservation] = useState<any>(null);
 
   // --- Refs ---
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -173,6 +175,10 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const activeTabRef = useRef(activeTab);
   const morningBriefingDone = useRef(false);
   const snapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const visionTimerRef = useRef<number>(0);
+  const lastVisionDescription = useRef<string>('');
+  const visionContextRef = useRef<string>('');
+  const lastVisionReaction = useRef<number>(0);
 
   // Keep refs synced
   useEffect(() => { convoRef.current = convo; }, [convo]);
@@ -290,6 +296,91 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.7); // Low quality = smaller payload = faster
   }, []);
+
+  // Generate a natural reaction based on visual observation changes
+  const generateVisualReaction = useCallback((obs: any): string | null => {
+    if (!obs || !obs.notable) return null;
+    const change = (obs.change || '').toLowerCase();
+    const expr = (obs.expression || '').toLowerCase();
+    const gaze = (obs.gaze || '').toLowerCase();
+
+    // Person left
+    if (obs.people_count === 0 && lastVisionDescription.current.includes('person')) {
+      return "Oh, you've wandered off. I'll be here when you're back.";
+    }
+    // Person returned
+    if (change.includes('return') || change.includes('back')) {
+      return "Welcome back. Miss me?";
+    }
+    // Big expression shifts
+    if (change.includes('stressed') || expr === 'stressed') {
+      return "You look stressed, mate. What's going on?";
+    }
+    if (change.includes('laugh') || change.includes('smil') || (expr === 'happy' && change !== 'none')) {
+      return "*chuckles* Good to see you smiling.";
+    }
+    if (expr === 'tired' && change !== 'none') {
+      return "You look knackered. Time for a coffee?";
+    }
+    if (gaze === 'phone') {
+      return "I can see you're on your phone. I'll wait.";
+    }
+    if (expr === 'confused') {
+      return "You look confused. Need me to help with something?";
+    }
+    // Generic notable change
+    if (change !== 'none' && change.length > 5) {
+      return null; // Let the AI handle complex observations via the main chat
+    }
+    return null;
+  }, []);
+
+  // ─── Live Vision Loop: Continuous camera awareness ─────────────
+  // Polls the camera every ~8 seconds, sends frame to GPT-4o-mini for a brief observation.
+  // Builds up a running visual context that feeds into every chat response.
+  const pollVision = useCallback(async () => {
+    if (stateRef.current === 'thinking' || stateRef.current === 'speaking' || stateRef.current === 'tool_calling') return;
+    const snapshot = captureSnapshot();
+    if (!snapshot) return;
+
+    try {
+      const res = await fetch('/api/ai-vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: snapshot,
+          previous_observation: lastVisionDescription.current || undefined,
+          user_name: currentUser?.name || undefined,
+        }),
+      });
+      if (!res.ok) return;
+      const obs = await res.json();
+      if (obs.error) return;
+
+      setVisionObservation(obs);
+      lastVisionDescription.current = obs.description || '';
+      const ctx = `[LIVE VISION — what you can see RIGHT NOW] People: ${obs.people_count || 0}. Expression: ${obs.expression || 'unknown'}. Gaze: ${obs.gaze || 'unknown'}. Scene: ${obs.description || 'unclear'}${obs.change && obs.change !== 'none' ? `. Change: ${obs.change}` : ''}`;
+      visionContextRef.current = ctx;
+      setLiveVisionContext(ctx);
+
+      // Proactive reaction when something notable happens
+      if (obs.notable && stateRef.current === 'idle') {
+        const now = Date.now();
+        const cooldown = 45_000; // Don't react more than once per 45 seconds
+        if (now - lastVisionReaction.current > cooldown) {
+          lastVisionReaction.current = now;
+          // Feed the observation back to the AI for a natural reaction
+          const reactPrompt = `You just noticed something through the camera: "${obs.description}". ${obs.change !== 'none' ? `Change from before: ${obs.change}.` : ''} React to this naturally and briefly — one short sentence, spoken aloud. Be yourself.`;
+          // Use the lightweight approach — just speak a reaction based on the observation
+          const reactions = generateVisualReaction(obs);
+          if (reactions) {
+            setConvo(prev => [...prev, { role: 'assistant', text: reactions, ts: Date.now() }]);
+            speak(reactions);
+          }
+        }
+      }
+    } catch {}
+  }, [captureSnapshot, currentUser, speak, generateVisualReaction]);
 
   // ─── Tool Resolution (Client-Side) ────────────────────────────
 
@@ -592,6 +683,7 @@ Top risks: ${topRisks.length > 0 ? topRisks.join(' | ') : 'None'}
 Ready to ship: ${readyList.length > 0 ? readyList.join(' | ') : 'Nothing ready'}
 Active clubs: ${topClubs || 'None'}
 ${screenContext}${memoryContext}${sessionMemory}
+${visionContextRef.current ? `\n${visionContextRef.current}\nYou have LIVE continuous vision. You can genuinely see the user right now. React to what you see naturally — mention their expression, if they look busy, tired, happy, etc. Don't announce that you're using vision, just naturally incorporate what you see like a colleague sitting across from them would.` : ''}
 
 Now: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (${currentUser.role})` : 'Speaker: unknown'}
@@ -782,8 +874,9 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     const snapshot = captureSnapshot();
 
     // Add vision context to system prompt when camera is active
+    const visionLive = visionContextRef.current;
     const activeSystem = snapshot
-      ? system + '\n\nVISION: You can SEE the user right now through their camera. A photo of what you see is attached to their message. You can comment on their appearance, expression, surroundings, what they\'re wearing, if they look tired, if they\'re smiling, etc. React naturally like a human colleague who can see them. Don\'t describe the image robotically — just incorporate what you see into your response naturally. If they ask "can you see me" or "what do I look like", describe what you genuinely see.'
+      ? system + `\n\nVISION: You have been CONTINUOUSLY watching the user through their camera. You can genuinely SEE them right now.${visionLive ? `\n\nYour ongoing visual awareness:\n${visionLive}` : ''}\n\nA fresh photo is also attached. React naturally to what you see — their expression, appearance, surroundings, energy, body language. Don't describe the image robotically. Just incorporate what you see like a human colleague sitting across from them. If they ask "can you see me", describe what you genuinely see.`
       : system;
 
     try {
@@ -1575,6 +1668,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       return () => {
         cancelAnimationFrame(animRef.current);
         clearInterval(faceTimerRef.current);
+        if (visionTimerRef.current) clearInterval(visionTimerRef.current);
         clearTimeout(silenceTimerRef.current);
         transcriptBufferRef.current = '';
         stopCamera();
@@ -1605,6 +1699,21 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       return () => cancelAnimationFrame(animRef.current);
     }
   }, [isOpen, drawOrb]);
+
+  // Live vision polling — continuously watch user every 8 seconds
+  useEffect(() => {
+    if (isOpen && cameraReady) {
+      // Start polling after short delay to let camera settle
+      const startDelay = setTimeout(() => {
+        pollVision();
+        visionTimerRef.current = window.setInterval(pollVision, 8000);
+      }, 3000);
+      return () => {
+        clearTimeout(startDelay);
+        if (visionTimerRef.current) clearInterval(visionTimerRef.current);
+      };
+    }
+  }, [isOpen, cameraReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll
   useEffect(() => { convoEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [convo]);
