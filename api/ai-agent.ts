@@ -123,17 +123,43 @@ export default async function handler(req: Request) {
   if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   try {
-    const { system, messages, tools_context } = await req.json();
+    const { system, messages, tools_context, image } = await req.json();
     if (!messages || !Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: 'messages required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const model = process.env.OPENAI_MODEL || 'gpt-4.1';
+    // Use GPT-4o when vision is needed (supports both vision AND tools)
+    // Fall back to gpt-4.1 for text-only (faster, cheaper)
+    const hasImage = !!image;
+    const model = hasImage ? 'gpt-4o' : (process.env.OPENAI_MODEL || 'gpt-4.1');
 
-    const oaiMessages = [
+    const oaiMessages: any[] = [
       ...(system ? [{ role: 'system' as const, content: system }] : []),
       ...messages,
     ];
+
+    // Attach camera snapshot to the last user message as vision content
+    if (hasImage && oaiMessages.length > 0) {
+      for (let i = oaiMessages.length - 1; i >= 0; i--) {
+        if (oaiMessages[i].role === 'user') {
+          const textContent = typeof oaiMessages[i].content === 'string' ? oaiMessages[i].content : '';
+          oaiMessages[i] = {
+            role: 'user',
+            content: [
+              { type: 'text', text: textContent },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`,
+                  detail: 'low',
+                },
+              },
+            ],
+          };
+          break;
+        }
+      }
+    }
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
