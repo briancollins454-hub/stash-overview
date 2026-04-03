@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock } from 'lucide-react';
+import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock, ToggleLeft, ToggleRight } from 'lucide-react';
 
 export interface AppUser {
   id: string;
@@ -8,6 +8,7 @@ export interface AppUser {
   username: string;
   role: string;
   displayName: string;
+  allowedTabs: string[];
 }
 
 interface StashUser {
@@ -19,6 +20,7 @@ interface StashUser {
   is_active: boolean;
   created_at: string;
   created_by: string;
+  allowed_tabs: string[];
 }
 
 interface Props {
@@ -33,6 +35,36 @@ const ROLES = [
   { value: 'manager', label: 'Manager', icon: Shield, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
 ];
+
+const ALL_TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'command', label: 'Live' },
+  { id: 'kanban', label: 'Kanban' },
+  { id: 'intelligence', label: 'Intel' },
+  { id: 'production', label: 'Production' },
+  { id: 'reports', label: 'Reports' },
+  { id: 'operations', label: 'Ops' },
+  { id: 'stock', label: 'Stock' },
+  { id: 'efficiency', label: 'Efficiency' },
+  { id: 'mto', label: 'MTO' },
+  { id: 'deco', label: 'Deco' },
+  { id: 'revenue', label: 'Revenue' },
+  { id: 'autolink', label: 'Linker' },
+  { id: 'fulfill', label: 'Fulfill' },
+  { id: 'analyst', label: 'Analyst' },
+  { id: 'finance', label: 'Finance' },
+  { id: 'users', label: 'Users' },
+  { id: 'manual', label: 'Manual' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'settings', label: 'Settings' },
+];
+
+const DEFAULT_TABS: Record<string, string[]> = {
+  superuser: ALL_TABS.map(t => t.id),
+  admin: ALL_TABS.filter(t => t.id !== 'settings').map(t => t.id),
+  manager: ['dashboard','command','kanban','production','operations','stock','mto','deco','fulfill','manual'],
+  viewer: ['dashboard','reports','revenue'],
+};
 
 function getRoleMeta(role: string) {
   return ROLES.find(r => r.value === role) || ROLES[3];
@@ -63,6 +95,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('viewer');
+  const [allowedTabs, setAllowedTabs] = useState<string[]>(DEFAULT_TABS.viewer);
 
   // Build auth params to pass to every API call
   const authParams = token ? { token } : firebaseIdToken ? { firebaseIdToken } : {};
@@ -88,6 +121,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
     setUsername('');
     setPassword('');
     setRole('viewer');
+    setAllowedTabs(DEFAULT_TABS.viewer);
     setShowAddForm(false);
     setEditingUser(null);
   };
@@ -97,7 +131,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
     setSaving(true);
     setError(null);
     try {
-      await usersApi({ action: 'create', ...authParams, firstName, lastName, username, password, role });
+      await usersApi({ action: 'create', ...authParams, firstName, lastName, username, password, role, allowedTabs });
       resetForm();
       await loadUsers();
     } catch (e: any) {
@@ -120,6 +154,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
         firstName,
         lastName,
         role,
+        allowedTabs,
       };
       if (password) updates.password = password;
       await usersApi(updates);
@@ -160,6 +195,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
     setUsername(user.username);
     setPassword('');
     setRole(user.role);
+    setAllowedTabs(user.allowed_tabs || DEFAULT_TABS[user.role] || DEFAULT_TABS.viewer);
     setShowAddForm(false);
   };
 
@@ -270,7 +306,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                       key={r.value}
                       type="button"
                       disabled={disabled}
-                      onClick={() => setRole(r.value)}
+                      onClick={() => { setRole(r.value); setAllowedTabs(DEFAULT_TABS[r.value] || DEFAULT_TABS.viewer); }}
                       className={`px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-all flex items-center gap-1.5 ${
                         role === r.value
                           ? `${r.bg} ${r.color} border-current`
@@ -283,6 +319,37 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                 })}
               </div>
             </div>
+            {/* Tab Permissions — superusers only */}
+            {currentUser.role === 'superuser' && (
+              <div className="col-span-1 sm:col-span-2">
+                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Tab Access</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-1.5">
+                  {ALL_TABS.map(tab => {
+                    const enabled = allowedTabs.includes(tab.id);
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setAllowedTabs(prev => enabled ? prev.filter(t => t !== tab.id) : [...prev, tab.id])}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest border transition-all ${
+                          enabled
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-900 text-slate-600 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        {enabled ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button type="button" onClick={() => setAllowedTabs(ALL_TABS.map(t => t.id))} className="text-[8px] font-bold uppercase tracking-widest text-indigo-400 hover:text-indigo-300">Select All</button>
+                  <button type="button" onClick={() => setAllowedTabs([])} className="text-[8px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-400">Clear All</button>
+                  <button type="button" onClick={() => setAllowedTabs(DEFAULT_TABS[role] || DEFAULT_TABS.viewer)} className="text-[8px] font-bold uppercase tracking-widest text-amber-400 hover:text-amber-300">Reset to Default</button>
+                </div>
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <button
                 type="submit"
@@ -337,6 +404,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                     <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${roleMeta.bg} ${roleMeta.color}`}>
                       {roleMeta.label}
                     </span>
+                    <span className="text-[8px] font-bold text-slate-500">{(u.allowed_tabs || []).length}/{ALL_TABS.length} tabs</span>
                   </div>
                 </div>
 

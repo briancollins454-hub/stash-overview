@@ -63,12 +63,15 @@ interface FirestoreUser {
   is_active: boolean;
   created_at: string;
   created_by: string;
+  allowed_tabs: string[];
 }
 
 function toFirestoreFields(data: Record<string, any>): Record<string, any> {
   const fields: Record<string, any> = {};
   for (const [key, value] of Object.entries(data)) {
-    if (typeof value === 'string') fields[key] = { stringValue: value };
+    if (Array.isArray(value)) {
+      fields[key] = { arrayValue: { values: value.map((v: string) => ({ stringValue: v })) } };
+    } else if (typeof value === 'string') fields[key] = { stringValue: value };
     else if (typeof value === 'boolean') fields[key] = { booleanValue: value };
     else if (typeof value === 'number') fields[key] = { integerValue: String(value) };
     else if (value === null) fields[key] = { nullValue: null };
@@ -76,19 +79,30 @@ function toFirestoreFields(data: Record<string, any>): Record<string, any> {
   return fields;
 }
 
+// Default tab access per role
+const DEFAULT_TABS: Record<string, string[]> = {
+  superuser: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts','settings'],
+  admin: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts'],
+  manager: ['dashboard','command','kanban','production','operations','stock','mto','deco','fulfill','manual'],
+  viewer: ['dashboard','reports','revenue'],
+};
+
 function fromFirestoreDoc(doc: any): FirestoreUser {
   const f = doc.fields || {};
   const name = (doc.name || '').split('/').pop() || '';
+  const role = f.role?.stringValue || 'viewer';
+  const tabValues = f.allowed_tabs?.arrayValue?.values;
   return {
     id: name,
     first_name: f.first_name?.stringValue || '',
     last_name: f.last_name?.stringValue || '',
     username: f.username?.stringValue || '',
     password_hash: f.password_hash?.stringValue || '',
-    role: f.role?.stringValue || 'viewer',
+    role,
     is_active: f.is_active?.booleanValue !== false,
     created_at: f.created_at?.stringValue || '',
     created_by: f.created_by?.stringValue || '',
+    allowed_tabs: tabValues ? tabValues.map((v: any) => v.stringValue) : (DEFAULT_TABS[role] || DEFAULT_TABS.viewer),
   };
 }
 
@@ -200,6 +214,7 @@ function formatUser(u: FirestoreUser) {
     is_active: u.is_active,
     created_at: u.created_at,
     created_by: u.created_by,
+    allowed_tabs: u.allowed_tabs,
   };
 }
 
@@ -211,6 +226,7 @@ function formatUserLogin(u: FirestoreUser) {
     username: u.username,
     role: u.role,
     displayName: `${u.first_name} ${u.last_name}`,
+    allowedTabs: u.allowed_tabs,
   };
 }
 
@@ -284,6 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(409).json({ error: 'Username already exists' });
         }
         const passwordHash = hashPassword(password);
+        const allowedTabs = Array.isArray(data.allowedTabs) ? data.allowedTabs : (DEFAULT_TABS[role] || DEFAULT_TABS.viewer);
         await firestoreCreate({
           first_name: firstName,
           last_name: lastName,
@@ -292,6 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role,
           is_active: true,
           created_by: caller.userId,
+          allowed_tabs: allowedTabs,
         }, authToken);
         return res.json({ success: true });
       }
@@ -299,7 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // ─── UPDATE USER ─────────────────────────────────
       case 'update': {
         const caller = await requireAdmin(token, firebaseIdToken);
-        const { userId, firstName, lastName, role, password, isActive } = data;
+        const { userId, firstName, lastName, role, password, isActive, allowedTabs } = data;
         if (!userId) return res.status(400).json({ error: 'userId required' });
 
         const updates: Record<string, any> = {};
@@ -317,6 +335,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (password) updates.password_hash = hashPassword(password);
         if (isActive !== undefined) updates.is_active = isActive;
+        if (Array.isArray(allowedTabs)) {
+          if (caller.role !== 'superuser') {
+            return res.status(403).json({ error: 'Only superusers can change tab permissions' });
+          }
+          updates.allowed_tabs = allowedTabs;
+        }
 
         if (Object.keys(updates).length === 0) {
           return res.status(400).json({ error: 'No updates provided' });

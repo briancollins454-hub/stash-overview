@@ -9,6 +9,7 @@ export interface CustomUser {
   username: string;
   role: string;
   displayName: string;
+  allowedTabs: string[];
   // Compatibility with Firebase User shape used in App.tsx
   email: string;
   photoURL: null;

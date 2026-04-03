@@ -231,13 +231,14 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
   if (tokenError) return <div className="text-center py-20 text-red-400 text-xs font-bold uppercase">{tokenError}</div>;
   if (!firebaseIdToken) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>;
 
-  const googleUser = {
+  const googleUser: import('./components/UserManagement').AppUser = {
     id: `google:${user.email}`,
     firstName: (user.displayName || '').split(' ')[0] || 'Admin',
     lastName: (user.displayName || '').split(' ').slice(1).join(' ') || '',
     username: user.email || '',
     role: 'superuser',
     displayName: user.displayName || user.email || 'Admin',
+    allowedTabs: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts','settings'],
   };
 
   return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
@@ -248,15 +249,29 @@ const App: React.FC = () => {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const validTabs = ['dashboard', 'stock', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'users', 'manual', 'command'];
-  const activeTab = validTabs.includes(searchParams.get('tab') || '') ? searchParams.get('tab')! : 'dashboard';
+  // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
+  const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
+  const isTabAllowed = useCallback((tabId: string) => {
+    if (!isCustomUser) return true; // Google auth = superuser = all
+    if (!userAllowedTabs) return true; // No restrictions set
+    return userAllowedTabs.includes(tabId);
+  }, [isCustomUser, userAllowedTabs]);
+  const activeTab = (() => {
+    const param = searchParams.get('tab') || '';
+    const tab = validTabs.includes(param) ? param : 'dashboard';
+    // If user doesn't have access to requested tab, fall back to dashboard
+    if (tab !== 'dashboard' && !isTabAllowed(tab)) return 'dashboard';
+    return tab;
+  })();
   const setActiveTab = useCallback((tab: string) => {
+    if (tab !== 'dashboard' && !isTabAllowed(tab)) return; // Block navigation to disallowed tabs
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (tab === 'dashboard') next.delete('tab');
       else next.set('tab', tab);
       return next;
     }, { replace: true });
-  }, [setSearchParams]);
+  }, [setSearchParams, isTabAllowed]);
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
       const defaults: ApiSettings = {
           useLiveData: true,
@@ -682,7 +697,7 @@ const App: React.FC = () => {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
-        setShowSettings(prev => !prev);
+        if (isTabAllowed('settings')) setShowSettings(prev => !prev);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') {
         e.preventDefault();
@@ -1653,7 +1668,7 @@ const App: React.FC = () => {
         {toastMsg && <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-xl shadow-2xl z-[200] text-white flex items-center gap-3 font-bold border-b-4 ${toastMsg.type === 'success' ? 'bg-green-600 border-green-800' : 'bg-red-600 border-red-800'}`}>{toastMsg.text} <button onClick={() => setToastMsg(null)} className="ml-2 opacity-50 hover:opacity-100"><X className="w-4 h-4" /></button></div>}
         
         <SettingsModal 
-          isOpen={showSettings} 
+          isOpen={showSettings && isTabAllowed('settings')} 
           onClose={() => setShowSettings(false)} 
           onSave={(s, e) => {
             setApiSettings(s); 
@@ -1676,17 +1691,17 @@ const App: React.FC = () => {
             {/* Desktop nav */}
             <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1">
                 <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
                     <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
                 <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); }} />
-                <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>
-                <button onClick={() => setActiveTab('manual')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'manual' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Instruction Manual"><BookOpen className="w-4 h-4" /></button>
-<button onClick={() => setActiveTab('finance')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'finance' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Accounts & Finance"><PoundSterling className="w-4 h-4" /></button>
-                <button onClick={() => setShowSettings(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Settings (⌘,)"><Settings className="w-4 h-4" /></button>
+                {isTabAllowed('alerts') && <button onClick={() => setShowAlertManager(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Alert Manager"><BellRing className="w-4 h-4" /></button>}
+                {isTabAllowed('manual') && <button onClick={() => setActiveTab('manual')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'manual' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Instruction Manual"><BookOpen className="w-4 h-4" /></button>}
+{isTabAllowed('finance') && <button onClick={() => setActiveTab('finance')} className={`p-2 rounded hover:bg-white/5 transition-colors ${activeTab === 'finance' ? 'text-white bg-white/10' : 'text-indigo-300 hover:text-white'}`} title="Accounts & Finance"><PoundSterling className="w-4 h-4" /></button>}
+                {isTabAllowed('settings') && <button onClick={() => setShowSettings(true)} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Settings (⌘,)"><Settings className="w-4 h-4" /></button>}
                 <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className="text-indigo-300 hover:text-white p-2 rounded hover:bg-white/5 transition-colors" title="Toggle Dark Mode">
                   {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
@@ -1730,13 +1745,13 @@ const App: React.FC = () => {
         {mobileMenuOpen && (
             <div className="lg:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-1 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, ...(isCustomUser && (customUserData?.role === 'superuser' || customUserData?.role === 'admin') ? [{ id: 'users', label: 'USERS' }] : !isCustomUser ? [{ id: 'users', label: 'USERS' }] : [])].map(tab => (
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
-                        <button onClick={() => { setActiveTab('manual'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-4 h-4" /> Manual</button>
-                <button onClick={() => { setActiveTab('finance'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><PoundSterling className="w-4 h-4" /> Finance</button>
-                        <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>
+                        {isTabAllowed('manual') && <button onClick={() => { setActiveTab('manual'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-4 h-4" /> Manual</button>}
+                {isTabAllowed('finance') && <button onClick={() => { setActiveTab('finance'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><PoundSterling className="w-4 h-4" /> Finance</button>}
+                        {isTabAllowed('settings') && <button onClick={() => { setShowSettings(true); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><Settings className="w-4 h-4" /> Settings</button>}
                         <NotificationBell username={isCustomUser ? (customUserData?.username || '') : (user?.email || '')} onOpenOrder={(oid, onum) => { setNotesOrderId(oid); setNotesOrderNumber(onum); setMobileMenuOpen(false); }} />
                         <button onClick={() => { signOut(); setMobileMenuOpen(false); }} className="text-red-300 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><LogOut className="w-4 h-4" /> Logout</button>
                     </div>
