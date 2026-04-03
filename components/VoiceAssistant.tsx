@@ -1315,7 +1315,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: 'user' }, audio: true });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); setCameraReady(true); }
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadeddata = () => setCameraReady(true);
+        videoRef.current.play().catch(() => {});
+      }
       const actx = new AudioContext();
       const src = actx.createMediaStreamSource(stream);
       const analyser = actx.createAnalyser();
@@ -1371,7 +1375,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
     try {
       const detections = await faceapi
-        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 }))
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 }))
         .withFaceLandmarks(true)
         .withFaceExpressions()
         .withFaceDescriptors();
@@ -1551,15 +1555,13 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Face detection interval
+  // Face detection interval — always run while panel is open for continuous recognition,
+  // expression tracking, and detecting new people. Slower interval after initial recognition.
   useEffect(() => {
-    if (isOpen && faceReady && cameraReady && (!currentUser || enrolling)) {
-      faceTimerRef.current = window.setInterval(runFaceDetection, 800);
+    if (isOpen && faceReady && cameraReady) {
+      const interval = currentUser && !enrolling ? 2000 : 800; // Slower once identified, fast during enrollment
+      faceTimerRef.current = window.setInterval(runFaceDetection, interval);
       return () => clearInterval(faceTimerRef.current);
-    } else if (currentUser && !enrolling) {
-      clearInterval(faceTimerRef.current);
-      const fc = faceCanvasRef.current;
-      if (fc) { const cx = fc.getContext('2d'); if (cx) cx.clearRect(0, 0, fc.width, fc.height); }
     }
   }, [isOpen, faceReady, cameraReady, currentUser, enrolling, runFaceDetection]);
 
@@ -1729,13 +1731,16 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
                 </div>
               )}
 
-              {/* Camera preview */}
-              <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-white/[0.08] bg-black/50 hidden sm:block">
+              {/* Camera preview — always visible for face detection */}
+              <div className="relative w-28 h-20 rounded-lg overflow-hidden border border-white/[0.08] bg-black/50">
                 <video ref={videoRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} autoPlay playsInline muted />
                 <canvas ref={faceCanvasRef} className="absolute inset-0 w-full h-full" style={{ transform: 'scaleX(-1)' }} />
                 {!cameraReady && <div className="absolute inset-0 flex items-center justify-center text-[8px] text-gray-600 font-mono">NO FEED</div>}
                 {faceDetected && !currentUser && (
-                  <div className="absolute bottom-0 inset-x-0 bg-indigo-600/70 text-white text-[7px] font-mono font-bold text-center py-0.5 tracking-[0.2em] uppercase">UNKNOWN</div>
+                  <div className="absolute bottom-0 inset-x-0 bg-indigo-600/70 text-white text-[7px] font-mono font-bold text-center py-0.5 tracking-[0.2em] uppercase">UNKNOWN — TAP ENROLL</div>
+                )}
+                {faceDetected && currentUser && (
+                  <div className="absolute bottom-0 inset-x-0 bg-emerald-600/70 text-white text-[7px] font-mono font-bold text-center py-0.5 tracking-[0.2em] uppercase">{currentUser.name}</div>
                 )}
                 {/* Scan line effect */}
                 <div className="absolute inset-0 overflow-hidden pointer-events-none">
