@@ -188,9 +188,11 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
       let cursor: string | null = null;
       let page = 0;
 
-      let queryFilter = `created_at:>='${dateFrom}T00:00:00Z' AND created_at:<='${dateTo}T23:59:59Z'`;
+      // Shopify query syntax: space-separated terms (implicit AND), no explicit AND keyword
+      let queryFilter = `created_at:>='${dateFrom}T00:00:00Z' created_at:<='${dateTo}T23:59:59Z'`;
       if (keyword.trim()) {
-        queryFilter += ` AND ${keyword.trim()}`;
+        // Search across order name, customer, tags, etc.
+        queryFilter += ` ${keyword.trim()}`;
       }
 
       while (hasNextPage) {
@@ -209,8 +211,9 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         if (!res.ok) throw new Error(`API error: ${res.status}`);
 
         const json = await res.json();
+        if (json.errors) throw new Error(json.errors.map((e: any) => e.message).join('; '));
         const data = json?.data?.orders;
-        if (!data) throw new Error('No order data returned');
+        if (!data) throw new Error('No order data returned — check date range');
 
         const nodes = data.edges.map((e: any) => e.node as OrderNode);
         allOrders.push(...nodes);
