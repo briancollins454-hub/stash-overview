@@ -181,6 +181,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
 
       // Shopify query syntax: space-separated terms (implicit AND), no explicit AND keyword
       let queryFilter = `created_at:>='${dateFrom}T00:00:00Z' created_at:<='${dateTo}T23:59:59Z'`;
+      if (keyword.trim()) queryFilter += ` ${keyword.trim()}`;
 
       while (hasNextPage) {
         page++;
@@ -218,7 +219,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, keyword]);
 
   // ── Aggregate line items ─────────────────────────────────────────────────────
 
