@@ -1172,6 +1172,19 @@ const App: React.FC = () => {
   useEffect(() => {
     if (unifiedOrders.length === 0) return;
     console.log(`[EAN Auto-Map] eanIndex size: ${eanIndex.size}, orders: ${unifiedOrders.length}`);
+    // Debug: log sample items with EAN/SKU data
+    const linkedOrders = unifiedOrders.filter(o => o.deco && o.shopify.fulfillmentStatus !== 'fulfilled');
+    if (linkedOrders.length > 0) {
+      const sample = linkedOrders.slice(0, 3);
+      for (const o of sample) {
+        const unmapped = o.shopify.items.filter(i => !i.linkedDecoItemId && i.itemStatus !== 'fulfilled');
+        if (unmapped.length > 0 && o.deco) {
+          console.log(`[EAN Auto-Map] Order ${o.shopify.orderNumber}: ${unmapped.length} unmapped items`);
+          unmapped.slice(0, 2).forEach(i => console.log(`  Shopify: "${i.name}" sku="${i.sku}" ean="${i.ean}"`));
+          o.deco.items.slice(0, 2).forEach(d => console.log(`  Deco: "${d.name}" vendorSku="${d.vendorSku}" productCode="${d.productCode}" ean="${d.ean}"`));
+        }
+      }
+    }
     const results = autoMatch(unifiedOrders, productMappings, eanIndex);
     console.log(`[EAN Auto-Map] autoMatch returned ${results.length} total results, ${results.filter(r => r.isEanMatch).length} auto-matches (EAN/SKU)`);
     if (results.length > 0 && results.filter(r => r.isEanMatch).length === 0) {
