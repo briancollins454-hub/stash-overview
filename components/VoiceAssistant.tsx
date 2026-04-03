@@ -100,6 +100,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [faceReady, setFaceReady] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [statusText, setStatusText] = useState('');
+  const [textInput, setTextInput] = useState('');
 
   // --- Refs ---
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -115,6 +116,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const faceapiRef = useRef<any>(null);
   const enrollDescs = useRef<number[][]>([]);
   const lastGreeted = useRef<string | null>(null);
+  const transcriptBufferRef = useRef('');
+  const silenceTimerRef = useRef<number>(0);
   const particles = useRef<Particle[]>([]);
   const stateRef = useRef<AssistantState>('idle');
   const convoEndRef = useRef<HTMLDivElement>(null);
@@ -251,7 +254,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
         const res = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text: cleaned }),
         });
 
         if (res.ok) {
@@ -271,7 +274,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
           audio.onerror = () => {
             URL.revokeObjectURL(url);
             audioRef.current = null;
-            speakFallback(text);
+            speakFallback(cleaned);
           };
           await audio.play();
           return;
@@ -285,7 +288,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     }
 
     // Fallback to browser TTS
-    speakFallback(text);
+    speakFallback(cleaned);
   }, [muted, handsFree, ttsAvailable, speakFallback]);
 
   // ─── Claude Query ──────────────────────────────────────────────
@@ -296,7 +299,7 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     const system = buildContext(userMsg);
     const history = convoRef.current
       .filter(m => m.role !== 'system')
-      .slice(-6)
+      .slice(-12)
       .map(m => ({ role: m.role, content: m.text }));
 
     try {
@@ -317,20 +320,13 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       const data = await res.json();
       const reply = data.content?.[0]?.text || "Sorry, I couldn't process that.";
 
-      setConvo(prev => [
-        ...prev,
-        { role: 'user', text: userMsg, ts: Date.now() },
-        { role: 'assistant', text: reply, ts: Date.now() },
-      ]);
+      setConvo(prev => [...prev, { role: 'assistant', text: reply, ts: Date.now() }]);
       setStatusText('');
       speak(reply);
     } catch (e: any) {
       console.error('Claude error:', e);
       const fallback = `Sorry, I couldn't connect to my brain. ${e.message || 'Try again.'}`;
-      setConvo(prev => [...prev,
-        { role: 'user', text: userMsg, ts: Date.now() },
-        { role: 'assistant', text: fallback, ts: Date.now() },
-      ]);
+      setConvo(prev => [...prev, { role: 'assistant', text: fallback, ts: Date.now() }]);
       speak(fallback);
     }
   }, [buildContext, speak]);
@@ -360,7 +356,8 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       return;
     }
 
-    // Everything else → Claude
+    // Everything else → Claude — show user message immediately
+    setConvo(prev => [...prev, { role: 'user', text: transcript, ts: Date.now() }]);
     await queryAssistant(transcript);
   }, [onSync, onNavigate, queryAssistant, speak]);
 
@@ -377,35 +374,51 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     recog.lang = 'en-GB';
 
     recog.onresult = (e: any) => {
-      // Interrupt speaking (both neural and browser TTS)
+      // Interrupt speaking when user starts talking
       if (stateRef.current === 'speaking') {
         speechSynthesis.cancel();
         if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+        setState('listening');
       }
 
-      const last = e.results[e.results.length - 1];
-      const text = last[0].transcript;
+      let finalText = '';
+      let interimText = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interimText += t;
+      }
 
-      if (last.isFinal) {
-        setInterim('');
-        // Wake word check for hands-free mode
-        if (handsFree) {
-          const lower = text.toLowerCase();
-          if (lower.includes('hey stash') || lower.includes('stash')) {
-            const command = lower.replace(/hey\s+stash|stash/i, '').trim();
-            if (command.length > 2) {
-              setState('thinking');
-              handleInput(command);
-            } else {
-              speak("Yes?");
-            }
-          }
-        } else {
+      if (finalText) {
+        // Accumulate into buffer — allows natural pauses without splitting sentences
+        transcriptBufferRef.current += (transcriptBufferRef.current ? ' ' : '') + finalText.trim();
+        setInterim(transcriptBufferRef.current + (interimText ? ' ' + interimText : ''));
+
+        // Auto-submit after 1.5s of silence
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = window.setTimeout(() => {
+          const fullText = transcriptBufferRef.current.trim();
+          transcriptBufferRef.current = '';
+          setInterim('');
+          if (fullText.length < 2) return;
+
           setState('thinking');
-          handleInput(text);
-        }
-      } else {
-        setInterim(text);
+          stateRef.current = 'thinking';
+
+          if (handsFree) {
+            const lower = fullText.toLowerCase();
+            if (lower.includes('hey stash') || lower.includes('stash')) {
+              const command = lower.replace(/hey\s+stash|stash/i, '').trim();
+              if (command.length > 2) handleInput(command);
+              else speak("Yes?");
+            }
+          } else {
+            try { recog.stop(); } catch {}
+            handleInput(fullText);
+          }
+        }, 1500);
+      } else if (interimText) {
+        setInterim(transcriptBufferRef.current + (transcriptBufferRef.current ? ' ' : '') + interimText);
         if (stateRef.current !== 'thinking') setState('listening');
       }
     };
@@ -711,6 +724,8 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       return () => {
         cancelAnimationFrame(animRef.current);
         clearInterval(faceTimerRef.current);
+        clearTimeout(silenceTimerRef.current);
+        transcriptBufferRef.current = '';
         stopCamera();
         stopListening();
         speechSynthesis.cancel();
@@ -952,6 +967,25 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
             </div>
           )}
 
+          {/* Text input */}
+          <div className="px-4 sm:px-8 mb-2">
+            <div className="max-w-2xl mx-auto">
+              <form onSubmit={(e) => { e.preventDefault(); const t = textInput.trim(); if (t) { setTextInput(''); handleInput(t); } }} className="flex gap-2">
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={e => setTextInput(e.target.value)}
+                  placeholder="Type a message..."
+                  className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:border-indigo-500 focus:outline-none text-sm"
+                  disabled={state === 'thinking'}
+                />
+                <button type="submit" disabled={!textInput.trim() || state === 'thinking'} className="px-4 py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm disabled:opacity-30 hover:bg-indigo-500 transition-colors">
+                  Send
+                </button>
+              </form>
+            </div>
+          </div>
+
           {/* Controls */}
           <div className="px-4 sm:px-6 py-4 border-t border-white/5">
             <div className="max-w-2xl mx-auto flex items-center justify-between">
@@ -977,8 +1011,16 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
               {/* Main mic button */}
               <button
                 onClick={() => {
-                  if (state === 'listening') { stopListening(); }
-                  else { startListening(); }
+                  if (state === 'listening') {
+                    clearTimeout(silenceTimerRef.current);
+                    const buffered = transcriptBufferRef.current.trim();
+                    transcriptBufferRef.current = '';
+                    setInterim('');
+                    stopListening();
+                    if (buffered.length > 2) handleInput(buffered);
+                  } else if (state !== 'thinking') {
+                    startListening();
+                  }
                 }}
                 className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
                   state === 'listening'

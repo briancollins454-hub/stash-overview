@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify({
         model: process.env.CLAUDE_MODEL || 'claude-3-haiku-20240307',
-        max_tokens: 400,
+        max_tokens: 800,
         system: system || '',
         messages,
       }),
