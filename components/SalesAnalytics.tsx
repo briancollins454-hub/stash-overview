@@ -168,6 +168,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [includeVat, setIncludeVat] = useState(true);
+  const [keyword, setKeyword] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'grossSales' | 'netSales' | 'quantity' | 'vendor' | 'itemName' | 'profit'>('grossSales');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -187,7 +188,10 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
       let cursor: string | null = null;
       let page = 0;
 
-      const queryFilter = `created_at:>='${dateFrom}T00:00:00Z' AND created_at:<='${dateTo}T23:59:59Z'`;
+      let queryFilter = `created_at:>='${dateFrom}T00:00:00Z' AND created_at:<='${dateTo}T23:59:59Z'`;
+      if (keyword.trim()) {
+        queryFilter += ` AND ${keyword.trim()}`;
+      }
 
       while (hasNextPage) {
         page++;
@@ -224,7 +228,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, keyword]);
 
   // ── Aggregate line items ─────────────────────────────────────────────────────
 
@@ -408,6 +412,10 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         <div className="flex items-center gap-2">
           <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">To</label>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={`text-xs font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+        </div>
+        <div className="flex items-center gap-2 flex-1 min-w-[160px] max-w-xs">
+          <Search className="w-3 h-3 text-gray-400 shrink-0" />
+          <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !loading) fetchData(); }} placeholder="Club, school or keyword..." className={`text-xs font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 w-full ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`} />
         </div>
         <button onClick={fetchData} disabled={loading} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-indigo-700 transition-colors disabled:opacity-50">
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
