@@ -84,7 +84,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '<table style="width:100%;margin-bottom:6px;border-collapse:collapse;"><tr>' +
     '<td style="vertical-align:top;">' +
       '<img src="https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880" style="max-width:200px;margin-bottom:4px;" />' +
-      '<p style="font-family:\'Libre Barcode 39 Text\',cursive;font-size:40px;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
+      '<p style="font-size:28px;font-weight:900;line-height:1;margin:2px 0 8px 0;">#' + order.shopify.orderNumber + '</p>' +
       '<table style="font-size:10px;border-collapse:collapse;">' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Date</td><td>' + orderDate + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Method</td><td>' + shippingMethod + '</td></tr>' +
