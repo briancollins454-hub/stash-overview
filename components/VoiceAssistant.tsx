@@ -1065,13 +1065,18 @@ People visible: ${visibleFaces.current.size || 'unknown'}`;
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Face detection interval
+  // Face detection interval — stop once user is identified (identify once per session)
   useEffect(() => {
-    if (isOpen && faceReady && cameraReady) {
+    if (isOpen && faceReady && cameraReady && (!currentUser || enrolling)) {
       faceTimerRef.current = window.setInterval(runFaceDetection, 800);
       return () => clearInterval(faceTimerRef.current);
+    } else if (currentUser && !enrolling) {
+      // Already identified — clear interval and face overlay
+      clearInterval(faceTimerRef.current);
+      const fc = faceCanvasRef.current;
+      if (fc) { const ctx = fc.getContext('2d'); if (ctx) ctx.clearRect(0, 0, fc.width, fc.height); }
     }
-  }, [isOpen, faceReady, cameraReady, runFaceDetection]);
+  }, [isOpen, faceReady, cameraReady, currentUser, enrolling, runFaceDetection]);
 
   // Start animation when canvas ready
   useEffect(() => {
