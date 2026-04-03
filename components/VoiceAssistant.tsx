@@ -686,7 +686,7 @@ Top risks: ${topRisks.length > 0 ? topRisks.join(' | ') : 'None'}
 Ready to ship: ${readyList.length > 0 ? readyList.join(' | ') : 'Nothing ready'}
 Active clubs: ${topClubs || 'None'}
 ${screenContext}${memoryContext}${sessionMemory}
-${visionContextRef.current ? `\n${visionContextRef.current}\nYou have LIVE continuous vision. You can genuinely see the user right now. React to what you see naturally — mention their expression, if they look busy, tired, happy, etc. Don't announce that you're using vision, just naturally incorporate what you see like a colleague sitting across from them would.` : ''}
+${visionContextRef.current ? `\n--- WHAT YOU CAN SEE RIGHT NOW (your camera feed) ---\n${visionContextRef.current}\n--- END CAMERA FEED ---\nIMPORTANT: You ARE watching the user through a live camera. The observations above are what you can literally see. If asked "can you see me", answer YES and describe what you see from the observations above. Be specific about their appearance, expression, clothing, and surroundings.` : ''}
 
 Now: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (${currentUser.role})` : 'Speaker: unknown'}
@@ -881,12 +881,14 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     // Add vision context to system prompt when camera is active
     const visionLive = visionContextRef.current;
     const hasVision = !!snapshot || !!visionLive;
+    console.log('[VISION] hasVision:', hasVision, '| snapshot:', !!snapshot, '| visionLive:', visionLive || 'empty');
     let activeSystem = system;
-    if (hasVision) {
-      activeSystem += `\n\nVISION: You have been CONTINUOUSLY watching the user through their camera. You can genuinely SEE them right now.`;
-      if (visionLive) activeSystem += `\n\nYour ongoing visual awareness:\n${visionLive}`;
-      if (snapshot) activeSystem += `\n\nA fresh photo is also attached. React naturally to what you see — their expression, appearance, surroundings, energy, body language. Don't describe the image robotically. Just incorporate what you see like a human colleague sitting across from them. If they ask "can you see me", describe what you genuinely see.`;
-      else activeSystem += `\n\nNote: You couldn't capture a photo just now, but you still have your ongoing visual awareness above. Use what you know from your continuous watching.`;
+    if (visionLive) {
+      // Inject live observations as FACTUAL DATA the AI already knows — not as "vision capability"
+      activeSystem += `\n\n--- YOUR CAMERA OBSERVATIONS (you are watching the user right now) ---\n${visionLive}\n--- END OBSERVATIONS ---\nYou CAN see the user. The above is what you are looking at RIGHT NOW through the camera. When asked if you can see them, say YES and describe what you see based on these observations. Mention their appearance, expression, what they're wearing, their surroundings. Be natural and specific.`;
+    }
+    if (snapshot) {
+      activeSystem += `\n\nA live camera photo is also attached to the user's message. Use it along with your observations above to respond naturally about what you see.`;
     }
 
     try {
