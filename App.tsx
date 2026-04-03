@@ -487,16 +487,18 @@ const App: React.FC = () => {
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
             
-            // Merge deco jobs: preserve existing cached jobs (may have fresher status from Status Refresh)
-            // Only overwrite if the freshly-fetched job has a different status (real update) or is brand new
-            const cachedJobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
-            dRecentJobs.forEach(j => {
-              const cached = cachedJobMap.get(j.jobNumber);
-              if (!cached || cached.status !== j.status || cached.itemsProduced !== j.itemsProduced || cached.totalItems !== j.totalItems) {
-                cachedJobMap.set(j.jobNumber, j);
+            // Merge deco jobs: start with API list data, then layer cached, then cloud (highest priority)
+            // Cloud data = status-refreshed jobs saved by any user, most accurate source
+            const jobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
+            dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
+            // Fetch cloud-saved deco jobs (includes status-refreshed data from any device)
+            try {
+              const cloudJobs = await fetchCloudData(apiSettings).then(d => d?.decoJobs || []).catch(() => []);
+              if (cloudJobs.length > 0) {
+                cloudJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
               }
-            });
-            const mergedDecoJobs = Array.from(cachedJobMap.values());
+            } catch {}
+            const mergedDecoJobs = Array.from(jobMap.values());
             setRawDecoJobs(mergedDecoJobs);
             setLocalItem('stash_raw_deco_jobs', mergedDecoJobs).catch(console.error);
 
@@ -1231,6 +1233,8 @@ const App: React.FC = () => {
             setLocalItem('stash_raw_deco_jobs', next).catch(console.error);
             return next;
         });
+        // Persist status-refreshed jobs to cloud so all devices keep accurate statuses
+        saveCloudDecoJobs(apiSettings, updatedJobs).catch(e => console.warn('Failed to save status-refreshed jobs to cloud:', e));
     }
 
     notify('Stash Shop Sync', { body: `Status refresh complete. ${updatedJobs.length} jobs updated.` });
