@@ -179,6 +179,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const lastVisionDescription = useRef<string>('');
   const visionContextRef = useRef<string>('');
   const lastVisionReaction = useRef<number>(0);
+  const speakRef = useRef<(text: string) => Promise<void>>(async () => {});
 
   // Keep refs synced
   useEffect(() => { convoRef.current = convo; }, [convo]);
@@ -375,12 +376,12 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
           const reactions = generateVisualReaction(obs);
           if (reactions) {
             setConvo(prev => [...prev, { role: 'assistant', text: reactions, ts: Date.now() }]);
-            speak(reactions);
+            speakRef.current(reactions);
           }
         }
       }
     } catch {}
-  }, [captureSnapshot, currentUser, speak, generateVisualReaction]);
+  }, [captureSnapshot, currentUser, generateVisualReaction]);
 
   // ─── Tool Resolution (Client-Side) ────────────────────────────
 
@@ -811,6 +812,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     }
     speakFallback(segments.filter(s => s.type === 'speech').map(s => s.text).join(' '));
   }, [muted, handsFree, ttsAvailable, speakFallback, parseSegments, fetchTtsBuffer, playTtsBuffer]);
+  useEffect(() => { speakRef.current = speak; }, [speak]);
 
   // ─── Sound Effects ─────────────────────────────────────────────
   const playNotificationSound = useCallback(() => {
