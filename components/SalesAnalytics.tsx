@@ -272,7 +272,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         const existing = map.get(key);
         if (existing) {
           existing.grossSales += gross;
-          existing.netSales += discounted;
+          existing.netSales += discounted - returnAmount;
           existing.discounts += discount;
           existing.tax += tax;
           existing.cost = existing.cost !== null && totalCost !== null ? existing.cost + totalCost : (existing.cost ?? totalCost);
@@ -285,7 +285,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
             itemName: li.title,
             variant,
             grossSales: gross,
-            netSales: discounted,
+            netSales: discounted - returnAmount,
             discounts: discount,
             tax,
             cost: totalCost,
@@ -321,8 +321,8 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
       if (sortBy === 'vendor') return sortDir === 'asc' ? a.vendor.localeCompare(b.vendor) : b.vendor.localeCompare(a.vendor);
       if (sortBy === 'itemName') return sortDir === 'asc' ? a.itemName.localeCompare(b.itemName) : b.itemName.localeCompare(a.itemName);
       if (sortBy === 'profit') {
-        av = a.cost !== null ? (includeVat ? a.netSales : a.netSales - a.tax) - a.returns - a.cost : -Infinity;
-        bv = b.cost !== null ? (includeVat ? b.netSales : b.netSales - b.tax) - b.returns - b.cost : -Infinity;
+        av = a.cost !== null ? (includeVat ? a.netSales : a.netSales - a.tax) - a.cost : -Infinity;
+        bv = b.cost !== null ? (includeVat ? b.netSales : b.netSales - b.tax) - b.cost : -Infinity;
       } else {
         av = a[sortBy];
         bv = b[sortBy];
@@ -361,14 +361,14 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     const rows = displayed.map(r => {
       const gross = includeVat ? r.grossSales : r.grossSales - r.tax;
       const net = includeVat ? r.netSales : r.netSales - r.tax;
-      const profit = r.cost !== null ? net - r.returns - r.cost : '';
+      const profit = r.cost !== null ? net - r.cost : '';
       return [r.vendor, r.itemName, r.variant, r.quantity, r.refundedQuantity, gross.toFixed(2), r.discounts.toFixed(2), net.toFixed(2), r.tax.toFixed(2), r.returns.toFixed(2), r.cost !== null ? r.cost.toFixed(2) : '', profit !== '' ? (profit as number).toFixed(2) : ''];
     });
 
     // Totals row
     const totalGross = includeVat ? totals.grossSales : totals.grossSales - totals.tax;
     const totalNet = includeVat ? totals.netSales : totals.netSales - totals.tax;
-    const totalProfit = totals.hasCost ? totalNet - totals.returns - totals.cost : '';
+    const totalProfit = totals.hasCost ? totalNet - totals.cost : '';
     rows.push(['TOTAL', '', '', String(totals.quantity), String(totals.refunded), totalGross.toFixed(2), totals.discounts.toFixed(2), totalNet.toFixed(2), totals.tax.toFixed(2), totals.returns.toFixed(2), totals.hasCost ? totals.cost.toFixed(2) : '', totalProfit !== '' ? (totalProfit as number).toFixed(2) : '']);
 
     const csv = [headers.join(','), ...rows.map(r => r.map(escapeCell).join(','))].join('\n');
@@ -526,7 +526,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
               {displayed.map((r, i) => {
                 const gross = v(r.grossSales, r.tax);
                 const net = v(r.netSales, r.tax);
-                const profit = r.cost !== null ? net - r.returns - r.cost : null;
+                const profit = r.cost !== null ? net - r.cost : null;
                 const margin = profit !== null && net > 0 ? (profit / net) * 100 : null;
                 return (
                   <tr key={i} className={`border-t ${isDark ? 'border-gray-700 hover:bg-gray-800/50' : 'border-gray-50 hover:bg-indigo-50/50'} transition-colors`}>
@@ -568,11 +568,11 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
                 <td className={`px-3 py-2 text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>£{fmt(totals.tax)}</td>
                 <td className="px-3 py-2 text-right text-red-500">-£{fmt(totals.returns)}</td>
                 <td className="px-3 py-2 text-right">{totals.hasCost ? `£${fmt(totals.cost)}` : '—'}</td>
-                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.returns - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
-                  {totals.hasCost ? `£${fmt(v(totals.netSales, totals.tax) - totals.returns - totals.cost)}` : '—'}
+                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
+                  {totals.hasCost ? `£${fmt(v(totals.netSales, totals.tax) - totals.cost)}` : '—'}
                 </td>
-                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.returns - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
-                  {totals.hasCost && v(totals.netSales, totals.tax) > 0 ? `${(((v(totals.netSales, totals.tax) - totals.returns - totals.cost) / v(totals.netSales, totals.tax)) * 100).toFixed(1)}%` : '—'}
+                <td className={`px-3 py-2 text-right ${totals.hasCost ? (v(totals.netSales, totals.tax) - totals.cost >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
+                  {totals.hasCost && v(totals.netSales, totals.tax) > 0 ? `${(((v(totals.netSales, totals.tax) - totals.cost) / v(totals.netSales, totals.tax)) * 100).toFixed(1)}%` : '—'}
                 </td>
               </tr>
             </tfoot>
