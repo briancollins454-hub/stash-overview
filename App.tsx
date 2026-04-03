@@ -1172,12 +1172,11 @@ const App: React.FC = () => {
   useEffect(() => {
     if (unifiedOrders.length === 0) return;
     console.log(`[EAN Auto-Map] eanIndex size: ${eanIndex.size}, orders: ${unifiedOrders.length}`);
-    if (eanIndex.size === 0) {
-      console.log('[EAN Auto-Map] No EAN data in index — check reference products / physical stock');
-      return;
-    }
     const results = autoMatch(unifiedOrders, productMappings, eanIndex);
-    console.log(`[EAN Auto-Map] autoMatch returned ${results.length} results, ${results.filter(r => r.isEanMatch).length} EAN matches`);
+    console.log(`[EAN Auto-Map] autoMatch returned ${results.length} total results, ${results.filter(r => r.isEanMatch).length} auto-matches (EAN/SKU)`);
+    if (results.length > 0 && results.filter(r => r.isEanMatch).length === 0) {
+      console.log('[EAN Auto-Map] Non-auto matches found but no exact SKU/EAN matches. Sample:', results.slice(0, 3).map(r => `${r.itemName} → ${r.suggestedDecoItemName} (${r.confidence}, ${r.reason})`));
+    }
     const eanMatches = results.filter(r => r.isEanMatch);
     if (eanMatches.length === 0) return;
 

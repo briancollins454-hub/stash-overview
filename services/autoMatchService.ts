@@ -134,11 +134,26 @@ export function autoMatch(
         const reasons: string[] = [];
         let isEanMatch = false;
 
-        // SKU exact match: high confidence
+        // SKU exact match: same SKU = same product. Auto-apply.
         if (shopifySku && decoSku && shopifySku === decoSku) {
-          score += 0.5;
-          reasons.push('SKU match');
-        } else if (shopifySku && decoSku && (decoSku.includes(shopifySku) || shopifySku.includes(decoSku))) {
+          candidates.push({ decoItem, score: 1.0, reason: 'SKU exact match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
+        }
+        
+        // Also check vendorSku and productCode separately (decoSku uses vendorSku || productCode)
+        const decoVendorSku = (decoItem.vendorSku || '').trim().toLowerCase();
+        const decoProductCode = (decoItem.productCode || '').trim().toLowerCase();
+        if (shopifySku && decoVendorSku && shopifySku === decoVendorSku) {
+          candidates.push({ decoItem, score: 1.0, reason: 'Vendor SKU match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
+        }
+        if (shopifySku && decoProductCode && shopifySku === decoProductCode) {
+          candidates.push({ decoItem, score: 1.0, reason: 'Product code match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
+        }
+        
+        // Partial SKU overlap
+        if (shopifySku && decoSku && (decoSku.includes(shopifySku) || shopifySku.includes(decoSku))) {
           score += 0.3;
           reasons.push('Partial SKU');
         }
