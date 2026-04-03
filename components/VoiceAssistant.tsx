@@ -345,11 +345,16 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
       });
       if (res.ok) {
         setTtsAvailable(true);
-        return await res.arrayBuffer();
+        const buf = await res.arrayBuffer();
+        console.log('[TTS] Fetched buffer:', buf.byteLength, 'bytes');
+        return buf;
       } else if (res.status === 501) {
         setTtsAvailable(false);
       }
-    } catch {}
+      console.warn('[TTS] Fetch failed, status:', res.status);
+    } catch (err) {
+      console.error('[TTS] Fetch error:', err);
+    }
     return null;
   }, []);
 
@@ -379,15 +384,19 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     return new Promise(async (resolve) => {
       try {
         const ctx = getAudioCtx();
+        // Ensure context is running (may have been suspended during long streaming)
+        if (ctx.state === 'suspended') await ctx.resume();
         const audioBuffer = await ctx.decodeAudioData(buffer.slice(0));
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
         source.onended = () => resolve();
         source.start(0);
+        console.log('[TTS] Playing audio buffer, duration:', audioBuffer.duration.toFixed(1) + 's');
         // Store source so we can stop it on interrupt
         audioRef.current = { pause: () => { try { source.stop(); } catch {} } } as any;
-      } catch {
+      } catch (err) {
+        console.error('[TTS] playTtsBuffer error:', err);
         resolve();
       }
     });
@@ -395,8 +404,11 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
 
   const speak = useCallback(async (text: string) => {
     if (muted) { setState('idle'); return; }
+    console.log('[TTS] speak() called, text length:', text.length);
     speechSynthesis.cancel();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    // Stop recognition to prevent it picking up speaker output and interrupting
+    if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
 
     // Parse text into segments (emotes become phonetic sounds)
     const segments = parseSegments(text);
@@ -684,8 +696,8 @@ ${expression && expression !== 'neutral' ? `Speaker appears: ${expression}` : ''
     };
 
     recog.onend = () => {
-      // Auto-restart in hands-free mode
-      if (handsFree && isOpen) {
+      // Auto-restart in hands-free mode — but NOT while speaking or thinking
+      if (handsFree && isOpen && stateRef.current !== 'speaking' && stateRef.current !== 'thinking') {
         try { recog.start(); } catch {}
       } else {
         if (stateRef.current === 'listening') setState('idle');
