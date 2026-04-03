@@ -52,6 +52,7 @@ export interface OrderTableProps {
     onOpenNotes?: (orderId: string, orderNumber: string) => void;
     noteCounts?: Record<string, number>;
     settings?: ApiSettings;
+    eanIndex?: Map<string, string>;
 }
 
 // --- Helper Components ---
@@ -144,7 +145,7 @@ function guessProductionMethod(name: string, sku: string): string {
 
 const OrderTable: React.FC<OrderTableProps> = ({ 
     orders, excludedTags, sortOption, onSortChange, shopifyDomain, onTimelineScan, onBulkScan, onPabblySync, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, onManualLink, onNavigateToJob, onItemJobLink, isBulkScanning, scanProgress, scanCount,
-    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts, settings
+    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts, settings, eanIndex
 }) => {
   const [mappingModalOpen, setMappingModalOpen] = useState(false);
   const [ordersForMapping, setOrdersForMapping] = useState<UnifiedOrder[]>([]);
@@ -664,7 +665,8 @@ const OrderTable: React.FC<OrderTableProps> = ({
               onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId })), learnedPatterns)}
               productMappings={productMappings || {}}
               confirmedMatches={confirmedMatches || {}}
-              itemJobLinks={{}} // We don't strictly need this here for auto-mapping but it's required by props
+              itemJobLinks={{}}
+              eanIndex={eanIndex}
           />
       )}
       <ManualMatchModal />

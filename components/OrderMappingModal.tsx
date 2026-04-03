@@ -13,6 +13,7 @@ interface OrderMappingModalProps {
   confirmedMatches: Record<string, string>;
   productMappings: Record<string, string>;
   itemJobLinks: Record<string, string>;
+  eanIndex?: Map<string, string>;
   onSearchJob: (jobId: string) => Promise<DecoJob | null>;
   onSaveMappings: (mappings: { itemKey: string, decoId: string }[], jobId: string, learnedPatterns?: Record<string, string>) => void;
 }
@@ -49,7 +50,7 @@ const parseItemName = (name: string) => {
 };
 
 const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
-  isOpen, onClose, order, orders, currentDecoJobId, confirmedMatches, productMappings, itemJobLinks, onSearchJob, onSaveMappings
+  isOpen, onClose, order, orders, currentDecoJobId, confirmedMatches, productMappings, itemJobLinks, eanIndex, onSearchJob, onSaveMappings
 }) => {
   const [searchId, setSearchId] = useState(currentDecoJobId || '');
   const [isLoading, setIsLoading] = useState(false);
@@ -115,10 +116,22 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                           if (!isEligibleForMapping(sItem.name, sItem.productType) || sItem.itemStatus === 'fulfilled') return;
 
                           // 1. EAN barcode match — same barcode = same product, instant map
-                          const sEan = (sItem.ean || '').trim();
+                          // Resolve EANs from item's own data OR the enrichment index (reference products + stock scans)
+                          let sEan = (sItem.ean || '').trim();
+                          if ((!sEan || sEan === '-' || sEan.length < 8) && eanIndex) {
+                              const skuKey = (sItem.sku || '').trim().toLowerCase();
+                              if (skuKey && eanIndex.has(skuKey)) sEan = eanIndex.get(skuKey)!;
+                          }
                           if (sEan && sEan !== '-' && sEan.length >= 8) {
                               const eanMatch = job.items.find(d => {
-                                  const dEan = (d.ean || '').trim();
+                                  let dEan = (d.ean || '').trim();
+                                  // Enrich Deco item EAN from index if not present
+                                  if ((!dEan || dEan === '-' || dEan.length < 8) && eanIndex) {
+                                      const vSku = (d.vendorSku || '').trim().toLowerCase();
+                                      const pCode = (d.productCode || '').trim().toLowerCase();
+                                      if (vSku && eanIndex.has(vSku)) dEan = eanIndex.get(vSku)!;
+                                      else if (pCode && eanIndex.has(pCode)) dEan = eanIndex.get(pCode)!;
+                                  }
                                   return dEan && dEan !== '-' && dEan.length >= 8 && dEan === sEan;
                               });
                               if (eanMatch) {
@@ -175,10 +188,20 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
         if (nextMappings[sItem.id]) return; // Skip if already mapped
 
         // EAN barcode match — same barcode = same product
-        const sEan = (sItem.ean || '').trim();
+        let sEan = (sItem.ean || '').trim();
+        if ((!sEan || sEan === '-' || sEan.length < 8) && eanIndex) {
+          const skuKey = (sItem.sku || '').trim().toLowerCase();
+          if (skuKey && eanIndex.has(skuKey)) sEan = eanIndex.get(skuKey)!;
+        }
         if (sEan && sEan !== '-' && sEan.length >= 8) {
           const eanMatch = decoJob.items.find(d => {
-            const dEan = (d.ean || '').trim();
+            let dEan = (d.ean || '').trim();
+            if ((!dEan || dEan === '-' || dEan.length < 8) && eanIndex) {
+              const vSku = (d.vendorSku || '').trim().toLowerCase();
+              const pCode = (d.productCode || '').trim().toLowerCase();
+              if (vSku && eanIndex.has(vSku)) dEan = eanIndex.get(vSku)!;
+              else if (pCode && eanIndex.has(pCode)) dEan = eanIndex.get(pCode)!;
+            }
             return dEan && dEan !== '-' && dEan.length >= 8 && dEan === sEan;
           });
           if (eanMatch) {
@@ -433,8 +456,19 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                                 const dName = d.name.toLowerCase();
                                                 const sSku = (sItem.sku || '').toLowerCase();
                                                 const sName = sItem.name.toLowerCase();
-                                                const sEan = (sItem.ean || '').toLowerCase();
-                                                const dEan = ((d as any).ean || '').toLowerCase();
+                                                
+                                                // Resolve EANs with enrichment index fallback
+                                                let sEan = (sItem.ean || '').trim().toLowerCase();
+                                                if ((!sEan || sEan === '-') && eanIndex) {
+                                                    if (sSku && eanIndex.has(sSku)) sEan = eanIndex.get(sSku)!.toLowerCase();
+                                                }
+                                                let dEan = ((d as any).ean || '').trim().toLowerCase();
+                                                if ((!dEan || dEan === '-') && eanIndex) {
+                                                    const vSku = (d.vendorSku || '').trim().toLowerCase();
+                                                    const pCode = (d.productCode || '').trim().toLowerCase();
+                                                    if (vSku && eanIndex.has(vSku)) dEan = eanIndex.get(vSku)!.toLowerCase();
+                                                    else if (pCode && eanIndex.has(pCode)) dEan = eanIndex.get(pCode)!.toLowerCase();
+                                                }
 
                                                 // Exact SKU match (strongest signal)
                                                 if (sSku && dSku && sSku === dSku) score += 100;

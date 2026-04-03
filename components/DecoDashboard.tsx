@@ -34,6 +34,7 @@ interface DecoDashboardProps {
     onSelectionChange: (ids: Set<string>) => void;
     productMappings?: Record<string, string>;
     confirmedMatches?: Record<string, string>;
+    eanIndex?: Map<string, string>;
 }
 
 const parseItemName = (name: string) => {
@@ -81,7 +82,7 @@ const StatusCell = ({ type, status }: { type: 'ordered' | 'received' | 'produced
 const DecoDashboard: React.FC<DecoDashboardProps> = ({ 
     apiSettings, orders, excludedTags, onManualLink, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, initialSearchId, onClearInitialSearch,
     onTimelineScan, onBulkScan, onNavigateToJob, sortOption, onSortChange, selectedFilterTags,
-    selectedOrderIds, onSelectionChange, productMappings, confirmedMatches
+    selectedOrderIds, onSelectionChange, productMappings, confirmedMatches, eanIndex
 }) => {
     const [viewMode, setViewMode] = useState<'search' | 'list'>('search');
     const [searchId, setSearchId] = useState('');
@@ -234,10 +235,11 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                   orders={bulkMapOrders} 
                   currentDecoJobId={bulkMapJobId} 
                   onSearchJob={onSearchJob} 
-                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings, learnedPatterns)} 
+                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings, learnedPatterns)}
                   productMappings={productMappings || {}}
                   confirmedMatches={confirmedMatches || {}}
                   itemJobLinks={{}}
+                  eanIndex={eanIndex}
                 />
             )}
             <div className={`transition-all duration-500 w-full max-w-4xl flex flex-col md:flex-row gap-3 mb-6 ${jobData || viewMode === 'list' ? 'mt-0' : 'mt-32'}`}>
@@ -420,6 +422,7 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                                     onNavigateToJob={onNavigateToJob}
                                     selectedOrderIds={selectedOrderIds}
                                     onSelectionChange={onSelectionChange}
+                                    eanIndex={eanIndex}
                                 />
                             </div>
                         </div>

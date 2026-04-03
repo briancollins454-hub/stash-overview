@@ -935,6 +935,24 @@ const App: React.FC = () => {
 
   const holidaySet = useMemo(() => getHolidayDateSet(apiSettings.holidayRanges), [apiSettings.holidayRanges]);
 
+  // EAN enrichment index: maps lowercase SKU/productCode → EAN barcode
+  // Built from physical stock scans (highest trust) and reference products (supplier CSVs)
+  const eanIndex = useMemo(() => {
+    const idx = new Map<string, string>();
+    for (const s of physicalStock) {
+      if (s.ean && s.ean.trim().length >= 8 && s.productCode) {
+        idx.set(s.productCode.toLowerCase(), s.ean.trim());
+      }
+    }
+    for (const r of referenceProducts) {
+      if (r.ean && r.ean.trim().length >= 8 && r.productCode) {
+        const key = r.productCode.toLowerCase();
+        if (!idx.has(key)) idx.set(key, r.ean.trim());
+      }
+    }
+    return idx;
+  }, [physicalStock, referenceProducts]);
+
   const calculateWorkingDays = (startStr: string, endStr: string, holidaySet: Set<string>) => {
       const start = new Date(startStr);
       const end = new Date(endStr);
@@ -1990,6 +2008,7 @@ const App: React.FC = () => {
                 onSelectionChange={setSelectedOrderIds}
                 productMappings={productMappings}
                 confirmedMatches={confirmedMatches}
+                eanIndex={eanIndex}
               />
             )}
             {activeTab === 'stock' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Stock Manager Error"><StockManager physicalStock={physicalStock} setPhysicalStock={updatePhysicalStock} returnStock={returnStock} setReturnStock={updateReturnStock} referenceProducts={referenceProducts} setReferenceProducts={updateReferenceProducts} orders={unifiedOrders} availableTags={allAvailableTags} /></ErrorBoundary></Suspense>}
@@ -2023,6 +2042,7 @@ const App: React.FC = () => {
                 onSelectionChange={setSelectedOrderIds}
                 productMappings={productMappings}
                 confirmedMatches={confirmedMatches}
+                eanIndex={eanIndex}
               />
             </Suspense>)}
             {activeTab === 'analyst' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Analyst Error"><ProcessAnalyst orders={unifiedOrders} /></ErrorBoundary></Suspense>}
