@@ -223,6 +223,8 @@ export function autoMatch(
       candidates.sort((a, b) => b.score - a.score);
       if (candidates.length > 0 && candidates[0].score >= 0.4) {
         const best = candidates[0];
+        // High-confidence fuzzy match: if score >= 0.85 AND size matches AND qty matches, auto-apply
+        const isHighConfidence = best.score >= 0.85 && best.reason.includes('Size match') && best.reason.includes('Qty match');
         results.push({
           orderNumber: order.shopify.orderNumber,
           itemId: item.id,
@@ -232,7 +234,7 @@ export function autoMatch(
           suggestedDecoItemName: best.decoItem.name,
           confidence: Math.round(best.score * 100),
           reason: best.reason,
-          isEanMatch: best.isEanMatch,
+          isEanMatch: best.isEanMatch || isHighConfidence,
         });
       }
     }

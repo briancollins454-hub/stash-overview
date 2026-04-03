@@ -44,11 +44,17 @@ const mapDecoStatus = (status: string | number): string => {
 const parseDecoItems = (job: any): DecoItem[] => {
     if (!job || !job.order_lines || !Array.isArray(job.order_lines)) return [];
     const optionNameMap: {[key: number]: string} = {};
+    const optionSkuMap: {[key: number]: string} = {};
     job.order_lines.forEach((line: any) => {
         if (line?.fields) {
             line.fields.forEach((field: any) => {
                 if (field.options) {
-                    field.options.forEach((opt: any) => { if (opt.option_id) optionNameMap[opt.option_id] = opt.code || opt.name || ''; });
+                    field.options.forEach((opt: any) => {
+                        if (opt.option_id) {
+                            optionNameMap[opt.option_id] = opt.code || opt.name || '';
+                            if (opt.sku) optionSkuMap[opt.option_id] = opt.sku;
+                        }
+                    });
                 }
             });
         }
@@ -64,7 +70,7 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 let uniqueName = `${line.product_name || 'Item'}${colorName ? ` - ${colorName}` : ''}${variantName ? ` - ${variantName}` : ''}`;
                 items.push({
                     productCode: line.product_code || '',
-                    vendorSku: wf.vendor_sku || line.sku || '',
+                    vendorSku: wf.vendor_sku || (wf.option_id && optionSkuMap[wf.option_id]) || line.sku || '',
                     name: uniqueName,
                     ean: wf.barcode || wf.ean || potentialEan,
                     quantity: wf.qty_to_fulfill || 0,
