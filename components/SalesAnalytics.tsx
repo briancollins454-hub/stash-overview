@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { ApiSettings } from './SettingsModal';
-import { BarChart3, Download, Loader2, RefreshCw, Filter, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { BarChart3, Download, Loader2, RefreshCw, Filter, ChevronDown, ChevronUp, Search, FileSpreadsheet } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -52,6 +52,10 @@ interface OrderNode {
   id: string;
   name: string;
   createdAt: string;
+  processedAt: string | null;
+  displayFulfillmentStatus: string;
+  displayFinancialStatus: string;
+  totalTaxSet: { shopMoney: Money } | null;
   lineItems: {
     edges: Array<{ node: LineItemNode }>;
     pageInfo: { hasNextPage: boolean; endCursor: string | null };
@@ -105,6 +109,10 @@ query getOrdersFinancial($cursor: String, $query: String) {
         id
         name
         createdAt
+        processedAt
+        displayFulfillmentStatus
+        displayFinancialStatus
+        totalTaxSet { shopMoney { amount currencyCode } }
         lineItems(first: 50) {
           edges {
             node {
@@ -164,6 +172,8 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
   const [sortBy, setSortBy] = useState<'grossSales' | 'netSales' | 'quantity' | 'vendor' | 'itemName' | 'profit'>('grossSales');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [vendorFilter, setVendorFilter] = useState<string>('all');
+  const [paymentDateFrom, setPaymentDateFrom] = useState('');
+  const [paymentDateTo, setPaymentDateTo] = useState('');
   const [fetched, setFetched] = useState(false);
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
@@ -221,14 +231,27 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     }
   }, [dateFrom, dateTo, keyword]);
 
+  // ── Filter orders by payment date (client-side) ──────────────────────────────
+
+  const filteredOrders = useMemo(() => {
+    if (!paymentDateFrom && !paymentDateTo) return orders;
+    return orders.filter(o => {
+      const pd = o.processedAt ? o.processedAt.split('T')[0] : null;
+      if (!pd) return !paymentDateFrom; // show orders without payment date only if no 'from' filter
+      if (paymentDateFrom && pd < paymentDateFrom) return false;
+      if (paymentDateTo && pd > paymentDateTo) return false;
+      return true;
+    });
+  }, [orders, paymentDateFrom, paymentDateTo]);
+
   // ── Aggregate line items ─────────────────────────────────────────────────────
 
   const aggregated = useMemo<AggregatedLineItem[]>(() => {
-    if (orders.length === 0) return [];
+    if (filteredOrders.length === 0) return [];
 
     // Build refund map: lineItem GID → { refunded qty, refund amount }
     const returnMap = new Map<string, { qty: number; amount: number }>();
-    for (const order of orders) {
+    for (const order of filteredOrders) {
       const refunds = (order as any).refunds || [];
       for (const refund of refunds) {
         const edges = refund?.refundLineItems?.edges || [];
@@ -248,7 +271,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     // Aggregate by vendor + item + variant
     const map = new Map<string, AggregatedLineItem>();
 
-    for (const order of orders) {
+    for (const order of filteredOrders) {
       for (const edge of order.lineItems.edges) {
         const li = edge.node;
         const vendor = li.vendor || 'Unknown Vendor';
@@ -294,7 +317,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     }
 
     return Array.from(map.values());
-  }, [orders]);
+  }, [filteredOrders]);
 
   // ── Vendors list ─────────────────────────────────────────────────────────────
 
@@ -375,6 +398,83 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     URL.revokeObjectURL(url);
   }, [displayed, totals, dateFrom, dateTo]);
 
+  // ── Detail CSV Export (per order line) ────────────────────────────────────────
+
+  const exportDetailCSV = useCallback(() => {
+    const headers = ['Order #', 'Order Date', 'Payment Date', 'Fulfillment Status', 'Financial Status', 'Vendor', 'Product', 'Variant', 'Qty', 'Gross (Inc VAT)', 'Discounts', 'VAT (Line)', 'Order Tax', 'Net (Exc VAT)', 'Cost', 'Profit', 'Margin %'];
+
+    // Build refund map for this export
+    const returnMap = new Map<string, { qty: number; amount: number }>();
+    for (const order of filteredOrders) {
+      const refunds = (order as any).refunds || [];
+      for (const refund of refunds) {
+        const edges = refund?.refundLineItems?.edges || [];
+        for (const edge of edges) {
+          const rli = edge.node;
+          const lineItemId = rli?.lineItem?.id;
+          if (lineItemId) {
+            const existing = returnMap.get(lineItemId) || { qty: 0, amount: 0 };
+            existing.qty += rli.quantity || 0;
+            existing.amount += money(rli.priceSet?.shopMoney);
+            returnMap.set(lineItemId, existing);
+          }
+        }
+      }
+    }
+
+    const rows: (string | number)[][] = [];
+    const vendorFilterLower = vendorFilter !== 'all' ? vendorFilter : null;
+    const searchQ = searchTerm ? searchTerm.toLowerCase() : null;
+    const keywordWords = keyword.trim() ? keyword.trim().toLowerCase().split(/\s+/) : null;
+
+    for (const order of filteredOrders) {
+      const orderDate = order.createdAt ? order.createdAt.split('T')[0] : '';
+      const paymentDate = order.processedAt ? order.processedAt.split('T')[0] : '';
+      const fulfillStatus = (order.displayFulfillmentStatus || '').replace(/_/g, ' ');
+      const financialStatus = (order.displayFinancialStatus || '').replace(/_/g, ' ');
+      const orderTax = money(order.totalTaxSet?.shopMoney);
+
+      for (const edge of order.lineItems.edges) {
+        const li = edge.node;
+        const vendor = li.vendor || 'Unknown Vendor';
+        const variant = li.variantTitle || 'Default';
+
+        // Apply same filters as displayed
+        if (vendorFilterLower && vendor !== vendorFilter) continue;
+        if (keywordWords && !keywordWords.every(w => li.title.toLowerCase().includes(w))) continue;
+        if (searchQ && !li.title.toLowerCase().includes(searchQ) && !vendor.toLowerCase().includes(searchQ) && !variant.toLowerCase().includes(searchQ)) continue;
+
+        const gross = money(li.originalTotalSet?.shopMoney);
+        const discount = money(li.totalDiscountSet?.shopMoney);
+        const lineTax = li.taxLines.reduce((s, t) => s + money(t.priceSet?.shopMoney), 0);
+        const discounted = money(li.discountedTotalSet?.shopMoney);
+        const refundData = returnMap.get(li.id) || { qty: 0, amount: 0 };
+        const returnAmount = refundData.amount > 0 ? refundData.amount : (refundData.qty > 0 && li.quantity > 0 ? (gross / li.quantity) * refundData.qty : 0);
+        const net = discounted - returnAmount - lineTax;
+        const unitCost = li.variant?.inventoryItem?.unitCost ? money(li.variant.inventoryItem.unitCost) : null;
+        const totalCost = unitCost !== null ? unitCost * li.quantity : null;
+        const profit = totalCost !== null ? net - totalCost : '';
+        const margin = totalCost !== null && net > 0 ? ((net - totalCost) / net * 100).toFixed(1) : '';
+
+        rows.push([
+          order.name, orderDate, paymentDate, fulfillStatus, financialStatus,
+          vendor, li.title, variant, li.quantity,
+          gross.toFixed(2), discount.toFixed(2), lineTax.toFixed(2), orderTax.toFixed(2),
+          net.toFixed(2), totalCost !== null ? totalCost.toFixed(2) : '', profit !== '' ? (profit as number).toFixed(2) : '', margin
+        ]);
+      }
+    }
+
+    const csv = [headers.join(','), ...rows.map(r => r.map(escapeCell).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sales-detail-${dateFrom}-to-${dateTo}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [filteredOrders, vendorFilter, keyword, searchTerm, dateFrom, dateTo]);
+
   // ── Sort handler ─────────────────────────────────────────────────────────────
 
   const handleSort = (col: typeof sortBy) => {
@@ -396,7 +496,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         <div className="flex items-center gap-2">
           <BarChart3 className="w-4 h-4 text-emerald-500" />
           <h3 className="text-xs font-black uppercase tracking-widest">Sales Analytics</h3>
-          {fetched && <span className="text-[9px] font-bold text-gray-500 uppercase">{orders.length} orders · {aggregated.length} line items</span>}
+          {fetched && <span className="text-[9px] font-bold text-gray-500 uppercase">{filteredOrders.length}{filteredOrders.length !== orders.length ? `/${orders.length}` : ''} orders · {aggregated.length} line items</span>}
         </div>
       </div>
 
@@ -423,7 +523,10 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
           <>
             <div className="h-4 w-px bg-gray-300 dark:bg-gray-600" />
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-emerald-700 transition-colors">
-              <Download className="w-3.5 h-3.5" /> CSV
+              <Download className="w-3.5 h-3.5" /> Summary CSV
+            </button>
+            <button onClick={exportDetailCSV} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-blue-700 transition-colors">
+              <FileSpreadsheet className="w-3.5 h-3.5" /> Detail CSV
             </button>
           </>
         )}
@@ -442,6 +545,20 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
             <Search className="w-3 h-3 text-gray-400" />
             <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search products..." className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 w-full ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200 placeholder-gray-500' : 'bg-white border-gray-200 text-gray-800 placeholder-gray-400'}`} />
           </div>
+          <div className="h-4 w-px bg-gray-300 dark:bg-gray-600" />
+          <div className="flex items-center gap-2">
+            <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Payment From</label>
+            <input type="date" value={paymentDateFrom} onChange={e => setPaymentDateFrom(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[9px] font-black uppercase tracking-widest text-gray-400">Payment To</label>
+            <input type="date" value={paymentDateTo} onChange={e => setPaymentDateTo(e.target.value)} className={`text-[10px] font-bold border rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 ${isDark ? 'bg-gray-800 border-gray-600 text-gray-200' : 'bg-white border-gray-200 text-gray-800'}`} />
+          </div>
+          {(paymentDateFrom || paymentDateTo) && (
+            <button onClick={() => { setPaymentDateFrom(''); setPaymentDateTo(''); }} className="text-[9px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors">
+              Clear
+            </button>
+          )}
         </div>
       )}
 
