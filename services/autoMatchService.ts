@@ -44,6 +44,18 @@ function diceCoefficient(a: string, b: string): number {
 }
 
 /**
+ * Normalizes a SKU for comparison by stripping common prefixes, whitespace, dashes, etc.
+ */
+function normalizeSku(sku: string): string {
+  if (!sku) return '';
+  return sku
+    .toLowerCase()
+    .replace(/^ccc[\s\-]*/i, '')
+    .replace(/[\s\-_.]/g, '')
+    .trim();
+}
+
+/**
  * Extracts size tokens from a string.
  */
 function extractSize(str: string): string | null {
@@ -105,6 +117,12 @@ export function autoMatch(
       const shopifyColour = extractColour(item.name);
       const shopifyEan = resolveEan(item.ean, item.sku, undefined, eanIndex);
 
+      // Debug: log SKU data for matching visibility
+      if (order.deco.items.length > 0) {
+        console.log(`[AutoMatch] Shopify "${item.name}" sku="${item.sku}" ean="${item.ean}" → Deco items:`,
+          order.deco.items.map(d => `"${d.name}" sku="${d.vendorSku}" pc="${d.productCode}" ean="${d.ean}"`).join(' | '));
+      }
+
       // Check learned product mappings first
       if (productMappings) {
         for (const [sPattern, dPattern] of Object.entries(productMappings)) {
@@ -135,14 +153,12 @@ export function autoMatch(
         let isEanMatch = false;
 
         // SKU exact match: same SKU = same product. Auto-apply.
+        const decoVendorSku = (decoItem.vendorSku || '').trim().toLowerCase();
+        const decoProductCode = (decoItem.productCode || '').trim().toLowerCase();
         if (shopifySku && decoSku && shopifySku === decoSku) {
           candidates.push({ decoItem, score: 1.0, reason: 'SKU exact match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
           continue;
         }
-        
-        // Also check vendorSku and productCode separately (decoSku uses vendorSku || productCode)
-        const decoVendorSku = (decoItem.vendorSku || '').trim().toLowerCase();
-        const decoProductCode = (decoItem.productCode || '').trim().toLowerCase();
         if (shopifySku && decoVendorSku && shopifySku === decoVendorSku) {
           candidates.push({ decoItem, score: 1.0, reason: 'Vendor SKU match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
           continue;
@@ -151,11 +167,40 @@ export function autoMatch(
           candidates.push({ decoItem, score: 1.0, reason: 'Product code match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
           continue;
         }
-        
-        // Partial SKU overlap
+
+        // Normalized SKU match: strip prefixes (CCC), spaces, dashes before comparing
+        const normShopSku = normalizeSku(item.sku || '');
+        const normDecoProductCode = normalizeSku(decoItem.productCode || '');
+        const normDecoVendorSku = normalizeSku(decoItem.vendorSku || '');
+        if (normShopSku && normDecoProductCode && normShopSku === normDecoProductCode) {
+          candidates.push({ decoItem, score: 1.0, reason: 'SKU match (normalized)', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
+        }
+        if (normShopSku && normDecoVendorSku && normShopSku === normDecoVendorSku) {
+          candidates.push({ decoItem, score: 1.0, reason: 'Vendor SKU match (normalized)', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+          continue;
+        }
+
+        // Shopify barcode/EAN → Deco SKU cross-check (sometimes Deco vendorSku IS the barcode)
+        const shopifyBarcode = (item.ean || '').trim().toLowerCase();
+        if (shopifyBarcode && shopifyBarcode !== '-' && shopifyBarcode.length >= 8) {
+          if (shopifyBarcode === decoVendorSku || shopifyBarcode === decoProductCode) {
+            candidates.push({ decoItem, score: 1.0, reason: 'Barcode→SKU match', decoId: `${decoId}@@@${idx}`, isEanMatch: true });
+            continue;
+          }
+        }
+
+        // Partial SKU overlap (both raw and normalized)
         if (shopifySku && decoSku && (decoSku.includes(shopifySku) || shopifySku.includes(decoSku))) {
           score += 0.3;
           reasons.push('Partial SKU');
+        } else if (normShopSku && (normDecoProductCode || normDecoVendorSku)) {
+          const partialPC = normDecoProductCode && (normDecoProductCode.includes(normShopSku) || normShopSku.includes(normDecoProductCode));
+          const partialVS = normDecoVendorSku && (normDecoVendorSku.includes(normShopSku) || normShopSku.includes(normDecoVendorSku));
+          if (partialPC || partialVS) {
+            score += 0.3;
+            reasons.push('Partial SKU (normalized)');
+          }
         }
 
         // EAN match (enriched from reference products + stock scans)
