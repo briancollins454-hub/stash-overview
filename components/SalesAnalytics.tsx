@@ -181,10 +181,6 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
 
       // Shopify query syntax: space-separated terms (implicit AND), no explicit AND keyword
       let queryFilter = `created_at:>='${dateFrom}T00:00:00Z' created_at:<='${dateTo}T23:59:59Z'`;
-      if (keyword.trim()) {
-        // Search across order name, customer, tags, etc.
-        queryFilter += ` ${keyword.trim()}`;
-      }
 
       while (hasNextPage) {
         page++;
@@ -222,7 +218,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, keyword]);
+  }, [dateFrom, dateTo]);
 
   // ── Aggregate line items ─────────────────────────────────────────────────────
 
@@ -311,6 +307,11 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
   const displayed = useMemo(() => {
     let items = aggregated;
     if (vendorFilter !== 'all') items = items.filter(i => i.vendor === vendorFilter);
+    // Keyword filter: match all space-separated words against product title
+    if (keyword.trim()) {
+      const words = keyword.trim().toLowerCase().split(/\s+/);
+      items = items.filter(i => words.every(w => i.itemName.toLowerCase().includes(w)));
+    }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
       items = items.filter(i => i.itemName.toLowerCase().includes(q) || i.vendor.toLowerCase().includes(q) || i.variant.toLowerCase().includes(q));
@@ -328,7 +329,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
       }
       return sortDir === 'asc' ? av - bv : bv - av;
     });
-  }, [aggregated, vendorFilter, searchTerm, sortBy, sortDir]);
+  }, [aggregated, vendorFilter, keyword, searchTerm, sortBy, sortDir]);
 
   // ── Totals ───────────────────────────────────────────────────────────────────
 
