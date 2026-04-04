@@ -5,6 +5,12 @@ import {
   Activity, Eye, MessageSquare, BarChart3, Clock, Shield
 } from 'lucide-react';
 import { getItem as getLocalItem, setItem as setLocalItem } from '../services/localStore';
+import {
+  type EmotionalMemory, type AIPersonalityState, type WeatherData,
+  loadEmotionalMemory, saveEmotionalMemory, loadPersonality, savePersonality,
+  recordMood, recordInteraction, addMemory, addInsideJoke, addPreference,
+  updatePersonality, getAmbientTriggers, fetchWeather, buildPersonalityPrompt,
+} from '../services/personalityEngine';
 
 // ─── Types ────────────────────────────────────────────────────────
 interface EnrolledFace {
@@ -143,6 +149,15 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [liveVisionContext, setLiveVisionContext] = useState<string>('');
   const [visionObservation, setVisionObservation] = useState<any>(null);
 
+  // Personality engine state
+  const [emotionalMemory, setEmotionalMemory] = useState<EmotionalMemory | null>(null);
+  const [personality, setPersonality] = useState<AIPersonalityState | null>(null);
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const lastAmbientRef = useRef<number>(0);
+  const lastSilenceStart = useRef<number>(Date.now());
+  const userAbsentRef = useRef<boolean>(false);
+  const sessionStartRef = useRef<number>(Date.now());
+
   // --- Refs ---
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -195,6 +210,60 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       if (saved && saved.length > 0) setConvo(saved.slice(-80));
     });
   }, []);
+
+  // ─── Personality Engine Init ───────────────────────────────────
+  // Load emotional memory when user is identified
+  useEffect(() => {
+    if (currentUser) {
+      loadEmotionalMemory(currentUser.id).then(mem => {
+        const updated = recordInteraction(mem);
+        setEmotionalMemory(updated);
+        saveEmotionalMemory(updated);
+      });
+    }
+  }, [currentUser]);
+
+  // Load AI personality and weather on mount
+  useEffect(() => {
+    loadPersonality().then(p => setPersonality(p));
+    fetchWeather().then(w => { if (w) setWeather(w); });
+    // Refresh weather every hour
+    const weatherTimer = setInterval(() => {
+      fetchWeather().then(w => { if (w) setWeather(w); });
+    }, 3600000);
+    return () => clearInterval(weatherTimer);
+  }, []);
+
+  // Update personality state when conditions change
+  useEffect(() => {
+    if (!personality) return;
+    const now = new Date();
+    const updated = updatePersonality(personality, {
+      stats: { late: stats.late, readyForShipping: stats.readyForShipping, unfulfilled: stats.unfulfilled },
+      userMood: expression || undefined,
+      hour: now.getHours(),
+      dayOfWeek: now.getDay(),
+      streak: emotionalMemory?.relationship.streak,
+    });
+    if (updated.mood.primary !== personality.mood.primary || Math.abs(updated.energy - personality.energy) > 0.1) {
+      setPersonality(updated);
+      savePersonality(updated);
+    }
+  }, [stats.late, stats.readyForShipping, stats.unfulfilled, expression]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Record user mood from expression changes
+  useEffect(() => {
+    if (expression && expression !== 'neutral' && emotionalMemory) {
+      const moodMap: Record<string, string> = {
+        happy: 'happy', sad: 'stressed', angry: 'frustrated', surprised: 'surprised',
+        disgusted: 'frustrated', fearful: 'stressed', neutral: 'neutral',
+      };
+      const mood = moodMap[expression] || 'neutral';
+      const updated = recordMood(emotionalMemory, mood, expression);
+      setEmotionalMemory(updated);
+      // Don't save on every expression change — debounced by vision polling
+    }
+  }, [expression]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Knowledge Base / RAG Helpers ──────────────────────────────
   const storeKnowledge = useCallback(async (text: string, category: string, metadata?: Record<string, any>) => {
@@ -686,13 +755,14 @@ Top risks: ${topRisks.length > 0 ? topRisks.join(' | ') : 'None'}
 Ready to ship: ${readyList.length > 0 ? readyList.join(' | ') : 'Nothing ready'}
 Active clubs: ${topClubs || 'None'}
 ${screenContext}${memoryContext}${sessionMemory}
+${personality ? buildPersonalityPrompt(personality, emotionalMemory, weather) : ''}
 ${visionContextRef.current ? `\n--- WHAT YOU CAN SEE RIGHT NOW (your camera feed) ---\n${visionContextRef.current}\n--- END CAMERA FEED ---\nIMPORTANT: You ARE watching the user through a live camera. The observations above are what you can literally see. If asked "can you see me", answer YES and describe what you see from the observations above. Be specific about their appearance, expression, clothing, and surroundings.` : ''}
 
 Now: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (${currentUser.role})` : 'Speaker: unknown'}
 ${expression && expression !== 'neutral' ? `Expression: ${expression}` : ''}
 Visible: ${visibleFaces.current.size || 'unknown'}`;
-  }, [stats, orders, currentUser, expression, activeTab, lastConversationSummary]);
+  }, [stats, orders, currentUser, expression, activeTab, lastConversationSummary, personality, emotionalMemory, weather]);
 
   // ─── Speech Synthesis ──────────────────────────────────────────
   const [ttsAvailable, setTtsAvailable] = useState<boolean | null>(null);
@@ -1078,6 +1148,27 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
       // Store interaction in knowledge base (fire and forget)
       storeKnowledge(`Q: ${userMsg}\nA: ${cleanText}`, 'conversations', { user: currentUser?.name, session: sessionId });
+
+      // Update emotional memory with interaction context
+      if (emotionalMemory) {
+        let mem = { ...emotionalMemory };
+        // Detect laughter / humor
+        if (cleanText.includes('*laughs*') || cleanText.includes('*chuckles*') || userMsg.toLowerCase().includes('haha') || userMsg.toLowerCase().includes('lol')) {
+          const jokeContext = userMsg.length < 80 ? userMsg : userMsg.slice(0, 60) + '...';
+          mem = addInsideJoke(mem, jokeContext);
+        }
+        // Detect preferences from questions
+        const lowerMsg = userMsg.toLowerCase();
+        if (lowerMsg.includes('always') || lowerMsg.includes('prefer') || lowerMsg.includes('usually')) {
+          mem = addPreference(mem, userMsg.slice(0, 80));
+        }
+        // Record the current mood from expression
+        if (expression) {
+          mem = recordMood(mem, expression === 'happy' ? 'happy' : expression === 'sad' ? 'stressed' : 'neutral', expression, userMsg.slice(0, 40));
+        }
+        setEmotionalMemory(mem);
+        saveEmotionalMemory(mem);
+      }
 
     } catch (e: any) {
       console.error('Agent error, trying fallback:', e);
@@ -1696,6 +1787,8 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
         // Save conversation summary on close
         storeConversationSummary();
+        // Save emotional memory on close
+        if (emotionalMemory) saveEmotionalMemory(emotionalMemory);
       };
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1734,6 +1827,47 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
   useEffect(() => {
     if (convo.length > 0) setLocalItem('stash_ai_conversation', convo.slice(-80));
   }, [convo]);
+
+  // ─── Ambient Consciousness ──────────────────────────────────────
+  // AI occasionally speaks unprompted — reacts to silence, time, data changes
+  useEffect(() => {
+    if (!isOpen || !personality) return;
+    const ambientTimer = setInterval(() => {
+      // Don't interrupt active states
+      if (stateRef.current !== 'idle') return;
+
+      // Detect if user left/returned via vision
+      const visionObs = visionObservation;
+      const wasAbsent = userAbsentRef.current;
+      const isPresent = visionObs?.people_count > 0;
+      const justReturned = wasAbsent && isPresent;
+      userAbsentRef.current = !isPresent;
+
+      // Calculate silence duration
+      const lastMsgTs = convoRef.current.length > 0 ? convoRef.current[convoRef.current.length - 1].ts : sessionStartRef.current;
+      const silenceSeconds = (Date.now() - lastMsgTs) / 1000;
+
+      const trigger = getAmbientTriggers({
+        silenceSeconds,
+        stats: { late: statsRef.current.late, readyForShipping: statsRef.current.readyForShipping, unfulfilled: statsRef.current.unfulfilled, dueSoon: statsRef.current.dueSoon },
+        hour: new Date().getHours(),
+        dayOfWeek: new Date().getDay(),
+        personality,
+        userPresent: isPresent,
+        userJustReturned: justReturned,
+        lastAmbientTs: lastAmbientRef.current,
+        userName: currentUser?.name,
+      });
+
+      if (trigger) {
+        lastAmbientRef.current = Date.now();
+        setConvo(prev => [...prev, { role: 'assistant', text: trigger.message, ts: Date.now() }]);
+        speakRef.current(trigger.message);
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(ambientTimer);
+  }, [isOpen, personality, currentUser, visionObservation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Proactive Alerts ──────────────────────────────────────────
   useEffect(() => {
