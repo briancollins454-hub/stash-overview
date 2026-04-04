@@ -148,6 +148,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const [conversationSummaryCache, setConversationSummaryCache] = useState<string | null>(null);
   const [liveVisionContext, setLiveVisionContext] = useState<string>('');
   const [visionObservation, setVisionObservation] = useState<any>(null);
+  const [consciousnessContext, setConsciousnessContext] = useState<string | null>(null);
 
   // Personality engine state
   const [emotionalMemory, setEmotionalMemory] = useState<EmotionalMemory | null>(null);
@@ -195,6 +196,9 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const lastVisionDescription = useRef<string>('');
   const visionContextRef = useRef<string>('');
   const lastVisionReaction = useRef<number>(0);
+  const awarenessBuffer = useRef<any[]>([]); // Rolling buffer of last ~30 observations (~4 min)
+  const learningTimerRef = useRef<number>(0);
+  const lastLearnTs = useRef<number>(0);
   const speakRef = useRef<(text: string) => Promise<void>>(async () => {});
 
   // Keep refs synced
@@ -213,7 +217,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   }, []);
 
   // ─── Personality Engine Init ───────────────────────────────────
-  // Load emotional memory when user is identified
+  // Load emotional memory and consciousness when user is identified
   useEffect(() => {
     if (currentUser) {
       loadEmotionalMemory(currentUser.id).then(mem => {
@@ -221,8 +225,9 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
         setEmotionalMemory(updated);
         saveEmotionalMemory(updated);
       });
+      loadConsciousness(currentUser.name);
     }
-  }, [currentUser]);
+  }, [currentUser, loadConsciousness]);
 
   // Load AI personality and weather on mount
   useEffect(() => {
@@ -349,6 +354,149 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     return null;
   }, []);
 
+  // ─── Consciousness: Load what the AI knows about this person ──
+  const loadConsciousness = useCallback(async (userName: string) => {
+    try {
+      const res = await fetch('/api/ai-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_consciousness', user_name: userName }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.consciousness) {
+          setConsciousnessContext(data.consciousness);
+          console.log('[CONSCIOUSNESS] Loaded knowledge for', userName);
+        }
+      }
+    } catch (e) { console.log('[CONSCIOUSNESS] Load failed:', e); }
+  }, []);
+
+  // ─── Learning Engine: Extract and store insights ──────────────
+  const triggerLearning = useCallback(async () => {
+    if (!currentUser) return;
+    const now = Date.now();
+    if (now - lastLearnTs.current < 300_000) return; // Max once per 5 minutes
+    lastLearnTs.current = now;
+
+    try {
+      // Get existing knowledge to avoid duplicates
+      const [knowledgeRes, patternsRes] = await Promise.all([
+        fetch('/api/ai-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get_knowledge', entity: currentUser.name }),
+        }),
+        fetch('/api/ai-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get_patterns', user_name: currentUser.name, min_confidence: 0.3 }),
+        }),
+      ]);
+
+      const existingKnowledge = knowledgeRes.ok ? (await knowledgeRes.json()).knowledge || [] : [];
+      const existingPatterns = patternsRes.ok ? (await patternsRes.json()).patterns || [] : [];
+
+      const res = await fetch('/api/ai-learn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_name: currentUser.name,
+          conversation: convoRef.current.filter(m => m.role !== 'system' && m.role !== 'tool').slice(-30),
+          observations: awarenessBuffer.current,
+          existing_knowledge: existingKnowledge,
+          existing_patterns: existingPatterns,
+          session_id: sessionId,
+        }),
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        console.log('[LEARNING]', result);
+        // Reload consciousness after learning
+        if (result.facts_stored > 0 || result.patterns_stored > 0) {
+          loadConsciousness(currentUser.name);
+        }
+      }
+    } catch (e) { console.log('[LEARNING] Failed:', e); }
+  }, [currentUser, sessionId, loadConsciousness]);
+
+  // ─── Awareness Summary: Compress observation buffer into context ──
+  const buildAwarenessSummary = useCallback((): string => {
+    const buf = awarenessBuffer.current;
+    if (buf.length === 0) return '';
+
+    const latest = buf[buf.length - 1];
+    const primary = latest.people?.[0];
+    if (!primary) return '';
+
+    // Current scene
+    const parts: string[] = [];
+    parts.push(`Scene: ${primary.name || 'Someone'} is ${primary.activity || 'at the desk'}. Posture: ${primary.posture || 'upright'}. Expression: ${primary.expression || 'neutral'}. Gaze: ${primary.gaze || 'forward'}.`);
+
+    if (primary.gesture && primary.gesture !== 'none') {
+      parts.push(`Gesture: ${primary.gesture}.`);
+    }
+
+    // Objects visible
+    const objects = latest.objects?.filter((o: any) => o.item);
+    if (objects?.length > 0) {
+      parts.push(`Objects: ${objects.map((o: any) => `${o.item} (${o.location || 'nearby'})`).join(', ')}.`);
+    }
+
+    // Environment
+    if (latest.environment) {
+      const env = latest.environment;
+      if (env.background_activity && env.background_activity !== 'none') {
+        parts.push(`Background: ${env.background_activity}.`);
+      }
+    }
+
+    // Interaction
+    if (latest.interaction && latest.interaction !== 'none') {
+      parts.push(`Interaction: ${latest.interaction}.`);
+    }
+
+    // Body language read
+    if (latest.body_language_read) {
+      parts.push(`Read: ${latest.body_language_read}`);
+    }
+
+    // People count
+    const totalPeople = latest.people?.length || 0;
+    if (totalPeople > 1) {
+      const others = latest.people.slice(1).map((p: any) => `${p.name || 'someone'} (${p.position || 'nearby'}, ${p.expression || 'neutral'})`).join(', ');
+      parts.push(`Also present: ${others}.`);
+    }
+
+    // Trend from buffer — what's been happening over the last few minutes
+    if (buf.length > 3) {
+      const changes = buf.slice(-5).map((o: any) => o.significant_change).filter((c: string) => c && c !== 'none');
+      if (changes.length > 0) {
+        parts.push(`Recent changes: ${changes.slice(-3).join('. ')}.`);
+      }
+
+      // Mood trend
+      const recentExpressions = buf.slice(-6).map((o: any) => o.people?.[0]?.expression).filter(Boolean);
+      const unique = [...new Set(recentExpressions)];
+      if (unique.length > 1) {
+        parts.push(`Mood trend: ${recentExpressions.join(' \u2192 ')}.`);
+      }
+
+      // Duration awareness
+      const firstTs = buf[0].timestamp;
+      const lastTs = buf[buf.length - 1].timestamp;
+      if (firstTs && lastTs) {
+        const durationMin = Math.round((lastTs - firstTs) / 60000);
+        if (durationMin > 10) {
+          parts.push(`They've been here for about ${durationMin} minutes.`);
+        }
+      }
+    }
+
+    return parts.join(' ');
+  }, []);
+
   // ─── Camera Snapshot for Vision ────────────────────────────────
   // Captures a JPEG frame from the live camera feed as base64 data URL
   const captureSnapshot = useCallback((): string | null => {
@@ -406,22 +554,26 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     return null;
   }, []);
 
-  // ─── Live Vision Loop: Continuous camera awareness ─────────────
-  // Polls the camera every ~8 seconds, sends frame to GPT-4o-mini for a brief observation.
-  // Builds up a running visual context that feeds into every chat response.
+  // ─── Live Vision Loop: Deep scene awareness ─────────────────
+  // Polls every ~8s, returns rich observation: people, objects, gestures,
+  // body language, environment. Feeds awareness buffer for temporal understanding.
   const pollVision = useCallback(async () => {
     if (stateRef.current === 'thinking' || stateRef.current === 'speaking' || stateRef.current === 'tool_calling') return;
     const snapshot = captureSnapshot();
     if (!snapshot) { console.log('[VISION POLL] No snapshot available'); return; }
-    console.log('[VISION POLL] Sending frame to /api/ai-vision...');
 
     try {
+      // Build previous observation context from awareness buffer
+      const prevObs = awarenessBuffer.current.length > 0
+        ? JSON.stringify(awarenessBuffer.current[awarenessBuffer.current.length - 1])
+        : undefined;
+
       const res = await fetch('/api/ai-vision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: snapshot,
-          previous_observation: lastVisionDescription.current || undefined,
+          previous_observation: prevObs,
           user_name: currentUser?.name || undefined,
         }),
       });
@@ -429,22 +581,26 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       const obs = await res.json();
       if (obs.error) { console.log('[VISION POLL] API error:', obs.error); return; }
 
-      console.log('[VISION POLL] Observation:', obs);
+      console.log('[VISION POLL] Deep observation:', obs);
       setVisionObservation(obs);
-      lastVisionDescription.current = obs.description || '';
-      const ctx = `[LIVE VISION — what you can see RIGHT NOW] People: ${obs.people_count || 0}. Expression: ${obs.expression || 'unknown'}. Gaze: ${obs.gaze || 'unknown'}. Scene: ${obs.description || 'unclear'}${obs.change && obs.change !== 'none' ? `. Change: ${obs.change}` : ''}`;
-      visionContextRef.current = ctx;
-      setLiveVisionContext(ctx);
+      lastVisionDescription.current = obs.description || obs.body_language_read || '';
+
+      // Push to awareness buffer (keep last 30 = ~4 minutes)
+      obs.timestamp = Date.now();
+      awarenessBuffer.current.push(obs);
+      if (awarenessBuffer.current.length > 30) awarenessBuffer.current.shift();
+
+      // Build rich awareness context from buffer
+      const awareness = buildAwarenessSummary();
+      visionContextRef.current = awareness || `[LIVE VISION] People: ${obs.people_count || 0}. Expression: ${obs.expression || 'unknown'}. Scene: ${obs.description || 'unclear'}`;
+      setLiveVisionContext(visionContextRef.current);
 
       // Proactive reaction when something notable happens
       if (obs.notable && stateRef.current === 'idle') {
         const now = Date.now();
-        const cooldown = 45_000; // Don't react more than once per 45 seconds
+        const cooldown = 45_000;
         if (now - lastVisionReaction.current > cooldown) {
           lastVisionReaction.current = now;
-          // Feed the observation back to the AI for a natural reaction
-          const reactPrompt = `You just noticed something through the camera: "${obs.description}". ${obs.change !== 'none' ? `Change from before: ${obs.change}.` : ''} React to this naturally and briefly — one short sentence, spoken aloud. Be yourself.`;
-          // Use the lightweight approach — just speak a reaction based on the observation
           const reactions = generateVisualReaction(obs);
           if (reactions) {
             setConvo(prev => [...prev, { role: 'assistant', text: reactions, ts: Date.now() }]);
@@ -452,8 +608,25 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
           }
         }
       }
+
+      // Store notable observations to DB (if significant)
+      if (obs.notable && currentUser) {
+        fetch('/api/ai-memory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'store_observation',
+            user_name: currentUser.name,
+            observation_type: obs.interaction !== 'none' ? 'interaction' : (obs.people?.[0]?.gesture !== 'none' ? 'gesture' : 'expression'),
+            detail: obs.body_language_read || obs.description || obs.significant_change || '',
+            context: { people: obs.people, objects: obs.objects, environment: obs.environment },
+            mood_at_time: obs.expression || obs.people?.[0]?.expression || null,
+            session_id: sessionId,
+          }),
+        }).catch(() => {});
+      }
     } catch {}
-  }, [captureSnapshot, currentUser, generateVisualReaction]);
+  }, [captureSnapshot, currentUser, generateVisualReaction, buildAwarenessSummary, sessionId]);
 
   // ─── Tool Resolution (Client-Side) ────────────────────────────
 
@@ -758,13 +931,14 @@ Ready to ship: ${readyList.length > 0 ? readyList.join(' | ') : 'Nothing ready'}
 Active clubs: ${topClubs || 'None'}
 ${screenContext}${memoryContext}${sessionMemory}
 ${personality ? buildPersonalityPrompt(personality, emotionalMemory, weather) : ''}
-${visionContextRef.current ? `\n--- WHAT YOU CAN SEE RIGHT NOW (your camera feed) ---\n${visionContextRef.current}\n--- END CAMERA FEED ---\nIMPORTANT: You ARE watching the user through a live camera. The observations above are what you can literally see. If asked "can you see me", answer YES and describe what you see from the observations above. Be specific about their appearance, expression, clothing, and surroundings.` : ''}
+${consciousnessContext ? `\n--- WHAT YOU KNOW ABOUT ${(currentUser?.name || 'THIS PERSON').toUpperCase()} ---\nYou have learned these things from past conversations and observations. Use them naturally — don't recite them, but let them inform how you interact:\n${consciousnessContext}\n--- END KNOWLEDGE ---` : ''}
+${visionContextRef.current ? `\n--- YOUR EYES (live camera feed, updated every 8 seconds) ---\n${visionContextRef.current}\n--- END VISION ---\nYou ARE watching through a live camera. You can see people, objects, gestures, posture, and body language. When asked "can you see me", say YES and describe what you see. Notice and react to changes — someone picking up a coffee, rubbing their face, looking stressed, another person walking in. Your observations are real and current.` : ''}
 
 Now: ${dayName}, ${now.toLocaleString('en-GB')}
 ${currentUser ? `Speaking to: ${currentUser.name} (${currentUser.role})` : 'Speaker: unknown'}
 ${expression && expression !== 'neutral' ? `Expression: ${expression}` : ''}
 Visible: ${visibleFaces.current.size || 'unknown'}`;
-  }, [stats, orders, currentUser, expression, activeTab, lastConversationSummary, personality, emotionalMemory, weather]);
+  }, [stats, orders, currentUser, expression, activeTab, lastConversationSummary, personality, emotionalMemory, weather, consciousnessContext]);
 
   // ─── Speech Synthesis ──────────────────────────────────────────
   const [ttsAvailable, setTtsAvailable] = useState<boolean | null>(null);
@@ -1786,9 +1960,25 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         storeConversationSummary();
         // Save emotional memory on close
         if (emotionalMemory) saveEmotionalMemory(emotionalMemory);
+        // Run learning engine on close — extract insights from this session
+        triggerLearning();
+        // Clear periodic learning timer
+        if (learningTimerRef.current) clearInterval(learningTimerRef.current);
       };
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Periodic learning — extract insights every 10 minutes during long sessions
+  useEffect(() => {
+    if (isOpen && currentUser) {
+      learningTimerRef.current = window.setInterval(() => {
+        if (convoRef.current.length >= 10 || awarenessBuffer.current.length >= 15) {
+          triggerLearning();
+        }
+      }, 600_000); // Every 10 minutes
+      return () => { if (learningTimerRef.current) clearInterval(learningTimerRef.current); };
+    }
+  }, [isOpen, currentUser, triggerLearning]);
 
   // Face detection interval — always run while panel is open for continuous recognition,
   // expression tracking, and detecting new people. Slower interval after initial recognition.

@@ -1,9 +1,9 @@
 export const config = { runtime: 'edge' };
 
-// ─── Live Vision Watch: Continuous camera awareness via GPT-4o-mini ──────
-// Lightweight endpoint called every ~8s to analyze what the AI sees.
-// Returns a brief JSON observation — NOT a full conversation response.
-// Uses gpt-4o-mini for speed and cost (vision-capable, very fast).
+// ─── Deep Vision: Full scene awareness via GPT-4o-mini ────────────
+// Polls every ~8s. Returns rich structured observation: people, objects,
+// gestures, body language, environment, interactions. Feeds the AI's
+// consciousness system for genuine spatial/social awareness.
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
@@ -27,8 +27,8 @@ export default async function handler(req: Request) {
     }
 
     const previousContext = previous_observation
-      ? `\nYour previous observation was: "${previous_observation}"\nNote any CHANGES from what you saw before.`
-      : '';
+      ? `\nYour PREVIOUS observation was:\n${previous_observation}\nCompare carefully — report what CHANGED. If nothing changed, say so.`
+      : '\nThis is your FIRST observation. Describe everything you see in detail.';
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -38,27 +38,54 @@ export default async function handler(req: Request) {
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        max_tokens: 150,
+        max_tokens: 350,
         temperature: 0.3,
         messages: [
           {
             role: 'system',
-            content: `You are a visual observer for an AI assistant. Analyze the camera frame and return a brief JSON observation. Be specific about what you see — this feeds into a conversational AI that reacts to the person naturally.${previousContext}
+            content: `You are the eyes of a conscious AI assistant. You observe a live camera feed every 8 seconds. Your observations power an AI that genuinely understands its surroundings — people, objects, gestures, body language, activities, and environment changes.
 
-Return ONLY valid JSON with these fields:
+Be SPECIFIC and OBSERVANT. You're not just detecting faces — you're reading the room. Notice posture shifts, hand gestures, objects being picked up or put down, clothing details, lighting changes, other people in the background, what's on screens, items on desks.${previousContext}
+${user_name ? `The main person's name is ${user_name}.` : ''}
+
+Return ONLY valid JSON:
 {
-  "people_count": number,
-  "expression": "happy|neutral|focused|tired|surprised|confused|stressed|amused|bored",
-  "gaze": "at_camera|away|down|phone",
-  "description": "Brief natural description of what you see — person, clothing, setting, posture, anything notable",
-  "change": "What changed since last observation, or 'none' if nothing notable",
-  "notable": true/false — true if something interesting happened worth commenting on (big expression change, left/returned, doing something unusual, looking stressed, laughing, etc)
-}${user_name ? `\nThe person's name is ${user_name}.` : ''}`,
+  "people": [
+    {
+      "name": "${user_name || 'unknown'}",
+      "position": "center|left|right|background",
+      "posture": "upright|leaning_forward|leaning_back|standing|hunched|relaxed",
+      "expression": "happy|neutral|focused|tired|surprised|confused|stressed|amused|bored|annoyed|thoughtful",
+      "gaze": "at_camera|at_screen|away|down|phone|talking_to_someone",
+      "gesture": "none|pointing|typing|writing|drinking|eating|on_phone|waving|rubbing_face|arms_crossed|hands_on_head|fidgeting",
+      "activity": "Brief description of what they're doing",
+      "clothing_note": "Brief notable clothing detail or 'unchanged'"
+    }
+  ],
+  "objects": [
+    {"item": "coffee mug|phone|headphones|etc", "location": "desk|hand|etc", "new": true}
+  ],
+  "environment": {
+    "lighting": "bright|dim|natural|artificial|mixed",
+    "setting": "office|desk|meeting_room|etc",
+    "background_activity": "none|people_walking|conversation_nearby|etc"
+  },
+  "interaction": "none|talking_to_camera|talking_to_someone_else|on_a_call|presenting|showing_something",
+  "body_language_read": "One sentence interpreting the overall body language and mood — what does the scene FEEL like?",
+  "significant_change": "What specifically changed since last observation, or 'none'",
+  "notable": true/false
+}
+
+Rules:
+- "objects" array: only list objects you can actually SEE. Empty array if nothing notable.
+- "notable" = true when: big expression/posture shift, person arrived/left, picked up an object, started a new activity, someone else appeared, environment changed significantly
+- Keep "body_language_read" natural and insightful — "He looks deep in thought, slightly tense" not "neutral posture detected"
+- If multiple people are visible, add entries to the "people" array`,
           },
           {
             role: 'user',
             content: [
-              { type: 'text', text: 'What do you see right now?' },
+              { type: 'text', text: 'Observe this frame. What do you see?' },
               {
                 type: 'image_url',
                 image_url: {
@@ -80,14 +107,29 @@ Return ONLY valid JSON with these fields:
     const data = await resp.json();
     const content = data.choices?.[0]?.message?.content || '{}';
 
-    // Parse the JSON observation (handle markdown-wrapped JSON)
     let observation;
     try {
       const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
       observation = JSON.parse(cleaned);
     } catch {
-      observation = { description: content, expression: 'neutral', notable: false, change: 'none', people_count: 0, gaze: 'unknown' };
+      observation = {
+        people: [{ name: user_name || 'unknown', expression: 'neutral', posture: 'upright', gaze: 'unknown', gesture: 'none', activity: content, position: 'center', clothing_note: '' }],
+        objects: [],
+        environment: { lighting: 'unknown', setting: 'unknown', background_activity: 'none' },
+        interaction: 'none',
+        body_language_read: content,
+        significant_change: 'none',
+        notable: false,
+      };
     }
+
+    // Backward compatibility — flatten primary person fields for existing code paths
+    const primary = observation.people?.[0] || {};
+    observation.people_count = observation.people?.length || 0;
+    observation.expression = primary.expression || 'neutral';
+    observation.gaze = primary.gaze || 'unknown';
+    observation.description = observation.body_language_read || primary.activity || '';
+    observation.change = observation.significant_change || 'none';
 
     return new Response(JSON.stringify(observation), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
