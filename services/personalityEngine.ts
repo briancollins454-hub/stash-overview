@@ -384,7 +384,7 @@ export function getAmbientTriggers(context: {
       `Oh, ${name}'s back. Miss me?`,
       `There you are. I was starting to get bored.`,
       `Welcome back. Nothing burned down while you were gone.`,
-      `*perks up* Ah, the prodigal returns.`,
+      `Ah, the prodigal returns.`,
       `Back already? Felt like ages. Well... seconds for me, ages for you probably.`,
     ];
     return { type: 'return', message: options[Math.floor(Math.random() * options.length)], priority: 7 };
@@ -394,7 +394,7 @@ export function getAmbientTriggers(context: {
   if (userPresent && silenceSeconds > 300 && timeSinceLastAmbient > 300) {
     if (stats.late > 5) {
       const options = [
-        `*mutters* ...${stats.late} overdue. Could be worse. Could also be a lot better.`,
+        `...${stats.late} overdue. Could be worse. Could also be a lot better.`,
         `Still thinking about those ${stats.late} overdue orders. They're not going to sort themselves.`,
         `You know what would be nice? If the overdue count went down instead of me just staring at it.`,
       ];
@@ -404,7 +404,7 @@ export function getAmbientTriggers(context: {
     if (stats.readyForShipping > 3) {
       const options = [
         `Just noting — ${stats.readyForShipping} orders sitting there ready to ship. Whenever you're ready.`,
-        `*taps dashboard* ${stats.readyForShipping} ready to go. Just saying.`,
+        `${stats.readyForShipping} ready to go. Just saying.`,
       ];
       return { type: 'data', message: options[Math.floor(Math.random() * options.length)], priority: 4 };
     }
@@ -412,8 +412,7 @@ export function getAmbientTriggers(context: {
     // Pure vibe comments
     if (personality.energy > 0.6) {
       const vibeOptions = [
-        "You've gone quiet. Deep in thought or just ignoring me?",
-        "*hums quietly to self*",
+        "Hmm. You've gone quiet. Deep in thought or just ignoring me?",
         "I'm here if you need me. Just... existing.",
         "The silence is actually quite nice. Don't tell anyone I said that.",
       ];
@@ -429,7 +428,7 @@ export function getAmbientTriggers(context: {
     return { type: 'time', message: "Five o'clock. Another day survived. Well done us.", priority: 3 };
   }
   if (dayOfWeek === 5 && hour === 16 && timeSinceLastAmbient > 600) {
-    return { type: 'time', message: "*stretches* Friday at four. The finish line's in sight, mate.", priority: 4 };
+    return { type: 'time', message: "Right then... Friday at four. The finish line's in sight, mate.", priority: 4 };
   }
 
   // Monday morning special
@@ -439,7 +438,7 @@ export function getAmbientTriggers(context: {
 
   // Operational concern (high urgency)
   if (stats.late > 15 && timeSinceLastAmbient > 180) {
-    return { type: 'data', message: `*winces* ${stats.late} overdue now. That number's climbing and I don't like it.`, priority: 8 };
+    return { type: 'data', message: `Oof. ${stats.late} overdue now. That number's climbing and I don't like it.`, priority: 8 };
   }
 
   // Due soon warnings

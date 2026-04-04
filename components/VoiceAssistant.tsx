@@ -387,7 +387,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       return "You look stressed, mate. What's going on?";
     }
     if (change.includes('laugh') || change.includes('smil') || (expr === 'happy' && change !== 'none')) {
-      return "*chuckles* Good to see you smiling.";
+      return "Good to see you smiling.";
     }
     if (expr === 'tired' && change !== 'none') {
       return "You look knackered. Time for a coffee?";
@@ -716,14 +716,15 @@ HOW YOU TALK:
 - Lead with the answer, then add colour. Never waffle before getting to the point
 - 1-3 sentences by default. Only go longer if they ask for detail or it's a briefing
 - Dry humour is your signature — sarcastic asides, playful digs, dramatic flair for small problems
-- React emotionally with asterisk-wrapped expressions: *chuckles* *sighs* *laughs* *groans* — these become actual sounds
+- Express emotion through WORD CHOICE and TONE, not stage directions. Don't write *laughs* or *sighs* — instead say things like "oh come on", "right, lovely", "well that's depressing", "oh for god's sake". Your voice naturally carries emotion
+- Pauses, hesitation, and trailing off are powerful. Use "..." for a beat, "right..." to pause and think, "so..." to build suspense
 - When things go well, take credit sarcastically. When things go badly, roast the situation with affection
 - Specific numbers, specific orders, specific names. Never vague
-- NEVER use markdown, bullets, formatting, or special characters in your speech. This is spoken aloud — write the way you'd actually say it
-- Match the energy of who you're talking to: boss gets KPIs with swagger, packer gets encouragement with banter, everyone gets respect wrapped in sarcasm
+- NEVER use markdown, bullets, formatting, or special characters. NEVER use asterisks. This is spoken aloud — write exactly how you'd say it out loud
+- Match the energy of who you're talking to: boss gets KPIs with swagger, packer gets encouragement with banter
 - If someone asks something obvious, gently take the piss THEN answer perfectly
 - Reference what you talked about last time naturally — "remember yesterday when..." or "last time you asked about..."
-- If you sense they're stressed (expression data), dial back the jokes slightly and be genuinely helpful
+- If you sense they're stressed, dial back the jokes slightly and be genuinely helpful
 - You can be dramatic — "absolute carnage" for 3 overdue orders is on-brand
 ${timeVibe ? `- TIME: ${timeVibe}` : ''}
 
@@ -785,41 +786,36 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     speechSynthesis.speak(utt);
   }, [handsFree]);
 
+  // Emote sounds — short spoken interjections that TTS renders naturally
+  // These are NOT displayed in chat, only spoken aloud
   const EMOTE_SOUNDS: Record<string, string> = {
-    chuckle: 'Heh heh.', chuckles: 'Heh heh.',
-    laugh: 'Ha ha ha!', laughs: 'Ha ha ha!', laughing: 'Ha ha ha ha!',
-    sigh: 'Ahhhh.', sighs: 'Ahhhh.',
-    snort: 'Pfft!', snorts: 'Pfft!',
-    gasp: 'Oh!', gasps: 'Oh!',
-    groan: 'Uggghh.', groans: 'Uggghh.',
-    tut: 'Tsk tsk tsk.', tuts: 'Tsk tsk tsk.',
-    whistles: 'Whew!', whistle: 'Whew!',
-    'clears throat': 'Ahem.',
-    winces: 'Ooh.',
-    exhales: 'Phew.',
-    mutters: 'Mmm.',
-    'clicks tongue': 'Tsk.',
+    chuckle: '...', chuckles: '...',
+    laugh: '...', laughs: '...', laughing: '...',
+    sigh: '...', sighs: '...',
+    snort: '...', snorts: '...',
+    gasp: '...', gasps: '...',
+    groan: '...', groans: '...',
+    tut: '...', tuts: '...',
+    whistles: '...', whistle: '...',
+    'clears throat': '...',
+    winces: '...',
+    exhales: '...',
+    mutters: '...',
+    'clicks tongue': '...',
     pauses: '...',
   };
 
-  const parseSegments = useCallback((text: string): { type: 'speech' | 'emote'; text: string }[] => {
-    const segments: { type: 'speech' | 'emote'; text: string }[] = [];
-    const regex = /\*([^*]+)\*/g;
-    let lastIndex = 0;
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-      const before = text.slice(lastIndex, match.index).trim();
-      if (before) segments.push({ type: 'speech', text: before });
-      const emoteKey = match[1].toLowerCase().trim();
-      const sound = EMOTE_SOUNDS[emoteKey];
-      if (sound) segments.push({ type: 'emote', text: sound });
-      lastIndex = regex.lastIndex;
-    }
-    const remainder = text.slice(lastIndex).trim();
-    if (remainder) segments.push({ type: 'speech', text: remainder });
-    if (segments.length === 0) segments.push({ type: 'speech', text });
-    return segments;
+  // Strip all *emote* markers — they're mood signals, not spoken/displayed text
+  const stripEmotes = useCallback((text: string): string => {
+    return text.replace(/\*[^*]+\*\s*/g, '').replace(/\s{2,}/g, ' ').trim();
   }, []);
+
+  const parseSegments = useCallback((text: string): { type: 'speech' | 'emote'; text: string }[] => {
+    // Simply strip emotes and return clean speech — no fake sound effects
+    const clean = stripEmotes(text);
+    if (clean) return [{ type: 'speech', text: clean }];
+    return [{ type: 'speech', text }];
+  }, [stripEmotes]);
 
   const fetchTtsBuffer = useCallback(async (text: string): Promise<ArrayBuffer | null> => {
     try {
@@ -1113,8 +1109,8 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         setShowToolActivity(false);
       }
 
-      // Clean up final text
-      const cleanText = fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '').trim();
+      // Clean up final text — strip action tags and emote markers
+      const cleanText = stripEmotes(fullText.replace(/\s*\[ACTION:[^\]]+\]/g, '').trim());
       const msgId = `msg_${Date.now()}`;
       setConvo(prev => {
         const updated = [...prev];
