@@ -217,7 +217,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   }, []);
 
   // ─── Personality Engine Init ───────────────────────────────────
-  // Load emotional memory and consciousness when user is identified
+  // Load emotional memory when user is identified
   useEffect(() => {
     if (currentUser) {
       loadEmotionalMemory(currentUser.id).then(mem => {
@@ -225,9 +225,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
         setEmotionalMemory(updated);
         saveEmotionalMemory(updated);
       });
-      loadConsciousness(currentUser.name);
     }
-  }, [currentUser, loadConsciousness]);
+  }, [currentUser]);
 
   // Load AI personality and weather on mount
   useEffect(() => {
@@ -371,6 +370,11 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       }
     } catch (e) { console.log('[CONSCIOUSNESS] Load failed:', e); }
   }, []);
+
+  // Load consciousness when user is identified (defined after loadConsciousness to avoid TDZ)
+  useEffect(() => {
+    if (currentUser) loadConsciousness(currentUser.name);
+  }, [currentUser, loadConsciousness]);
 
   // ─── Learning Engine: Extract and store insights ──────────────
   const triggerLearning = useCallback(async () => {
