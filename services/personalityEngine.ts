@@ -355,14 +355,225 @@ export function updatePersonality(
 // ─── Ambient Consciousness ──────────────────────────────────────
 
 export interface AmbientTrigger {
-  type: 'silence' | 'time' | 'data' | 'return' | 'vibe';
+  type: 'silence' | 'time' | 'data' | 'return' | 'vibe' | 'change';
   message: string;
   priority: number; // 1-10
 }
 
+export interface FullStats {
+  late: number;
+  readyForShipping: number;
+  unfulfilled: number;
+  dueSoon: number;
+  notOnDeco: number;
+  notOnDeco5Plus: number;
+  notOnDeco10Plus: number;
+  orderComplete: number;
+  fulfilled7d: number;
+  stockReady: number;
+  mappingGap: number;
+  productionAfterDispatch: number;
+}
+
+// Pick a random item from an array
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// Actively scans all metrics, detects changes, comments on both good and bad
+function scanData(stats: FullStats, prevStats: FullStats | null, userName?: string): AmbientTrigger | null {
+  const name = userName || 'mate';
+  const observations: AmbientTrigger[] = [];
+
+  // ── CHANGE DETECTION — most interesting when things shift ──
+  if (prevStats) {
+    const overdueDelta = stats.late - prevStats.late;
+    const readyDelta = stats.readyForShipping - prevStats.readyForShipping;
+    const completedDelta = stats.orderComplete - prevStats.orderComplete;
+    const shippedDelta = stats.fulfilled7d - prevStats.fulfilled7d;
+    const notOnDecoDelta = stats.notOnDeco - prevStats.notOnDeco;
+    const dueSoonDelta = stats.dueSoon - prevStats.dueSoon;
+
+    // Overdue went UP
+    if (overdueDelta > 0) {
+      observations.push({ type: 'change', priority: 8, message: pick([
+        `Right... ${overdueDelta} more order${overdueDelta > 1 ? 's have' : ' has'} gone overdue. We're at ${stats.late} total now.`,
+        `That overdue number just went up by ${overdueDelta}. ${stats.late} total. Not ideal.`,
+        `Another ${overdueDelta} overdue. ${stats.late} and counting. Might want to look at that, ${name}.`,
+      ])});
+    }
+
+    // Overdue went DOWN — celebrate!
+    if (overdueDelta < 0) {
+      observations.push({ type: 'change', priority: 7, message: pick([
+        `Oh nice, overdue dropped by ${Math.abs(overdueDelta)}. Down to ${stats.late} now. Progress.`,
+        `That overdue count just went down. ${stats.late} now. Someone's been busy.`,
+        `${Math.abs(overdueDelta)} fewer overdue than before. I like this trend.`,
+      ])});
+    }
+
+    // New orders completed
+    if (completedDelta > 0) {
+      observations.push({ type: 'change', priority: 6, message: pick([
+        `${completedDelta} more order${completedDelta > 1 ? 's' : ''} just hit 100% complete. ${stats.orderComplete} total ready.`,
+        `Nice one. ${completedDelta} order${completedDelta > 1 ? 's' : ''} finished. That's what I like to see.`,
+        `Someone's smashing it — ${completedDelta} order${completedDelta > 1 ? 's' : ''} just completed.`,
+      ])});
+    }
+
+    // New orders ready to ship
+    if (readyDelta > 0) {
+      observations.push({ type: 'change', priority: 6, message: pick([
+        `${readyDelta} more order${readyDelta > 1 ? 's are' : ' is'} ready to ship. ${stats.readyForShipping} waiting to go out the door.`,
+        `Heads up, ${readyDelta} just became ready to ship. Don't let them sit there too long.`,
+      ])});
+    }
+
+    // Orders shipped
+    if (shippedDelta > 0) {
+      observations.push({ type: 'change', priority: 5, message: pick([
+        `${shippedDelta} order${shippedDelta > 1 ? 's' : ''} shipped. We've done ${stats.fulfilled7d} this week.`,
+        `Another ${shippedDelta} out the door. ${stats.fulfilled7d} shipped in the last 7 days. Solid.`,
+      ])});
+    }
+
+    // Not on Deco increasing
+    if (notOnDecoDelta > 2) {
+      observations.push({ type: 'change', priority: 7, message: pick([
+        `${notOnDecoDelta} more orders not on Deco. ${stats.notOnDeco} total now, ${stats.notOnDeco5Plus} of those over 5 days. That queue needs attention.`,
+        `The "not on Deco" pile just grew by ${notOnDecoDelta}. We're at ${stats.notOnDeco} now.`,
+      ])});
+    }
+
+    // Due soon spike
+    if (dueSoonDelta > 3) {
+      observations.push({ type: 'change', priority: 7, message: pick([
+        `Careful — ${dueSoonDelta} more orders just entered the "due soon" zone. ${stats.dueSoon} total ticking.`,
+        `Due soon count jumped by ${dueSoonDelta}. ${stats.dueSoon} orders on the clock now.`,
+      ])});
+    }
+  }
+
+  // ── STATIC OBSERVATIONS — comment on current state ──
+
+  // Overdue situation
+  if (stats.late === 0) {
+    observations.push({ type: 'data', priority: 6, message: pick([
+      `Zero overdue, by the way. Clean sheet. Enjoy it while it lasts.`,
+      `Not a single overdue order right now. Savour that.`,
+      `Overdue count is zero. I'm almost suspicious.`,
+    ])});
+  } else if (stats.late > 20) {
+    observations.push({ type: 'data', priority: 8, message: pick([
+      `${stats.late} overdue. That's... a lot. Might be worth a deep dive into what's blocking things.`,
+      `We're at ${stats.late} overdue now. Something's clearly stuck in the pipeline.`,
+    ])});
+  } else if (stats.late > 10) {
+    observations.push({ type: 'data', priority: 6, message: pick([
+      `${stats.late} overdue. Not catastrophic but not great either.`,
+      `Overdue's sitting at ${stats.late}. Could use some attention.`,
+    ])});
+  }
+
+  // Ready to ship sitting there
+  if (stats.readyForShipping > 5) {
+    observations.push({ type: 'data', priority: 5, message: pick([
+      `${stats.readyForShipping} orders just sitting there ready to ship. That's revenue waiting to leave the building.`,
+      `We've got ${stats.readyForShipping} ready to go. Might want to get those moving.`,
+    ])});
+  }
+
+  // Stock ready — positive
+  if (stats.stockReady > 5) {
+    observations.push({ type: 'data', priority: 4, message: pick([
+      `${stats.stockReady} orders with stock ready. Good position to be in.`,
+      `Stock's looking healthy — ${stats.stockReady} orders with everything in hand.`,
+    ])});
+  }
+
+  // Due soon pressure
+  if (stats.dueSoon > 15) {
+    observations.push({ type: 'data', priority: 7, message: pick([
+      `${stats.dueSoon} orders due soon. Tomorrow's going to be fun.`,
+      `Big wave incoming — ${stats.dueSoon} orders due shortly. Might want to prioritise.`,
+    ])});
+  }
+
+  // Not on Deco — long waiters
+  if (stats.notOnDeco10Plus > 3) {
+    observations.push({ type: 'data', priority: 7, message: pick([
+      `${stats.notOnDeco10Plus} orders have been waiting over 10 days to get onto Deco. That's too long.`,
+      `Quick one — ${stats.notOnDeco10Plus} orders sitting over 10 days with no Deco job. Customers won't be happy.`,
+    ])});
+  } else if (stats.notOnDeco5Plus > 5) {
+    observations.push({ type: 'data', priority: 5, message: pick([
+      `${stats.notOnDeco5Plus} orders over 5 days without a Deco job. Worth chasing.`,
+      `Not on Deco for 5+ days: ${stats.notOnDeco5Plus} orders. That queue's getting stale.`,
+    ])});
+  }
+
+  // Mapping gaps
+  if (stats.mappingGap > 5) {
+    observations.push({ type: 'data', priority: 4, message: pick([
+      `${stats.mappingGap} mapping gaps still. Not urgent but they'll cause confusion eventually.`,
+      `We've got ${stats.mappingGap} items with mapping gaps. Might want to sort those when you get a chance.`,
+    ])});
+  }
+
+  // Production after dispatch — bad
+  if (stats.productionAfterDispatch > 0) {
+    observations.push({ type: 'data', priority: 8, message: pick([
+      `Hang on — ${stats.productionAfterDispatch} order${stats.productionAfterDispatch > 1 ? 's have' : ' has'} production happening after dispatch. That shouldn't be right.`,
+      `${stats.productionAfterDispatch} with production after dispatch. That's either a data issue or we've shipped incomplete orders.`,
+    ])});
+  }
+
+  // Shipped this week — positive commentary
+  if (stats.fulfilled7d > 20) {
+    observations.push({ type: 'data', priority: 4, message: pick([
+      `${stats.fulfilled7d} shipped this week. Decent output.`,
+      `We've pushed out ${stats.fulfilled7d} orders in 7 days. Not bad at all.`,
+    ])});
+  }
+
+  // Overall health check
+  if (stats.late === 0 && stats.readyForShipping > 0 && stats.notOnDeco < 5) {
+    observations.push({ type: 'data', priority: 5, message: pick([
+      `Actually... things are looking pretty good right now. No overdue, ${stats.readyForShipping} ready to ship, only ${stats.notOnDeco} not on Deco. Rare day.`,
+      `I've been looking at the numbers and honestly... not bad. Not bad at all.`,
+    ])});
+  }
+
+  // Unfulfilled volume
+  if (stats.unfulfilled > 100) {
+    observations.push({ type: 'data', priority: 4, message: pick([
+      `${stats.unfulfilled} unfulfilled orders in the system. Busy times.`,
+      `Total pipeline is ${stats.unfulfilled} orders. That's a full plate.`,
+    ])});
+  }
+
+  // Completed orders — milestone check
+  if (stats.orderComplete > 10) {
+    observations.push({ type: 'data', priority: 4, message: pick([
+      `${stats.orderComplete} orders at 100% complete. Let's get those shipped.`,
+      `There's ${stats.orderComplete} fully complete orders. They should be going out, no?`,
+    ])});
+  }
+
+  // Return ONE random observation from the pool — gives variety
+  if (observations.length > 0) {
+    // Bias toward higher priority
+    const sorted = observations.sort((a, b) => b.priority - a.priority);
+    // 60% chance pick top priority, 40% chance pick random
+    if (Math.random() < 0.6) return sorted[0];
+    return pick(observations);
+  }
+
+  return null;
+}
+
 export function getAmbientTriggers(context: {
   silenceSeconds: number;
-  stats: { late: number; readyForShipping: number; unfulfilled: number; dueSoon: number };
+  stats: FullStats;
+  prevStats: FullStats | null;
   hour: number;
   dayOfWeek: number;
   personality: AIPersonalityState;
@@ -371,79 +582,83 @@ export function getAmbientTriggers(context: {
   lastAmbientTs: number;
   userName?: string;
 }): AmbientTrigger | null {
-  const { silenceSeconds, stats, hour, dayOfWeek, personality, userPresent, userJustReturned, lastAmbientTs, userName } = context;
+  const { silenceSeconds, stats, prevStats, hour, dayOfWeek, personality, userPresent, userJustReturned, lastAmbientTs, userName } = context;
   const timeSinceLastAmbient = (Date.now() - lastAmbientTs) / 1000;
 
-  // Don't trigger too often — minimum 2 minutes between ambient comments
-  if (timeSinceLastAmbient < 120) return null;
+  // Don't trigger too often — minimum 90 seconds between ambient comments
+  if (timeSinceLastAmbient < 90) return null;
 
   // User just came back after being away
   if (userJustReturned && timeSinceLastAmbient > 300) {
     const name = userName || 'mate';
-    const options = [
+    return { type: 'return', priority: 7, message: pick([
       `Oh, ${name}'s back. Miss me?`,
       `There you are. I was starting to get bored.`,
       `Welcome back. Nothing burned down while you were gone.`,
       `Ah, the prodigal returns.`,
-      `Back already? Felt like ages. Well... seconds for me, ages for you probably.`,
-    ];
-    return { type: 'return', message: options[Math.floor(Math.random() * options.length)], priority: 7 };
+      `Back already? Felt like ages.`,
+    ])};
   }
 
-  // Long silence — user is working
-  if (userPresent && silenceSeconds > 300 && timeSinceLastAmbient > 300) {
-    if (stats.late > 5) {
-      const options = [
-        `...${stats.late} overdue. Could be worse. Could also be a lot better.`,
-        `Still thinking about those ${stats.late} overdue orders. They're not going to sort themselves.`,
-        `You know what would be nice? If the overdue count went down instead of me just staring at it.`,
-      ];
-      return { type: 'data', message: options[Math.floor(Math.random() * options.length)], priority: 5 };
-    }
-
-    if (stats.readyForShipping > 3) {
-      const options = [
-        `Just noting — ${stats.readyForShipping} orders sitting there ready to ship. Whenever you're ready.`,
-        `${stats.readyForShipping} ready to go. Just saying.`,
-      ];
-      return { type: 'data', message: options[Math.floor(Math.random() * options.length)], priority: 4 };
-    }
-
-    // Pure vibe comments
-    if (personality.energy > 0.6) {
-      const vibeOptions = [
-        "Hmm. You've gone quiet. Deep in thought or just ignoring me?",
-        "I'm here if you need me. Just... existing.",
-        "The silence is actually quite nice. Don't tell anyone I said that.",
-      ];
-      return { type: 'silence', message: vibeOptions[Math.floor(Math.random() * vibeOptions.length)], priority: 2 };
-    }
+  // ── DATA CHANGES — react immediately to metric shifts ──
+  if (prevStats && timeSinceLastAmbient > 90) {
+    const change = scanData(stats, prevStats, userName);
+    if (change && change.priority >= 6) return change;
   }
 
-  // Time-based triggers
+  // ── ACTIVE DATA SCANNING — proactively check things every few minutes ──
+  if (userPresent && silenceSeconds > 120 && timeSinceLastAmbient > 180) {
+    const observation = scanData(stats, null, userName);
+    if (observation) return observation;
+  }
+
+  // ── TIME-BASED ──
+  if (hour === 9 && timeSinceLastAmbient > 600) {
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const morningTail = stats.late === 0 ? 'Clean start.' : 'Got some catching up to do.';
+    return { type: 'time', priority: 5, message: pick([
+      `Right then, ${dayNames[dayOfWeek]} morning. ${stats.unfulfilled} orders in the pipe, ${stats.late} overdue, ${stats.readyForShipping} ready to ship. Let's go.`,
+      `Morning. Quick status — ${stats.late} overdue, ${stats.dueSoon} due soon, ${stats.readyForShipping} ready to go. ${morningTail}`,
+    ])};
+  }
   if (hour === 12 && timeSinceLastAmbient > 600) {
-    return { type: 'time', message: "It's noon. Have you eaten? I'm an AI and even I know you need food.", priority: 3 };
+    const noonTail = stats.late > 0 ? `Still ${stats.late} overdue though.` : 'And zero overdue. Nice.';
+    return { type: 'time', priority: 3, message: pick([
+      `Midday check — ${stats.late} overdue, ${stats.orderComplete} complete, ${stats.readyForShipping} ready to ship. Also... have you eaten?`,
+      `Noon. We've shipped ${stats.fulfilled7d} this week so far. ${noonTail}`,
+    ])};
+  }
+  if (hour === 15 && timeSinceLastAmbient > 600) {
+    const afternoonMsg1 = stats.dueSoon > 5
+      ? `Afternoon check. ${stats.readyForShipping} ready to ship — still time to get those out today. And ${stats.dueSoon} due soon, so tomorrow's going to be busy.`
+      : `Afternoon check. ${stats.readyForShipping} ready to ship — still time to get those out today.`;
+    const afternoonMsg2 = stats.late > 0
+      ? `Three o'clock. ${stats.unfulfilled} still in the pipe. ${stats.late} overdue. Anything I can help chase?`
+      : `Three o'clock. ${stats.unfulfilled} still in the pipe. No overdue though, so we're in good shape.`;
+    return { type: 'time', priority: 4, message: pick([afternoonMsg1, afternoonMsg2]) };
   }
   if (hour === 17 && dayOfWeek >= 1 && dayOfWeek <= 5 && timeSinceLastAmbient > 600) {
-    return { type: 'time', message: "Five o'clock. Another day survived. Well done us.", priority: 3 };
+    const eodMsg1 = stats.late === 0
+      ? `End of day. We shipped ${stats.fulfilled7d} this week. Clean finish. See you tomorrow.`
+      : `End of day. We shipped ${stats.fulfilled7d} this week. ${stats.late} overdue carrying into tomorrow though.`;
+    const eodMsg2 = stats.readyForShipping > 0
+      ? `Five o'clock. Another day survived. ${stats.readyForShipping} still ready to ship if you want to squeeze those out.`
+      : `Five o'clock. Another day survived. Everything that could go out, went out.`;
+    return { type: 'time', priority: 3, message: pick([eodMsg1, eodMsg2]) };
   }
   if (dayOfWeek === 5 && hour === 16 && timeSinceLastAmbient > 600) {
-    return { type: 'time', message: "Right then... Friday at four. The finish line's in sight, mate.", priority: 4 };
+    const fridayTail = stats.late === 0 ? 'Clean weekend for once.' : 'Those overdue ones will be waiting Monday.';
+    return { type: 'time', priority: 4, message: `Right then... Friday at four. ${stats.fulfilled7d} shipped this week, ${stats.late} overdue. ${fridayTail} Finish line's in sight, mate.` };
   }
 
-  // Monday morning special
-  if (dayOfWeek === 1 && hour === 9 && timeSinceLastAmbient > 600) {
-    return { type: 'time', message: `Monday. Again. Right then — ${stats.unfulfilled} orders waiting, ${stats.late} overdue. Let's get through this.`, priority: 5 };
-  }
-
-  // Operational concern (high urgency)
-  if (stats.late > 15 && timeSinceLastAmbient > 180) {
-    return { type: 'data', message: `Oof. ${stats.late} overdue now. That number's climbing and I don't like it.`, priority: 8 };
-  }
-
-  // Due soon warnings
-  if (stats.dueSoon > 10 && timeSinceLastAmbient > 300) {
-    return { type: 'data', message: `Heads up — ${stats.dueSoon} orders due soon. Might want to check the pipeline.`, priority: 6 };
+  // ── SILENCE / VIBE — only after long quiet periods ──
+  if (userPresent && silenceSeconds > 600 && timeSinceLastAmbient > 600) {
+    return { type: 'silence', priority: 2, message: pick([
+      "Hmm. You've gone quiet. Need me to check on anything?",
+      "I'm here if you need me. Just... keeping an eye on things.",
+      "The silence is actually quite nice. Don't tell anyone I said that.",
+      `Quick thought — we've got ${stats.unfulfilled} orders in play. Want me to flag anything specific?`,
+    ])};
   }
 
   return null;

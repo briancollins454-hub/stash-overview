@@ -183,6 +183,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const stateRef = useRef<AssistantState>('idle');
   const convoEndRef = useRef<HTMLDivElement>(null);
   const prevStatsRef = useRef<typeof stats | null>(null);
+  const prevAmbientStatsRef = useRef<any>(null);
   const statsRef = useRef(stats);
   const ttsAudioCtxRef = useRef<AudioContext | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1843,9 +1844,19 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       const lastMsgTs = convoRef.current.length > 0 ? convoRef.current[convoRef.current.length - 1].ts : sessionStartRef.current;
       const silenceSeconds = (Date.now() - lastMsgTs) / 1000;
 
+      const currentStats = statsRef.current;
+      const fullStats = {
+        late: currentStats.late, readyForShipping: currentStats.readyForShipping,
+        unfulfilled: currentStats.unfulfilled, dueSoon: currentStats.dueSoon,
+        notOnDeco: currentStats.notOnDeco, notOnDeco5Plus: currentStats.notOnDeco5Plus,
+        notOnDeco10Plus: currentStats.notOnDeco10Plus, orderComplete: currentStats.orderComplete,
+        fulfilled7d: currentStats.fulfilled7d, stockReady: currentStats.stockReady,
+        mappingGap: currentStats.mappingGap, productionAfterDispatch: currentStats.productionAfterDispatch,
+      };
       const trigger = getAmbientTriggers({
         silenceSeconds,
-        stats: { late: statsRef.current.late, readyForShipping: statsRef.current.readyForShipping, unfulfilled: statsRef.current.unfulfilled, dueSoon: statsRef.current.dueSoon },
+        stats: fullStats,
+        prevStats: prevAmbientStatsRef.current,
         hour: new Date().getHours(),
         dayOfWeek: new Date().getDay(),
         personality,
@@ -1854,6 +1865,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         lastAmbientTs: lastAmbientRef.current,
         userName: currentUser?.name,
       });
+      prevAmbientStatsRef.current = { ...fullStats };
 
       if (trigger) {
         lastAmbientRef.current = Date.now();
@@ -1864,37 +1876,6 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
     return () => clearInterval(ambientTimer);
   }, [isOpen, personality, currentUser, visionObservation]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ─── Proactive Alerts ──────────────────────────────────────────
-  useEffect(() => {
-    if (!isOpen) return;
-    prevStatsRef.current = { ...statsRef.current };
-    const timer = setInterval(() => {
-      const prev = prevStatsRef.current;
-      const current = statsRef.current;
-      if (!prev) { prevStatsRef.current = { ...current }; return; }
-      const alerts: string[] = [];
-      if (current.late > prev.late) {
-        const n = current.late - prev.late;
-        alerts.push(`Oi, ${n} order${n > 1 ? 's have' : ' has'} just gone overdue. ${current.late} total now.`);
-      }
-      if (current.readyForShipping > prev.readyForShipping + 1) {
-        alerts.push(`Nice, ${current.readyForShipping - prev.readyForShipping} more orders ready to ship. ${current.readyForShipping} total waiting.`);
-      }
-      // Proactive: risk forecast
-      if (current.dueSoon > prev.dueSoon + 2) {
-        alerts.push(`Watch out, ${current.dueSoon - prev.dueSoon} more orders now due within 5 days.`);
-      }
-      prevStatsRef.current = { ...current };
-      if (alerts.length > 0 && stateRef.current === 'idle') {
-        playNotificationSound();
-        const alert = alerts.join(' ');
-        setConvo(p => [...p, { role: 'system', text: '\u26A1 Alert', ts: Date.now() }, { role: 'assistant', text: alert, ts: Date.now() }]);
-        speak(alert);
-      }
-    }, 30000);
-    return () => clearInterval(timer);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Enrollment ────────────────────────────────────────────────
   const startEnrollment = () => {
