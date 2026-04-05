@@ -215,6 +215,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
   // ─── Screen Awareness: Track tab navigation over time ──────────
   const lastTabReaction = useRef<number>(0);
+  const prevTabRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeTab) return;
     const history = screenHistory.current;
@@ -231,9 +232,17 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     }
 
     // ─── Proactive tab-change reactions ──────────────────────────
-    // Always react to tab changes — AI is always aware
-    // Throttle: at most one reaction every 60s
-    if (now - lastTabReaction.current < 60_000) return;
+    // Skip initial page load — only react to actual navigation
+    if (prevTabRef.current === null) {
+      prevTabRef.current = activeTab;
+      return;
+    }
+    // Skip if tab didn't actually change
+    if (activeTab === prevTabRef.current) return;
+    prevTabRef.current = activeTab;
+
+    // Throttle: at most one reaction every 20s
+    if (now - lastTabReaction.current < 20_000) return;
 
     const s = statsRef.current;
     const tabLabels: Record<string, string> = {
@@ -2486,14 +2495,19 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     <>
       {/* ── Always-visible Tab Insight Toast ── */}
       {minimizedToast && !isOpen && (
-        <div className="fixed bottom-24 right-6 z-50 animate-in slide-in-from-right">
+        <div className="fixed top-4 right-4 z-[9999]" style={{ animation: 'toastSlideIn 0.3s ease-out' }}>
           <button
-            onClick={() => { setMinimizedToast(null); setIsMinimized(false); setIsOpen(true); }}
-            className="max-w-xs bg-gray-900/95 border border-indigo-500/30 rounded-xl px-4 py-3 text-left shadow-2xl backdrop-blur-md cursor-pointer hover:border-indigo-400/50 transition-colors"
+            onClick={() => { setMinimizedToast(null); setIsOpen(true); }}
+            className="max-w-sm bg-gray-900/95 border border-indigo-500/40 rounded-xl px-5 py-3.5 text-left shadow-2xl backdrop-blur-xl cursor-pointer hover:border-indigo-400/60 transition-colors"
           >
-            <div className="flex items-start gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center flex-shrink-0">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div>
+                <p className="text-[10px] font-mono tracking-wider text-indigo-400/70 uppercase mb-1">STASH AI</p>
+                <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
+              </div>
             </div>
           </button>
         </div>
@@ -2951,13 +2965,17 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         <video ref={videoRef} autoPlay playsInline muted className="hidden" />
       )}
 
-      {/* CSS for scan animation */}
+      {/* CSS for animations */}
       <style>{`
         @keyframes scan {
           0% { transform: translateY(-100%); }
           100% { transform: translateY(2000%); }
         }
         .animate-scan { animation: scan 3s linear infinite; }
+        @keyframes toastSlideIn {
+          0% { opacity: 0; transform: translateX(100px); }
+          100% { opacity: 1; transform: translateX(0); }
+        }
       `}</style>
     </>
   );
