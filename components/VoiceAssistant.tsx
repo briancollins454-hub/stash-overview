@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Mic, MicOff, X, UserPlus, Volume2, VolumeX, Radio, User, Sparkles, Trash2,
   Hand, ThumbsUp, ThumbsDown, Brain, Zap, ChevronDown, ChevronUp, Send,
-  Activity, Eye, MessageSquare, BarChart3, Clock, Shield
+  Activity, Eye, MessageSquare, BarChart3, Clock, Shield, Minimize2
 } from 'lucide-react';
 import { getItem as getLocalItem, setItem as setLocalItem } from '../services/localStore';
 import {
@@ -121,6 +121,10 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
   // --- State ---
   const [isOpen, setIsOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const isActive = isOpen || isMinimized; // Camera, vision, ambient run when active
+  const [minimizedToast, setMinimizedToast] = useState<string | null>(null);
+  const minimizedToastTimer = useRef<number>(0);
   const [state, setState] = useState<AssistantState>('idle');
   const [convo, setConvo] = useState<Message[]>([]);
   const [interim, setInterim] = useState('');
@@ -2227,11 +2231,20 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
   }, [faces, currentUser, enrolling, speak, stats, orders, ambientMode, loadLastConversation, storeActivity]);
 
   // ─── Lifecycle ─────────────────────────────────────────────────
+  // Re-attach camera stream when switching between open/minimized (video element changes)
   useEffect(() => {
-    if (isOpen) {
+    if (isActive && streamRef.current && videoRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [isActive, isOpen]);
+
+  // Camera + face API start when active (open OR minimized)
+  useEffect(() => {
+    if (isActive) {
       startCamera();
       initFaceAPI();
-      animRef.current = requestAnimationFrame(drawOrb);
+      if (isOpen) animRef.current = requestAnimationFrame(drawOrb);
       return () => {
         cancelAnimationFrame(animRef.current);
         clearInterval(faceTimerRef.current);
@@ -2252,11 +2265,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         if (learningTimerRef.current) clearInterval(learningTimerRef.current);
       };
     }
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Periodic learning — extract insights every 10 minutes during long sessions
   useEffect(() => {
-    if (isOpen && currentUser) {
+    if (isActive && currentUser) {
       learningTimerRef.current = window.setInterval(() => {
         if (convoRef.current.length >= 10 || awarenessBuffer.current.length >= 15) {
           triggerLearning();
@@ -2264,17 +2277,17 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       }, 600_000); // Every 10 minutes
       return () => { if (learningTimerRef.current) clearInterval(learningTimerRef.current); };
     }
-  }, [isOpen, currentUser, triggerLearning]);
+  }, [isActive, currentUser, triggerLearning]);
 
   // Face detection interval — always run while panel is open for continuous recognition,
   // expression tracking, and detecting new people. Slower interval after initial recognition.
   useEffect(() => {
-    if (isOpen && faceReady && cameraReady) {
+    if (isActive && faceReady && cameraReady) {
       const interval = currentUser && !enrolling ? 2000 : 800; // Slower once identified, fast during enrollment
       faceTimerRef.current = window.setInterval(runFaceDetection, interval);
       return () => clearInterval(faceTimerRef.current);
     }
-  }, [isOpen, faceReady, cameraReady, currentUser, enrolling, runFaceDetection]);
+  }, [isActive, faceReady, cameraReady, currentUser, enrolling, runFaceDetection]);
 
   // Animation loop
   useEffect(() => {
@@ -2287,11 +2300,11 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
   // Single vision capture when camera becomes ready (no continuous polling)
   useEffect(() => {
-    if (isOpen && cameraReady) {
+    if (isActive && cameraReady) {
       const timer = setTimeout(() => pollVision(), 3000);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, cameraReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive, cameraReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll
   useEffect(() => { convoEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [convo]);
@@ -2304,7 +2317,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
   // ─── Ambient Consciousness ──────────────────────────────────────
   // AI occasionally speaks unprompted — reacts to silence, time, data changes
   useEffect(() => {
-    if (!isOpen || !personality) return;
+    if (!isActive || !personality) return;
     const ambientTimer = setInterval(() => {
       // Don't interrupt active states
       if (stateRef.current !== 'idle') return;
@@ -2345,8 +2358,15 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       if (trigger) {
         prevAmbientStatsRef.current = { ...fullStats };
         lastAmbientRef.current = Date.now();
-        setConvo(prev => [...prev, { role: 'assistant', text: trigger.message, ts: Date.now() }]);
-        speakRef.current(trigger.message);
+        if (isMinimized) {
+          // Show toast notification instead of speaking
+          if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
+          setMinimizedToast(trigger.message);
+          minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
+        } else {
+          setConvo(prev => [...prev, { role: 'assistant', text: trigger.message, ts: Date.now() }]);
+          speakRef.current(trigger.message);
+        }
       } else if (!prevAmbientStatsRef.current) {
         // First run — set baseline
         prevAmbientStatsRef.current = { ...fullStats };
@@ -2354,7 +2374,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(ambientTimer);
-  }, [isOpen, personality, currentUser, visionObservation]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isActive, personality, currentUser, visionObservation]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Enrollment ────────────────────────────────────────────────
   const startEnrollment = () => {
@@ -2407,7 +2427,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
   return (
     <>
       {/* ── Floating Activation Button ── */}
-      {!isOpen && (
+      {!isOpen && !isMinimized && (
         <button
           onClick={() => setIsOpen(true)}
           className="fixed bottom-6 right-6 z-50 group"
@@ -2491,8 +2511,16 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
                 </div>
               </div>
 
-              <button onClick={() => { stopListening(); speechSynthesis.cancel(); storeConversationSummary(); setIsOpen(false); }}
-                className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all">
+              {/* Minimize button */}
+              <button onClick={() => { stopListening(); speechSynthesis.cancel(); setIsOpen(false); setIsMinimized(true); }}
+                className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all"
+                title="Minimize — AI stays active">
+                <Minimize2 className="w-5 h-5" />
+              </button>
+              {/* Full close button */}
+              <button onClick={() => { stopListening(); speechSynthesis.cancel(); storeConversationSummary(); setIsOpen(false); setIsMinimized(false); }}
+                className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-white/5 transition-all"
+                title="Close — fully shut down AI">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -2813,6 +2841,53 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
             )}
           </div>
         </div>
+      )}
+
+      {/* ── Minimized Floating Widget ── */}
+      {isMinimized && !isOpen && (
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
+          {/* Toast notification */}
+          {minimizedToast && (
+            <button
+              onClick={() => { setMinimizedToast(null); setIsMinimized(false); setIsOpen(true); }}
+              className="max-w-xs bg-gray-900/95 border border-indigo-500/30 rounded-xl px-4 py-3 text-left shadow-2xl backdrop-blur-md animate-in slide-in-from-right cursor-pointer hover:border-indigo-400/50 transition-colors"
+            >
+              <div className="flex items-start gap-2">
+                <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
+              </div>
+            </button>
+          )}
+          {/* Mini orb */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setIsMinimized(false); setIsOpen(false); }}
+              className="w-6 h-6 rounded-full flex items-center justify-center text-gray-500 hover:text-red-400 hover:bg-gray-800/80 transition-all"
+              title="Close AI"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => { setIsMinimized(false); setIsOpen(true); }}
+              className="group relative"
+              title="Stash AI — watching (click to expand)"
+            >
+              <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 opacity-40 blur-sm group-hover:opacity-70 transition-opacity" />
+              <div className="relative w-11 h-11 bg-gradient-to-br from-indigo-700 via-purple-700 to-indigo-900 rounded-full shadow-2xl flex items-center justify-center text-white group-hover:scale-110 transition-all duration-300">
+                <Eye className="w-5 h-5 relative z-10" />
+              </div>
+              {/* Active indicator */}
+              <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-emerald-400 rounded-full border-2 border-gray-900">
+                <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-50" />
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Persistent hidden video element — keeps camera feed alive when minimized */}
+      {isActive && !isOpen && (
+        <video ref={videoRef} autoPlay playsInline muted className="hidden" />
       )}
 
       {/* CSS for scan animation */}
