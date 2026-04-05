@@ -558,16 +558,47 @@ function scanData(stats: FullStats, prevStats: FullStats | null, userName?: stri
     ])});
   }
 
-  // Return ONE random observation from the pool — gives variety
+  // Return ONE observation — with dedup to avoid repeating the same category
   if (observations.length > 0) {
-    // Bias toward higher priority
-    const sorted = observations.sort((a, b) => b.priority - a.priority);
-    // 60% chance pick top priority, 40% chance pick random
-    if (Math.random() < 0.6) return sorted[0];
-    return pick(observations);
+    // Filter out recently-used categories if we have alternatives
+    const recentTypes = (globalThis as any).__recentAmbientCategories || [];
+    const fresh = observations.filter(o => !recentTypes.includes(getCategoryKey(o)));
+    const pool = fresh.length > 0 ? fresh : observations; // fallback to all if everything's been said
+    
+    // Weighted random: higher priority = more tickets in the lottery, but not dominant
+    const weighted: AmbientTrigger[] = [];
+    for (const obs of pool) {
+      const tickets = Math.max(1, obs.priority - 2); // priority 4=2 tickets, 8=6 tickets
+      for (let i = 0; i < tickets; i++) weighted.push(obs);
+    }
+    const chosen = pick(weighted);
+    
+    // Track this category as recently used (keep last 5)
+    const catKey = getCategoryKey(chosen);
+    const recent: string[] = [...recentTypes, catKey].slice(-5);
+    (globalThis as any).__recentAmbientCategories = recent;
+    
+    return chosen;
   }
 
   return null;
+}
+
+// Extract a category key from a trigger for dedup tracking
+function getCategoryKey(trigger: AmbientTrigger): string {
+  const msg = trigger.message.toLowerCase();
+  if (msg.includes('overdue')) return 'overdue';
+  if (msg.includes('ready to ship') || msg.includes('ready to go')) return 'ready_to_ship';
+  if (msg.includes('not on deco') || msg.includes('deco job')) return 'not_on_deco';
+  if (msg.includes('due soon') || msg.includes('due shortly')) return 'due_soon';
+  if (msg.includes('complete') || msg.includes('finished')) return 'completed';
+  if (msg.includes('shipped') || msg.includes('out the door')) return 'shipped';
+  if (msg.includes('mapping gap')) return 'mapping';
+  if (msg.includes('stock ready') || msg.includes('stock')) return 'stock';
+  if (msg.includes('production after dispatch')) return 'prod_after_dispatch';
+  if (msg.includes('unfulfilled') || msg.includes('pipeline')) return 'unfulfilled';
+  if (msg.includes('looking pretty good') || msg.includes('not bad')) return 'health_check';
+  return trigger.type + '_' + trigger.priority;
 }
 
 export function getAmbientTriggers(context: {

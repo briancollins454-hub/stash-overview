@@ -197,6 +197,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   const visionContextRef = useRef<string>('');
   const lastVisionReaction = useRef<number>(0);
   const awarenessBuffer = useRef<any[]>([]); // Rolling buffer of last ~30 observations (~4 min)
+  const screenHistory = useRef<{ tab: string; enteredAt: number; leftAt?: number }[]>([]); // Track tab navigation history
   const learningTimerRef = useRef<number>(0);
   const lastLearnTs = useRef<number>(0);
   const speakRef = useRef<(text: string) => Promise<void>>(async () => {});
@@ -207,6 +208,23 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   useEffect(() => { statsRef.current = stats; }, [stats]);
   useEffect(() => { ordersRef.current = orders; }, [orders]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
+  // ─── Screen Awareness: Track tab navigation over time ──────────
+  useEffect(() => {
+    if (!activeTab) return;
+    const history = screenHistory.current;
+    const now = Date.now();
+    // Close out previous tab entry
+    if (history.length > 0 && !history[history.length - 1].leftAt) {
+      history[history.length - 1].leftAt = now;
+    }
+    // Don't add duplicate consecutive entries for same tab
+    if (history.length === 0 || history[history.length - 1].tab !== activeTab) {
+      history.push({ tab: activeTab, enteredAt: now });
+      // Keep last 20 tab visits
+      if (history.length > 20) history.shift();
+    }
+  }, [activeTab]);
 
   // Load enrolled faces and saved conversation on mount
   useEffect(() => {
@@ -600,8 +618,33 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       lines.push(`My read: ${latest.body_language_read}`);
     }
 
+    // Screen awareness — what they're looking at in the dashboard
+    const history = screenHistory.current;
+    if (history.length > 0) {
+      const currentScreen = history[history.length - 1];
+      const dwellMs = Date.now() - currentScreen.enteredAt;
+      const dwellMin = Math.round(dwellMs / 60000);
+
+      if (dwellMin > 5) {
+        lines.push(`They've been on the ${currentScreen.tab} tab for about ${dwellMin} minutes.`);
+      } else if (activeTab) {
+        lines.push(`They're looking at the ${activeTab} tab.`);
+      }
+
+      // Tab switching patterns
+      if (history.length >= 3) {
+        const recent3 = history.slice(-3).map(h => h.tab);
+        const uniqueTabs = [...new Set(recent3)];
+        if (uniqueTabs.length < recent3.length) {
+          lines.push(`They keep switching back to ${recent3[0]} — probably comparing something.`);
+        }
+      }
+    } else if (activeTab) {
+      lines.push(`They're on the ${activeTab} tab.`);
+    }
+
     return lines.join(' ');
-  }, []);
+  }, [activeTab]);
 
   // ─── Anticipatory Intelligence: What you've noticed ─────────────
   // Detects things the user probably needs but hasn't asked about
@@ -651,9 +694,39 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       insights.push(`${stats.notOnDeco10Plus} orders not on deco for 10+ days — that's getting critical.`);
     }
 
+    // Screen awareness — connect what they're viewing to what they might need
+    const history = screenHistory.current;
+    if (history.length > 0) {
+      const currentScreen = history[history.length - 1];
+      const dwellMs = Date.now() - currentScreen.enteredAt;
+      const dwellMin = Math.round(dwellMs / 60000);
+
+      // Staring at one tab for ages
+      if (dwellMin > 8) {
+        insights.push(`They've been on the ${currentScreen.tab} tab for ${dwellMin} minutes — might be stuck on something.`);
+      }
+
+      // Frequent tab switching — they're hunting for something
+      if (history.length >= 4) {
+        const last4 = history.slice(-4);
+        const span = ((last4[3]?.enteredAt || 0) - (last4[0]?.enteredAt || 0)) / 1000;
+        if (span < 120) {
+          insights.push(`They've switched tabs ${history.length >= 5 ? 'a lot' : 'a few times'} in the last couple minutes — looking for something specific.`);
+        }
+      }
+
+      // Connecting tab to data
+      if (currentScreen.tab?.toLowerCase().includes('order') && stats.late > 5) {
+        insights.push(`They're in orders and there's ${stats.late} overdue — probably dealing with that.`);
+      }
+      if (currentScreen.tab?.toLowerCase().includes('analytic') && stats.fulfilled7d > 0) {
+        insights.push(`They're checking analytics — this week's shipped ${stats.fulfilled7d}.`);
+      }
+    }
+
     if (insights.length === 0) return '';
     return insights.join(' ');
-  }, [stats]);
+  }, [stats, activeTab]);
 
   // ─── Camera Snapshot for Vision ────────────────────────────────
   // Captures a JPEG frame from the live camera feed as base64 data URL
@@ -1029,8 +1102,27 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
                      dayName === 'Monday' ? "It's Monday — commiserate about the start of the week" :
                      dayName === 'Friday' ? "It's Friday — be upbeat about the weekend" : '';
 
-    // Screen awareness
-    const screenContext = activeTab ? `\nUser is currently viewing the "${activeTab}" tab. Tailor responses to what they're looking at when relevant.` : '';
+    // Screen awareness — enriched with navigation history
+    let screenContext = '';
+    if (activeTab) {
+      const history = screenHistory.current;
+      const parts = [`\nUser is currently viewing the "${activeTab}" tab.`];
+      if (history.length > 1) {
+        const prevTabs = history.slice(-4, -1).map(h => h.tab);
+        if (prevTabs.length > 0) {
+          parts.push(`Before this, they visited: ${prevTabs.join(' → ')}.`);
+        }
+      }
+      if (history.length > 0) {
+        const currentEntry = history[history.length - 1];
+        const dwellMin = Math.round((Date.now() - currentEntry.enteredAt) / 60000);
+        if (dwellMin > 3) {
+          parts.push(`They've been on this tab for about ${dwellMin} minutes.`);
+        }
+      }
+      parts.push('Tailor responses to what they\'re looking at when relevant.');
+      screenContext = parts.join(' ');
+    }
 
     // Last conversation memory
     const memoryContext = lastConversationSummary ? `\nLAST CONVERSATION SUMMARY: ${lastConversationSummary}\nReference this naturally if relevant — "Last time we talked about..." etc.` : '';
@@ -2266,12 +2358,15 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         lastAmbientTs: lastAmbientRef.current,
         userName: currentUser?.name,
       });
-      prevAmbientStatsRef.current = { ...fullStats };
-
+      // Only update prevStats when a trigger fires — otherwise deltas stay meaningful
       if (trigger) {
+        prevAmbientStatsRef.current = { ...fullStats };
         lastAmbientRef.current = Date.now();
         setConvo(prev => [...prev, { role: 'assistant', text: trigger.message, ts: Date.now() }]);
         speakRef.current(trigger.message);
+      } else if (!prevAmbientStatsRef.current) {
+        // First run — set baseline
+        prevAmbientStatsRef.current = { ...fullStats };
       }
     }, 30000); // Check every 30 seconds
 
