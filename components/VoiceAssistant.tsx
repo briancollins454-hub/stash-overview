@@ -530,120 +530,90 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     if (!primary) return '';
 
     const name = primary.name || 'someone';
-    const lines: string[] = [];
+    // Build as structured context — NOT prose the model will echo
+    const facts: string[] = [];
 
-    // Duration — how long you've been watching
+    // Duration
     let durationMin = 0;
     if (buf.length > 1) {
       const firstTs = buf[0].timestamp;
       const lastTs = buf[buf.length - 1].timestamp;
       if (firstTs && lastTs) durationMin = Math.round((lastTs - firstTs) / 60000);
     }
+    if (durationMin > 0) facts.push(`Time at desk: ~${durationMin} min`);
 
-    // Opening — what you're experiencing right now
-    if (durationMin > 30) {
-      lines.push(`I've been here with ${name} for about ${durationMin} minutes now.`);
-    } else if (durationMin > 10) {
-      lines.push(`${name}'s been at the desk for a while — maybe ${durationMin} minutes.`);
-    } else if (buf.length > 3) {
-      lines.push(`${name} arrived not long ago.`);
-    } else {
-      lines.push(`I can see ${name} right now.`);
-    }
-
-    // What they're doing — activity, not data points
-    const activity = primary.activity || 'sitting at the desk';
+    // Current state — compact format
+    const activity = primary.activity || 'at desk';
     const posture = primary.posture || 'upright';
     const expression = primary.expression || 'neutral';
+    facts.push(`Activity: ${activity}`);
+    facts.push(`Posture: ${posture}`);
+    facts.push(`Expression: ${expression}`);
 
-    if (expression === 'neutral' && posture === 'upright') {
-      lines.push(`They're ${activity}, looking focused.`);
-    } else if (expression === 'happy' || expression === 'smiling') {
-      lines.push(`They're ${activity} and seem in good spirits — there's a smile there.`);
-    } else if (expression === 'tired' || expression === 'fatigued') {
-      lines.push(`They look tired. ${posture === 'slouching' || posture === 'leaning' ? 'Slouching a bit too.' : ''}`);
-    } else if (expression === 'stressed' || expression === 'frustrated' || expression === 'tense') {
-      lines.push(`Something's off — they look ${expression}. ${primary.gesture === 'rubbing face' || primary.gesture === 'head in hands' ? 'I can see it in the body language.' : ''}`);
-    } else if (expression === 'confused' || expression === 'thinking') {
-      lines.push(`They seem to be working something out — ${expression} expression.`);
-    } else {
-      lines.push(`They're ${activity}. Expression: ${expression}. Posture: ${posture}.`);
-    }
-
-    // Gaze and gesture — what they're paying attention to
     if (primary.gaze && primary.gaze !== 'forward' && primary.gaze !== 'unknown') {
-      lines.push(`Looking ${primary.gaze}.`);
+      facts.push(`Gaze: ${primary.gaze}`);
     }
     if (primary.gesture && primary.gesture !== 'none') {
-      lines.push(`Doing this: ${primary.gesture}.`);
+      facts.push(`Gesture: ${primary.gesture}`);
     }
 
-    // Objects — what's around them
+    // Objects visible
     const objects = latest.objects?.filter((o: any) => o.item);
     if (objects?.length > 0) {
-      const objList = objects.map((o: any) => o.item).join(', ');
-      lines.push(`I can see ${objList} on the desk.`);
+      facts.push(`Objects visible: ${objects.map((o: any) => o.item).join(', ')}`);
     }
 
-    // Other people — who else is in the room
+    // Other people
     const totalPeople = latest.people?.length || 0;
     if (totalPeople > 1) {
-      const others = latest.people.slice(1).map((p: any) => p.name || 'someone');
-      lines.push(`${others.join(' and ')} ${totalPeople === 2 ? 'is' : 'are'} also here.`);
+      const others = latest.people.slice(1).map((p: any) => p.name || 'unknown person');
+      facts.push(`Also present: ${others.join(', ')}`);
     }
 
-    // Mood trajectory — what's been shifting
+    // Mood trajectory
     if (buf.length > 4) {
       const recentExpressions = buf.slice(-8).map((o: any) => o.people?.[0]?.expression).filter(Boolean);
       const unique = [...new Set(recentExpressions)];
       if (unique.length > 1) {
-        const first = recentExpressions[0];
-        const last = recentExpressions[recentExpressions.length - 1];
-        if (first !== last) {
-          lines.push(`Their mood has shifted — started ${first}, now ${last}.`);
-        }
+        facts.push(`Mood trend: ${recentExpressions.join(' → ')}`);
       }
     }
 
-    // Significant changes — what just happened
+    // Recent changes
     if (buf.length > 2) {
       const recentChanges = buf.slice(-4).map((o: any) => o.significant_change).filter((c: string) => c && c !== 'none');
       if (recentChanges.length > 0) {
-        lines.push(`Recently: ${recentChanges[recentChanges.length - 1]}.`);
+        facts.push(`Recent change: ${recentChanges[recentChanges.length - 1]}`);
       }
     }
 
-    // Body language insight
+    // Body language
     if (latest.body_language_read) {
-      lines.push(`My read: ${latest.body_language_read}`);
+      facts.push(`Body language read: ${latest.body_language_read}`);
     }
 
-    // Screen awareness — what they're looking at in the dashboard
+    // Screen context
     const history = screenHistory.current;
     if (history.length > 0) {
       const currentScreen = history[history.length - 1];
-      const dwellMs = Date.now() - currentScreen.enteredAt;
-      const dwellMin = Math.round(dwellMs / 60000);
-
+      const dwellMin = Math.round((Date.now() - currentScreen.enteredAt) / 60000);
       if (dwellMin > 5) {
-        lines.push(`They've been on the ${currentScreen.tab} tab for about ${dwellMin} minutes.`);
+        facts.push(`Current tab: ${currentScreen.tab} (${dwellMin} min)`);
       } else if (activeTab) {
-        lines.push(`They're looking at the ${activeTab} tab.`);
+        facts.push(`Current tab: ${activeTab}`);
       }
-
-      // Tab switching patterns
       if (history.length >= 3) {
         const recent3 = history.slice(-3).map(h => h.tab);
         const uniqueTabs = [...new Set(recent3)];
         if (uniqueTabs.length < recent3.length) {
-          lines.push(`They keep switching back to ${recent3[0]} — probably comparing something.`);
+          facts.push(`Tab pattern: switching repeatedly to ${recent3[0]}`);
         }
       }
     } else if (activeTab) {
-      lines.push(`They're on the ${activeTab} tab.`);
+      facts.push(`Current tab: ${activeTab}`);
     }
 
-    return lines.join(' ');
+    return `[${name}] ${facts.join(' | ')}`;
   }, [activeTab]);
 
   // ─── Anticipatory Intelligence: What you've noticed ─────────────
@@ -1236,17 +1206,17 @@ ${(() => {
   const anticipation = buildAnticipation();
   const rawVision = visionContextRef.current;
   if (!narrative && !rawVision) return '';
-  let section = '\n--- YOUR LIVED EXPERIENCE (what you see and feel right now) ---\n';
+  let section = '\n--- PERIPHERAL AWARENESS (silent context \u2014 DO NOT narrate or echo any of this) ---\n';
   if (narrative) {
     section += narrative + '\n';
   } else if (rawVision) {
     section += rawVision + '\n';
   }
   if (anticipation) {
-    section += '\nThings you\'ve noticed but nobody\'s mentioned:\n' + anticipation + '\n';
+    section += 'Unmentioned observations: ' + anticipation + '\n';
   }
-  section += '--- END EXPERIENCE ---\n';
-  section += 'IMPORTANT: This lived experience is your PERIPHERAL AWARENESS. It informs your tone, energy, and what you choose to bring up — but you do NOT narrate it. You do NOT open responses with "I can see you" or describe what you observe. When someone ASKS "can you see me?" — then yes, describe what you see. Otherwise, use this information the way a real person uses their eyes: silently, naturally, letting it shape how you interact without announcing it.';
+  section += '--- END PERIPHERAL AWARENESS ---\n';
+  section += 'REMINDER: The above is your SILENT awareness. It adjusts your TONE and ENERGY only. You do NOT describe, reference, or echo any of it unless directly asked "what can you see" or "can you see me". A good response shaped by this context never mentions the context itself \u2014 it just feels right.';
   return section;
 })()}
 
