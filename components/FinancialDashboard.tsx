@@ -132,6 +132,52 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const CACHE_KEY = 'stash_finance_jobs';
   const CACHE_TS_KEY = 'stash_finance_synced';
 
+  // --- Supabase cloud persistence helpers ---
+  const saveToSupabase = useCallback(async (jobs: DecoJob[], syncedAt: string) => {
+    try {
+      await fetch('/api/supabase-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: 'stash_finance_cache',
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates',
+          body: { id: 'finance_jobs', data: jobs, last_synced: syncedAt, updated_at: new Date().toISOString() },
+        }),
+      });
+    } catch { /* non-critical — IndexedDB still works as fallback */ }
+  }, []);
+
+  const loadFromSupabase = useCallback(async (): Promise<{ data: DecoJob[]; last_synced: string } | null> => {
+    try {
+      const res = await fetch('/api/supabase-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: 'stash_finance_cache?id=eq.finance_jobs&select=data,last_synced',
+          method: 'GET',
+        }),
+      });
+      if (!res.ok) return null;
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data) && rows[0].data.length > 0) {
+        return { data: rows[0].data, last_synced: rows[0].last_synced };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Persist to both IndexedDB (instant local) and Supabase (cross-device)
+  const persistFinanceData = useCallback(async (jobs: DecoJob[], syncedAt: string) => {
+    await Promise.all([
+      setItem(CACHE_KEY, jobs),
+      setItem(CACHE_TS_KEY, syncedAt),
+      saveToSupabase(jobs, syncedAt),
+    ]);
+  }, [saveToSupabase]);
+
   // Load cached data on mount, then incremental sync in background
   useEffect(() => {
     if (hasLoaded || isLoading) return;
@@ -140,25 +186,45 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, []);
 
   const loadCachedThenSync = useCallback(async () => {
-    // Step 1: Load from IndexedDB cache instantly
+    // Step 1: Try IndexedDB first (instant), then Supabase (cross-device)
+    let cached: DecoJob[] | null = null;
+    let cachedTs: string | null = null;
+
     try {
-      const [cached, cachedTs] = await Promise.all([
+      const [localJobs, localTs] = await Promise.all([
         getItem<DecoJob[]>(CACHE_KEY),
         getItem<string>(CACHE_TS_KEY),
       ]);
-      if (cached && cached.length > 0) {
-        setFinanceJobs(cached);
-        setHasLoaded(true);
-        setLastSynced(cachedTs || null);
-        // Step 2: Incremental sync (last 60 days) in background to pick up changes
-        if (settings.useLiveData) {
-          incrementalSync(cached, cachedTs);
-        }
-        return;
+      if (localJobs && localJobs.length > 0) {
+        cached = localJobs;
+        cachedTs = localTs || null;
       }
-    } catch { /* cache miss, do full load */ }
+    } catch { /* IndexedDB miss */ }
 
-    // No cache — do full load
+    // If no local cache, try Supabase (covers new device / cleared browser)
+    if (!cached) {
+      const cloud = await loadFromSupabase();
+      if (cloud) {
+        cached = cloud.data;
+        cachedTs = cloud.last_synced;
+        // Backfill IndexedDB so next load is instant
+        setItem(CACHE_KEY, cached);
+        setItem(CACHE_TS_KEY, cachedTs);
+      }
+    }
+
+    if (cached && cached.length > 0) {
+      setFinanceJobs(cached);
+      setHasLoaded(true);
+      setLastSynced(cachedTs || null);
+      // Step 2: Incremental sync (last 60 days) in background to pick up changes
+      if (settings.useLiveData) {
+        incrementalSync(cached, cachedTs);
+      }
+      return;
+    }
+
+    // No cache anywhere — do full load
     if (settings.useLiveData) {
       fullSync();
     }
@@ -194,14 +260,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       setHasLoaded(true);
       const now = new Date().toISOString();
       setLastSynced(now);
-      // Persist to IndexedDB
-      await Promise.all([setItem(CACHE_KEY, merged), setItem(CACHE_TS_KEY, now)]);
+      // Persist to IndexedDB + Supabase
+      await persistFinanceData(merged, now);
     } catch (e: any) {
       if (!controller.signal.aborted) setLoadError(e.message || 'Incremental sync failed');
     } finally {
       if (!controller.signal.aborted) setIsLoading(false);
     }
-  }, [settings, isLoading]);
+  }, [settings, isLoading, persistFinanceData]);
 
   const fullSync = useCallback(async () => {
     if (isLoading) return;
@@ -220,13 +286,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       setHasLoaded(true);
       const now = new Date().toISOString();
       setLastSynced(now);
-      await Promise.all([setItem(CACHE_KEY, jobs), setItem(CACHE_TS_KEY, now)]);
+      await persistFinanceData(jobs, now);
     } catch (e: any) {
       if (!controller.signal.aborted) setLoadError(e.message || 'Failed to load financial data');
     } finally {
       if (!controller.signal.aborted) setIsLoading(false);
     }
-  }, [settings, isLoading]);
+  }, [settings, isLoading, persistFinanceData]);
 
   // Use finance-fetched jobs if available, otherwise fall back to cached decoJobs
   const allJobsRaw = hasLoaded ? financeJobs : decoJobs;

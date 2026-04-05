@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Only allow known stash_ table names (no query params in table name)
   const tableName = path.split('?')[0];
-  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes'];
+  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes', 'stash_finance_cache'];
   if (!ALLOWED_TABLES.includes(tableName)) {
     return res.status(403).json({ error: 'Table not allowed' });
   }
