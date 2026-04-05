@@ -560,10 +560,19 @@ function scanData(stats: FullStats, prevStats: FullStats | null, userName?: stri
 
   // Return ONE observation — with dedup to avoid repeating the same category
   if (observations.length > 0) {
-    // Filter out recently-used categories if we have alternatives
-    const recentTypes = (globalThis as any).__recentAmbientCategories || [];
-    const fresh = observations.filter(o => !recentTypes.includes(getCategoryKey(o)));
-    const pool = fresh.length > 0 ? fresh : observations; // fallback to all if everything's been said
+    // Track categories with timestamps — suppress repeats for 15 minutes
+    const SUPPRESS_MS = 15 * 60 * 1000; // 15 minutes
+    const now = Date.now();
+    const categoryTimestamps: Record<string, number> = (globalThis as any).__ambientCategoryTs || {};
+    
+    // Clean out expired entries
+    for (const key of Object.keys(categoryTimestamps)) {
+      if (now - categoryTimestamps[key] > SUPPRESS_MS) delete categoryTimestamps[key];
+    }
+    
+    // Filter out recently-used categories
+    const fresh = observations.filter(o => !categoryTimestamps[getCategoryKey(o)]);
+    const pool = fresh.length > 0 ? fresh : observations; // fallback if everything's been said
     
     // Weighted random: higher priority = more tickets in the lottery, but not dominant
     const weighted: AmbientTrigger[] = [];
@@ -573,10 +582,9 @@ function scanData(stats: FullStats, prevStats: FullStats | null, userName?: stri
     }
     const chosen = pick(weighted);
     
-    // Track this category as recently used (keep last 5)
-    const catKey = getCategoryKey(chosen);
-    const recent: string[] = [...recentTypes, catKey].slice(-5);
-    (globalThis as any).__recentAmbientCategories = recent;
+    // Record this category with timestamp
+    categoryTimestamps[getCategoryKey(chosen)] = now;
+    (globalThis as any).__ambientCategoryTs = categoryTimestamps;
     
     return chosen;
   }
@@ -616,8 +624,8 @@ export function getAmbientTriggers(context: {
   const { silenceSeconds, stats, prevStats, hour, dayOfWeek, personality, userPresent, userJustReturned, lastAmbientTs, userName } = context;
   const timeSinceLastAmbient = (Date.now() - lastAmbientTs) / 1000;
 
-  // Don't trigger too often — minimum 90 seconds between ambient comments
-  if (timeSinceLastAmbient < 90) return null;
+  // Don't trigger too often — minimum 180 seconds between ambient comments
+  if (timeSinceLastAmbient < 180) return null;
 
   // User just came back after being away
   if (userJustReturned && timeSinceLastAmbient > 300) {
@@ -632,7 +640,7 @@ export function getAmbientTriggers(context: {
   }
 
   // ── DATA CHANGES — react immediately to metric shifts ──
-  if (prevStats && timeSinceLastAmbient > 90) {
+  if (prevStats && timeSinceLastAmbient > 180) {
     const change = scanData(stats, prevStats, userName);
     if (change && change.priority >= 6) return change;
   }

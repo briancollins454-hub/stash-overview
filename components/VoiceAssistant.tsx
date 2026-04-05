@@ -2425,7 +2425,7 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         // First run — set baseline
         prevAmbientStatsRef.current = { ...fullStats };
       }
-    }, 30000); // Check every 30 seconds
+    }, 45000); // Check every 45 seconds
 
     return () => clearInterval(ambientTimer);
   }, [isActive, personality, currentUser, visionObservation]); // eslint-disable-line react-hooks/exhaustive-deps
