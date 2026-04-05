@@ -231,11 +231,10 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     }
 
     // ─── Proactive tab-change reactions ──────────────────────────
-    if (!isActive) return;
+    // Only react if panel is open or minimized
+    if (!isOpen && !isMinimized) return;
     // Throttle: at most one reaction every 60s
     if (now - lastTabReaction.current < 60_000) return;
-    // Don't react if AI is busy
-    if (stateRef.current !== 'idle') return;
 
     const s = statsRef.current;
     const tabLabels: Record<string, string> = {
@@ -304,16 +303,25 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
     if (insight) {
       lastTabReaction.current = now;
-      if (isMinimized) {
-        if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
-        setMinimizedToast(insight);
-        minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
-      } else if (isOpen) {
-        setConvo(prev => [...prev, { role: 'assistant', text: insight, ts: Date.now() }]);
-        speakRef.current(insight);
+      // Delay delivery to avoid colliding with greeting or active speech
+      const deliver = () => {
+        if (isMinimized) {
+          if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
+          setMinimizedToast(insight);
+          minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
+        } else if (isOpen) {
+          setConvo(prev => [...prev, { role: 'assistant', text: insight, ts: Date.now() }]);
+          speakRef.current(insight);
+        }
+      };
+      // If AI is busy (greeting/speaking), wait a moment then deliver
+      if (stateRef.current !== 'idle') {
+        setTimeout(deliver, 4000);
+      } else {
+        deliver();
       }
     }
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, isOpen, isMinimized]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load enrolled faces and saved conversation on mount
   useEffect(() => {
