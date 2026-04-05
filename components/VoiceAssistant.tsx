@@ -231,8 +231,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     }
 
     // ─── Proactive tab-change reactions ──────────────────────────
-    // Only react if panel is open or minimized
-    if (!isOpen && !isMinimized) return;
+    // Always react to tab changes — AI is always aware
     // Throttle: at most one reaction every 60s
     if (now - lastTabReaction.current < 60_000) return;
 
@@ -303,22 +302,19 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
     if (insight) {
       lastTabReaction.current = now;
-      // Delay delivery to avoid colliding with greeting or active speech
-      const deliver = () => {
-        if (isMinimized) {
-          if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
-          setMinimizedToast(insight);
-          minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
-        } else if (isOpen) {
+      console.log(`[TAB AWARENESS] ${activeTab}: ${insight}`);
+      // Always show toast notification — visible regardless of panel state
+      if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
+      setMinimizedToast(insight);
+      minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
+      // Also speak if panel is open
+      if (isOpen) {
+        const doSpeak = () => {
           setConvo(prev => [...prev, { role: 'assistant', text: insight, ts: Date.now() }]);
           speakRef.current(insight);
-        }
-      };
-      // If AI is busy (greeting/speaking), wait a moment then deliver
-      if (stateRef.current !== 'idle') {
-        setTimeout(deliver, 4000);
-      } else {
-        deliver();
+        };
+        if (stateRef.current === 'idle') doSpeak();
+        else setTimeout(doSpeak, 4000);
       }
     }
   }, [activeTab, isOpen, isMinimized]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2488,6 +2484,21 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
 
   return (
     <>
+      {/* ── Always-visible Tab Insight Toast ── */}
+      {minimizedToast && !isOpen && (
+        <div className="fixed bottom-24 right-6 z-50 animate-in slide-in-from-right">
+          <button
+            onClick={() => { setMinimizedToast(null); setIsMinimized(false); setIsOpen(true); }}
+            className="max-w-xs bg-gray-900/95 border border-indigo-500/30 rounded-xl px-4 py-3 text-left shadow-2xl backdrop-blur-md cursor-pointer hover:border-indigo-400/50 transition-colors"
+          >
+            <div className="flex items-start gap-2">
+              <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* ── Floating Activation Button ── */}
       {!isOpen && !isMinimized && (
         <button
@@ -2908,18 +2919,6 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
       {/* ── Minimized Floating Widget ── */}
       {isMinimized && !isOpen && (
         <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
-          {/* Toast notification */}
-          {minimizedToast && (
-            <button
-              onClick={() => { setMinimizedToast(null); setIsMinimized(false); setIsOpen(true); }}
-              className="max-w-xs bg-gray-900/95 border border-indigo-500/30 rounded-xl px-4 py-3 text-left shadow-2xl backdrop-blur-md animate-in slide-in-from-right cursor-pointer hover:border-indigo-400/50 transition-colors"
-            >
-              <div className="flex items-start gap-2">
-                <Sparkles className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-                <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
-              </div>
-            </button>
-          )}
           {/* Mini orb */}
           <div className="flex items-center gap-2">
             <button
