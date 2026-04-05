@@ -251,24 +251,55 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
     // Build a contextual insight based on the tab + current stats
     let insight = '';
-    if (activeTab === 'command' && s.late > 5) {
-      insight = `You're in Command Center — heads up, ${s.late} orders are overdue right now.`;
-    } else if (activeTab === 'deco' && s.notOnDeco5Plus > 0) {
-      insight = `Checking deco — ${s.notOnDeco5Plus} orders have been waiting 5+ days to get on a decorator.`;
-    } else if (activeTab === 'stock' && s.mappingGap > 0) {
-      insight = `Stock Manager — there are ${s.mappingGap} unmapped products that need attention.`;
-    } else if (activeTab === 'efficiency' && s.fulfilled7d > 0) {
-      insight = `Efficiency tab — ${s.fulfilled7d} orders fulfilled this week so far.`;
-    } else if (activeTab === 'fulfill' && s.readyForShipping > 0) {
-      insight = `Fulfillment — ${s.readyForShipping} orders are ready to ship.`;
-    } else if (activeTab === 'mto' && s.unfulfilled > 0) {
-      insight = `Made to Order — ${s.unfulfilled} unfulfilled orders in the pipeline.`;
-    } else if (activeTab === 'sales' || activeTab === 'revenue' || activeTab === 'finance') {
-      insight = `Looking at ${label} — let me know if you want me to break down any numbers.`;
+    if (activeTab === 'command') {
+      const parts: string[] = [];
+      if (s.late > 5) parts.push(`${s.late} overdue`);
+      if (s.readyForShipping > 0) parts.push(`${s.readyForShipping} ready to ship`);
+      if (s.dueSoon > 10) parts.push(`${s.dueSoon} due soon`);
+      insight = parts.length > 0 ? `Command Center — ${parts.join(', ')}.` : `Command Center — looking at the overview.`;
+    } else if (activeTab === 'dashboard') {
+      const parts: string[] = [];
+      if (s.late > 0) parts.push(`${s.late} overdue`);
+      if (s.unfulfilled > 0) parts.push(`${s.unfulfilled} active orders`);
+      insight = parts.length > 0 ? `Dashboard — ${parts.join(', ')}.` : `Back on the Dashboard.`;
+    } else if (activeTab === 'deco') {
+      insight = s.notOnDeco5Plus > 0
+        ? `Deco Dashboard — ${s.notOnDeco5Plus} orders waiting 5+ days, ${s.notOnDeco10Plus || 0} over 10 days.`
+        : `Checking Deco Dashboard.`;
+    } else if (activeTab === 'stock') {
+      insight = s.mappingGap > 0
+        ? `Stock Manager — ${s.mappingGap} unmapped products need attention.`
+        : `Stock Manager — everything looks mapped.`;
+    } else if (activeTab === 'efficiency') {
+      insight = `Efficiency — ${s.fulfilled7d || 0} shipped this week, ${Math.round((s as any).completionRate || 0)}% completion rate.`;
+    } else if (activeTab === 'fulfill') {
+      insight = s.readyForShipping > 0
+        ? `Fulfillment — ${s.readyForShipping} orders ready to ship right now.`
+        : `Fulfillment — nothing ready to ship at the moment.`;
+    } else if (activeTab === 'mto') {
+      insight = `Made to Order — ${s.unfulfilled || 0} unfulfilled orders in the pipeline.`;
     } else if (activeTab === 'kanban') {
-      insight = `Kanban view — good for seeing the flow. ${s.late > 0 ? `${s.late} overdue need moving.` : ''}`;
+      insight = s.late > 0 ? `Kanban view — ${s.late} overdue need moving.` : `Kanban view — flow looks clean.`;
     } else if (activeTab === 'production') {
-      insight = `Production Calendar — ${s.dueSoon > 0 ? `${s.dueSoon} orders due soon.` : 'looking clear.'}`;
+      insight = s.dueSoon > 0 ? `Production Calendar — ${s.dueSoon} orders due soon.` : `Production Calendar — looking clear.`;
+    } else if (activeTab === 'sales') {
+      insight = `Sales Analytics — ${s.fulfilled7d || 0} orders shipped in the last 7 days.`;
+    } else if (activeTab === 'revenue') {
+      insight = `Revenue view — pipeline value and order trends.`;
+    } else if (activeTab === 'finance') {
+      insight = `Finance — let me know if you want me to break down any numbers.`;
+    } else if (activeTab === 'analyst') {
+      insight = `Process Analyst — looking at bottlenecks and workflow performance.`;
+    } else if (activeTab === 'alerts') {
+      insight = `Stock Alerts — checking inventory warnings.`;
+    } else if (activeTab === 'operations') {
+      insight = `Operations — shipping and logistics overview.`;
+    } else if (activeTab === 'reports') {
+      insight = s.late > 0 ? `Reports — ${s.late} overdue orders worth investigating.` : `Reports section.`;
+    } else if (activeTab === 'intelligence') {
+      insight = `Intelligence — AI insights and pattern analysis.`;
+    } else {
+      insight = `Switched to ${label}.`;
     }
 
     if (insight) {
@@ -415,22 +446,36 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   }, [knowledgeFetch]);
 
   // ─── Consciousness: Load what the AI knows about this person ──
-  const loadConsciousness = useCallback(async (userName: string) => {
+  const memoryAvailable = useRef(true);
+  const memoryFailCount = useRef(0);
+
+  const memoryFetch = useCallback(async (body: Record<string, any>): Promise<Response | null> => {
+    if (!memoryAvailable.current) return null;
     try {
       const res = await fetch('/api/ai-memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_consciousness', user_name: userName }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.consciousness) {
-          setConsciousnessContext(data.consciousness);
-          console.log('[CONSCIOUSNESS] Loaded knowledge for', userName);
-        }
+      if (res.status === 501) {
+        memoryFailCount.current++;
+        if (memoryFailCount.current >= 2) memoryAvailable.current = false;
+        return null;
       }
-    } catch (e) { console.log('[CONSCIOUSNESS] Load failed:', e); }
+      memoryFailCount.current = 0;
+      return res;
+    } catch { return null; }
   }, []);
+
+  const loadConsciousness = useCallback(async (userName: string) => {
+    const res = await memoryFetch({ action: 'get_consciousness', user_name: userName });
+    if (res?.ok) {
+      const data = await res.json();
+      if (data.consciousness) {
+        setConsciousnessContext(data.consciousness);
+      }
+    }
+  }, [memoryFetch]);
 
   // Load consciousness when user is identified (defined after loadConsciousness to avoid TDZ)
   useEffect(() => {
@@ -447,20 +492,12 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
     try {
       // Get existing knowledge to avoid duplicates
       const [knowledgeRes, patternsRes] = await Promise.all([
-        fetch('/api/ai-memory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'get_knowledge', entity: currentUser.name }),
-        }),
-        fetch('/api/ai-memory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'get_patterns', user_name: currentUser.name, min_confidence: 0.3 }),
-        }),
+        memoryFetch({ action: 'get_knowledge', entity: currentUser.name }),
+        memoryFetch({ action: 'get_patterns', user_name: currentUser.name, min_confidence: 0.3 }),
       ]);
 
-      const existingKnowledge = knowledgeRes.ok ? (await knowledgeRes.json()).knowledge || [] : [];
-      const existingPatterns = patternsRes.ok ? (await patternsRes.json()).patterns || [] : [];
+      const existingKnowledge = knowledgeRes?.ok ? (await knowledgeRes.json()).knowledge || [] : [];
+      const existingPatterns = patternsRes?.ok ? (await patternsRes.json()).patterns || [] : [];
 
       const res = await fetch('/api/ai-learn', {
         method: 'POST',
@@ -856,19 +893,15 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
 
       // Store notable observations to DB (if significant)
       if (obs.notable && currentUser) {
-        fetch('/api/ai-memory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'store_observation',
-            user_name: currentUser.name,
-            observation_type: obs.interaction !== 'none' ? 'interaction' : (obs.people?.[0]?.gesture !== 'none' ? 'gesture' : 'expression'),
-            detail: obs.body_language_read || obs.description || obs.significant_change || '',
-            context: { people: obs.people, objects: obs.objects, environment: obs.environment },
-            mood_at_time: obs.expression || obs.people?.[0]?.expression || null,
-            session_id: sessionId,
-          }),
-        }).catch(() => {});
+        memoryFetch({
+          action: 'store_observation',
+          user_name: currentUser.name,
+          observation_type: obs.interaction !== 'none' ? 'interaction' : (obs.people?.[0]?.gesture !== 'none' ? 'gesture' : 'expression'),
+          detail: obs.body_language_read || obs.description || obs.significant_change || '',
+          context: { people: obs.people, objects: obs.objects, environment: obs.environment },
+          mood_at_time: obs.expression || obs.people?.[0]?.expression || null,
+          session_id: sessionId,
+        });
       }
     } catch {}
   }, [captureSnapshot, currentUser, generateVisualReaction, buildAwarenessSummary, sessionId]);
