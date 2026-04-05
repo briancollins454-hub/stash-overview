@@ -347,87 +347,72 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   }, [expression]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Knowledge Base / RAG Helpers ──────────────────────────────
-  const storeKnowledge = useCallback(async (text: string, category: string, metadata?: Record<string, any>) => {
-    try {
-      await fetch('/api/ai-knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'store', text, category, metadata }),
-      });
-    } catch {}
-  }, []);
+  const knowledgeAvailable = useRef(true); // Circuit breaker — stops calling after repeated failures
+  const knowledgeFailCount = useRef(0);
 
-  const searchKnowledge = useCallback(async (query: string, category?: string): Promise<any[]> => {
+  const knowledgeFetch = useCallback(async (body: Record<string, any>): Promise<Response | null> => {
+    if (!knowledgeAvailable.current) return null;
     try {
       const res = await fetch('/api/ai-knowledge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'search', text: query, category: category || 'all', limit: 5 }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) {
-        const data = await res.json();
-        return data.results || [];
+      if (res.status === 501) {
+        knowledgeFailCount.current++;
+        if (knowledgeFailCount.current >= 2) knowledgeAvailable.current = false;
+        return null;
       }
-    } catch {}
-    return [];
+      knowledgeFailCount.current = 0;
+      return res;
+    } catch { return null; }
   }, []);
 
+  const storeKnowledge = useCallback(async (text: string, category: string, metadata?: Record<string, any>) => {
+    await knowledgeFetch({ action: 'store', text, category, metadata });
+  }, [knowledgeFetch]);
+
+  const searchKnowledge = useCallback(async (query: string, category?: string): Promise<any[]> => {
+    const res = await knowledgeFetch({ action: 'search', text: query, category: category || 'all', limit: 5 });
+    if (res?.ok) {
+      const data = await res.json();
+      return data.results || [];
+    }
+    return [];
+  }, [knowledgeFetch]);
+
   const storeFeedback = useCallback(async (messageId: string, rating: 'up' | 'down') => {
-    try {
-      await fetch('/api/ai-knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'store_feedback', message_id: messageId, rating, user_name: currentUser?.name }),
-      });
-    } catch {}
-  }, [currentUser]);
+    await knowledgeFetch({ action: 'store_feedback', message_id: messageId, rating, user_name: currentUser?.name });
+  }, [currentUser, knowledgeFetch]);
 
   const storeActivity = useCallback(async (eventType: string, details?: Record<string, any>) => {
-    try {
-      await fetch('/api/ai-knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'store_activity', user_name: currentUser?.name || 'unknown', event_type: eventType, details }),
-      });
-    } catch {}
-  }, [currentUser]);
+    await knowledgeFetch({ action: 'store_activity', user_name: currentUser?.name || 'unknown', event_type: eventType, details });
+  }, [currentUser, knowledgeFetch]);
 
   const storeConversationSummary = useCallback(async () => {
     if (convoRef.current.length < 4) return;
     const msgs = convoRef.current.filter(m => m.role !== 'system' && m.role !== 'tool').slice(-20);
     const summary = msgs.map(m => `${m.role}: ${m.text.slice(0, 100)}`).join(' | ');
-    try {
-      await fetch('/api/ai-knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'store_conversation_summary',
-          user_name: currentUser?.name || 'unknown',
-          summary: summary.slice(0, 500),
-          session_id: sessionId,
-          message_count: msgs.length,
-        }),
-      });
-    } catch {}
-  }, [currentUser, sessionId]);
+    await knowledgeFetch({
+      action: 'store_conversation_summary',
+      user_name: currentUser?.name || 'unknown',
+      summary: summary.slice(0, 500),
+      session_id: sessionId,
+      message_count: msgs.length,
+    });
+  }, [currentUser, sessionId, knowledgeFetch]);
 
   const loadLastConversation = useCallback(async (userName: string) => {
-    try {
-      const res = await fetch('/api/ai-knowledge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_last_conversation', user_name: userName }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.conversation?.summary) {
-          setLastConversationSummary(data.conversation.summary);
-          return data.conversation.summary;
-        }
+    const res = await knowledgeFetch({ action: 'get_last_conversation', user_name: userName });
+    if (res?.ok) {
+      const data = await res.json();
+      if (data.conversation?.summary) {
+        setLastConversationSummary(data.conversation.summary);
+        return data.conversation.summary;
       }
-    } catch {}
+    }
     return null;
-  }, []);
+  }, [knowledgeFetch]);
 
   // ─── Consciousness: Load what the AI knows about this person ──
   const loadConsciousness = useCallback(async (userName: string) => {
