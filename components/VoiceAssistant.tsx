@@ -1640,26 +1640,8 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
         return updated;
       });
 
-      // Progressive TTS: speak sentence by sentence for ultra-low perceived latency
-      const sentences = cleanText.match(/[^.!?*]+[.!?]+\s*|\*[^*]+\*\s*/g) || [cleanText];
-      if (!muted && sentences.length > 1) {
-        speechSynthesis.cancel();
-        if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-        if (recogRef.current) { try { recogRef.current.stop(); } catch {} }
-        setState('speaking');
-        stateRef.current = 'speaking';
-        const allSegments = sentences.flatMap(s => parseSegments(s.trim())).filter(s => s.text.trim());
-        for (const seg of allSegments) {
-          if (stateRef.current !== 'speaking') break;
-          const buf = await fetchTtsBuffer(seg.text);
-          if (buf) { await playTtsBuffer(buf); audioRef.current = null; }
-          else { speakFallback(cleanText); break; }
-        }
-        if (stateRef.current === 'speaking') setState('idle');
-        if (handsFree && recogRef.current) { try { recogRef.current.start(); } catch {} }
-      } else {
-        speak(cleanText);
-      }
+      // Speak the full response as one continuous audio clip
+      speak(cleanText);
 
       // Store interaction in knowledge base (fire and forget)
       storeKnowledge(`Q: ${userMsg}\nA: ${cleanText}`, 'conversations', { user: currentUser?.name, session: sessionId });
