@@ -214,6 +214,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
   // ─── Screen Awareness: Track tab navigation over time ──────────
+  const lastTabReaction = useRef<number>(0);
   useEffect(() => {
     if (!activeTab) return;
     const history = screenHistory.current;
@@ -228,7 +229,60 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ stats, orders, onNaviga
       // Keep last 20 tab visits
       if (history.length > 20) history.shift();
     }
-  }, [activeTab]);
+
+    // ─── Proactive tab-change reactions ──────────────────────────
+    if (!isActive) return;
+    // Throttle: at most one reaction every 60s
+    if (now - lastTabReaction.current < 60_000) return;
+    // Don't react if AI is busy
+    if (stateRef.current !== 'idle') return;
+
+    const s = statsRef.current;
+    const tabLabels: Record<string, string> = {
+      dashboard: 'Dashboard', stock: 'Stock Manager', efficiency: 'Efficiency',
+      mto: 'Made to Order', deco: 'Deco Dashboard', analyst: 'Process Analyst',
+      command: 'Command Center', kanban: 'Kanban Board', intelligence: 'Intelligence',
+      alerts: 'Stock Alerts', production: 'Production Calendar', reports: 'Reports',
+      operations: 'Operations', revenue: 'Revenue', finance: 'Finance',
+      sales: 'Sales Analytics', fulfill: 'Fulfillment', guide: 'Guide',
+      widget: 'Widget', autolink: 'Auto Link', users: 'Users', manual: 'Manual',
+    };
+    const label = tabLabels[activeTab] || activeTab;
+
+    // Build a contextual insight based on the tab + current stats
+    let insight = '';
+    if (activeTab === 'command' && s.late > 5) {
+      insight = `You're in Command Center — heads up, ${s.late} orders are overdue right now.`;
+    } else if (activeTab === 'deco' && s.notOnDeco5Plus > 0) {
+      insight = `Checking deco — ${s.notOnDeco5Plus} orders have been waiting 5+ days to get on a decorator.`;
+    } else if (activeTab === 'stock' && s.mappingGap > 0) {
+      insight = `Stock Manager — there are ${s.mappingGap} unmapped products that need attention.`;
+    } else if (activeTab === 'efficiency' && s.fulfilled7d > 0) {
+      insight = `Efficiency tab — ${s.fulfilled7d} orders fulfilled this week so far.`;
+    } else if (activeTab === 'fulfill' && s.readyForShipping > 0) {
+      insight = `Fulfillment — ${s.readyForShipping} orders are ready to ship.`;
+    } else if (activeTab === 'mto' && s.unfulfilled > 0) {
+      insight = `Made to Order — ${s.unfulfilled} unfulfilled orders in the pipeline.`;
+    } else if (activeTab === 'sales' || activeTab === 'revenue' || activeTab === 'finance') {
+      insight = `Looking at ${label} — let me know if you want me to break down any numbers.`;
+    } else if (activeTab === 'kanban') {
+      insight = `Kanban view — good for seeing the flow. ${s.late > 0 ? `${s.late} overdue need moving.` : ''}`;
+    } else if (activeTab === 'production') {
+      insight = `Production Calendar — ${s.dueSoon > 0 ? `${s.dueSoon} orders due soon.` : 'looking clear.'}`;
+    }
+
+    if (insight) {
+      lastTabReaction.current = now;
+      if (isMinimized) {
+        if (minimizedToastTimer.current) clearTimeout(minimizedToastTimer.current);
+        setMinimizedToast(insight);
+        minimizedToastTimer.current = window.setTimeout(() => setMinimizedToast(null), 8000);
+      } else if (isOpen) {
+        setConvo(prev => [...prev, { role: 'assistant', text: insight, ts: Date.now() }]);
+        speakRef.current(insight);
+      }
+    }
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load enrolled faces and saved conversation on mount
   useEffect(() => {
