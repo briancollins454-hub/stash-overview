@@ -342,8 +342,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     });
 
     return Array.from(map.entries()).map(([name, jobs]) => {
-      // Exclude cancelled jobs from all financial figures
-      const activeJobs = jobs.filter(j => !isCancelled(j));
+      // Exclude cancelled and quote jobs from financial figures
+      const activeJobs = jobs.filter(j => !isCancelled(j) && !j.isQuote);
 
       const totalOutstanding = activeJobs.reduce((s, j) => s + (j.outstandingBalance || 0), 0);
       const totalBillable = activeJobs.reduce((s, j) => s + (j.billableAmount || 0), 0);
@@ -412,8 +412,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     const overdue90 = customersWithInvoicedBalance.filter(a => a.agingBucket === '90+');
     const overdue60 = customersWithInvoicedBalance.filter(a => a.agingBucket === '61-90' || a.agingBucket === '90+');
 
-    // Exclude cancelled from all summary calculations
-    const activeJobs = allJobs.filter(j => !isCancelled(j));
+    // Exclude cancelled and quotes from financial calculations (quotes counted separately)
+    const activeJobs = allJobs.filter(j => !isCancelled(j) && !j.isQuote);
 
     // Aging buckets — only for invoiced orders (jobs with dateInvoiced)
     const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
@@ -423,13 +423,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       aging[bucket] += (j.outstandingBalance || 0);
     });
 
-    // Total value of Quotes — check isQuote flag, status text, or paymentStatus
+    // Total value of Quotes — check isQuote flag or status text
     const isQuoteJob = (j: DecoJob) => {
       if (j.isQuote) return true;
       const s = (j.status || '').toLowerCase();
-      return s.includes('quote') || s === 'saved';
+      return s.includes('quote');
     };
-    const quoteJobs = activeJobs.filter(isQuoteJob);
+    const quoteJobs = allJobs.filter(j => !isCancelled(j) && isQuoteJob(j));
     const quotesTotal = quoteJobs
       .reduce((s, j) => s + (j.orderTotal || j.billableAmount || j.outstandingBalance || 0), 0);
     const quotesCount = quoteJobs.length;
