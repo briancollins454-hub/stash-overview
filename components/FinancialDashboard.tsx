@@ -94,6 +94,12 @@ const paymentStatusLabel = (ps: string | undefined): string => {
 
 const paymentStatusColor = (ps: string | undefined): string => {
   const label = paymentStatusLabel(ps);
+
+const isCancelled = (j: DecoJob): boolean => {
+  const status = (j.status || '').toLowerCase();
+  const ps = j.paymentStatus;
+  return status === 'cancelled' || ps === '7';
+};
   if (label === 'Paid') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300';
   if (label === 'Invoiced') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
   if (label === 'Unpaid') return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
@@ -337,21 +343,24 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     });
 
     return Array.from(map.entries()).map(([name, jobs]) => {
-      const totalOutstanding = jobs.reduce((s, j) => s + (j.outstandingBalance || 0), 0);
-      const totalBillable = jobs.reduce((s, j) => s + (j.billableAmount || 0), 0);
+      // Exclude cancelled jobs from all financial figures
+      const activeJobs = jobs.filter(j => !isCancelled(j));
+
+      const totalOutstanding = activeJobs.reduce((s, j) => s + (j.outstandingBalance || 0), 0);
+      const totalBillable = activeJobs.reduce((s, j) => s + (j.billableAmount || 0), 0);
       const totalPaid = totalBillable - totalOutstanding;
-      const totalCreditUsed = jobs.reduce((s, j) => s + (j.creditUsed || 0), 0);
+      const totalCreditUsed = activeJobs.reduce((s, j) => s + (j.creditUsed || 0), 0);
 
       // Split outstanding into invoiced vs in-progress
-      const invoicedOutstanding = jobs
+      const invoicedOutstanding = activeJobs
         .filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0)
         .reduce((s, j) => s + (j.outstandingBalance || 0), 0);
-      const inProgressValue = jobs
+      const inProgressValue = activeJobs
         .filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0)
         .reduce((s, j) => s + (j.outstandingBalance || 0), 0);
 
       // Find the oldest unpaid INVOICED date (aging only for invoiced jobs)
-      const unpaidJobs = jobs.filter(j => (j.outstandingBalance || 0) > 0);
+      const unpaidJobs = activeJobs.filter(j => (j.outstandingBalance || 0) > 0);
       const invoicedUnpaidJobs = unpaidJobs.filter(j => !!j.dateInvoiced);
       const oldestDates = invoicedUnpaidJobs
         .map(j => j.dateInvoiced!)
@@ -404,23 +413,31 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     const overdue90 = customersWithInvoicedBalance.filter(a => a.agingBucket === '90+');
     const overdue60 = customersWithInvoicedBalance.filter(a => a.agingBucket === '61-90' || a.agingBucket === '90+');
 
+    // Exclude cancelled from all summary calculations
+    const activeJobs = allJobs.filter(j => !isCancelled(j));
+
     // Aging buckets — only for invoiced orders (jobs with dateInvoiced)
     const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-    allJobs.filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+    activeJobs.filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
       const days = daysSince(j.dateInvoiced!);
       const bucket = getAgingBucket(days);
       aging[bucket] += (j.outstandingBalance || 0);
     });
 
-    // Total value of Quotes
-    const quotesTotal = allJobs
-      .filter(j => (j.status || '').toLowerCase().includes('quote'))
-      .reduce((s, j) => s + (j.billableAmount || j.outstandingBalance || 0), 0);
-    const quotesCount = allJobs.filter(j => (j.status || '').toLowerCase().includes('quote')).length;
+    // Total value of Quotes — use orderTotal/billableAmount, check status or paymentStatus
+    const isQuote = (j: DecoJob) => {
+      const s = (j.status || '').toLowerCase();
+      const ps = j.paymentStatus;
+      return s.includes('quote') || s === 'awaiting review' || ps === '11';
+    };
+    const quoteJobs = activeJobs.filter(isQuote);
+    const quotesTotal = quoteJobs
+      .reduce((s, j) => s + (j.orderTotal || j.billableAmount || j.outstandingBalance || 0), 0);
+    const quotesCount = quoteJobs.length;
 
-    // Jobs in Progress breakdown by order status
+    // Jobs in Progress breakdown by order status (exclude cancelled)
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
-    allJobs.filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+    activeJobs.filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
       const status = j.status || 'Unknown';
       if (!inProgressByStatus[status]) inProgressByStatus[status] = { value: 0, count: 0 };
       inProgressByStatus[status].value += (j.outstandingBalance || 0);
