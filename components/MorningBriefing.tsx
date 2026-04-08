@@ -1439,7 +1439,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       </div>
 
       {/* ═══ PLATFORM OVERVIEW: SHOPIFY vs DECO ═══ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* LEFT: Shopify */}
         <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
           <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
