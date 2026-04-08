@@ -439,71 +439,122 @@ export const fetchDecoFinancials = async (
 
     // Fetch quotes separately — Deco stores quotes as a different order type
     let quoteOffset = 0;
+    let quoteFetchWorked = false;
+    // Try manage_quotes/find first
     while (true) {
         if (signal?.aborted) break;
-        const quoteParams: Record<string, string> = {
-            field: '1', condition: '4', date1: dateStr,
-            limit: BATCH.toString(), offset: quoteOffset.toString(),
-            skip_login_token: '1',
-            order_type: '2', // quotes
-        };
-        let quoteData: any;
         try {
-            quoteData = await robustDecoFetch(settings, 'api/json/manage_orders/find', quoteParams);
-        } catch {
-            // If order_type param not supported, try manage_quotes endpoint
+            const quoteData = await robustDecoFetch(settings, 'api/json/manage_quotes/find', {
+                field: '1', condition: '4', date1: dateStr,
+                limit: BATCH.toString(), offset: quoteOffset.toString(),
+                skip_login_token: '1',
+            });
+            const quotes = quoteData?.orders || quoteData?.quotes || [];
+            if (!quotes.length) break;
+            quoteFetchWorked = true;
+
+            for (const job of quotes) {
+                if (allJobs.some(j => j.jobNumber === String(job.order_id))) continue;
+                const custName = job.billing_details?.company ||
+                    `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
+                allJobs.push({
+                    id: String(job.order_id), jobNumber: String(job.order_id),
+                    poNumber: job.customer_po_number || '', jobName: job.job_name || '',
+                    customerName: custName,
+                    status: job.order_status_name || mapDecoStatus(job.order_status),
+                    dateOrdered: job.date_ordered,
+                    productionDueDate: job.date_scheduled || '',
+                    dateDue: job.date_due,
+                    dateShipped: job.date_shipped || job.date_completed,
+                    itemsProduced: 0, totalItems: 0,
+                    notes: '', productCode: '', items: [],
+                    orderTotal: parseFloat(job.item_amount) || parseFloat(job.total) || undefined,
+                    orderSubtotal: parseFloat(job.item_amount) || undefined,
+                    orderTax: parseFloat(job.tax_amount) || parseFloat(job.tax) || undefined,
+                    paymentStatus: job.payment_status?.toString(),
+                    paymentMethod: job.payment_details?.payment_type_name || job.payment_method || undefined,
+                    discount: parseFloat(job.discount_amount) || undefined,
+                    couponCode: job.coupon_code || undefined,
+                    outstandingBalance: parseFloat(job.outstanding_balance) || 0,
+                    billableAmount: parseFloat(job.billable_amount) || 0,
+                    creditUsed: parseFloat(job.credit_used) || 0,
+                    accountTerms: job.account_terms || undefined,
+                    dateInvoiced: job.date_invoiced || undefined,
+                    isQuote: true,
+                    payments: [],
+                    refunds: [],
+                });
+            }
+
+            quoteOffset += quotes.length;
+            if (quotes.length < BATCH) break;
+            await delay(50);
+        } catch (e: any) {
+            console.warn('[Deco] manage_quotes/find failed:', e.message);
+            break;
+        }
+    }
+
+    // If manage_quotes didn't work, try manage_orders with is_quote=1 and order_type=2
+    if (!quoteFetchWorked) {
+        quoteOffset = 0;
+        while (true) {
+            if (signal?.aborted) break;
             try {
-                quoteData = await robustDecoFetch(settings, 'api/json/manage_quotes/find', {
+                const quoteData = await robustDecoFetch(settings, 'api/json/manage_orders/find', {
                     field: '1', condition: '4', date1: dateStr,
                     limit: BATCH.toString(), offset: quoteOffset.toString(),
                     skip_login_token: '1',
+                    is_quote: '1',
                 });
-            } catch {
-                console.warn('[Deco] Could not fetch quotes — neither order_type=2 nor manage_quotes endpoint worked');
+                const quotes = quoteData?.orders || [];
+                if (!quotes.length) break;
+                console.log('[Deco] is_quote=1 returned', quotes.length, 'results');
+
+                for (const job of quotes) {
+                    if (allJobs.some(j => j.jobNumber === String(job.order_id))) continue;
+                    const custName = job.billing_details?.company ||
+                        `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
+                    allJobs.push({
+                        id: String(job.order_id), jobNumber: String(job.order_id),
+                        poNumber: job.customer_po_number || '', jobName: job.job_name || '',
+                        customerName: custName,
+                        status: job.order_status_name || mapDecoStatus(job.order_status),
+                        dateOrdered: job.date_ordered,
+                        productionDueDate: job.date_scheduled || '',
+                        dateDue: job.date_due,
+                        dateShipped: job.date_shipped || job.date_completed,
+                        itemsProduced: 0, totalItems: 0,
+                        notes: '', productCode: '', items: [],
+                        orderTotal: parseFloat(job.item_amount) || parseFloat(job.total) || undefined,
+                        orderSubtotal: parseFloat(job.item_amount) || undefined,
+                        orderTax: parseFloat(job.tax_amount) || parseFloat(job.tax) || undefined,
+                        paymentStatus: job.payment_status?.toString(),
+                        paymentMethod: job.payment_details?.payment_type_name || job.payment_method || undefined,
+                        discount: parseFloat(job.discount_amount) || undefined,
+                        couponCode: job.coupon_code || undefined,
+                        outstandingBalance: parseFloat(job.outstanding_balance) || 0,
+                        billableAmount: parseFloat(job.billable_amount) || 0,
+                        creditUsed: parseFloat(job.credit_used) || 0,
+                        accountTerms: job.account_terms || undefined,
+                        dateInvoiced: job.date_invoiced || undefined,
+                        isQuote: true,
+                        payments: [],
+                        refunds: [],
+                    });
+                }
+
+                quoteOffset += quotes.length;
+                if (quotes.length < BATCH) break;
+                await delay(50);
+            } catch (e: any) {
+                console.warn('[Deco] is_quote=1 fallback failed:', e.message);
                 break;
             }
         }
-        const quotes = quoteData?.orders || quoteData?.quotes || [];
-        if (!quotes.length) break;
-
-        for (const job of quotes) {
-            // Skip if we already have this order from the main fetch
-            if (allJobs.some(j => j.jobNumber === String(job.order_id))) continue;
-            const custName = job.billing_details?.company ||
-                `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
-            allJobs.push({
-                id: String(job.order_id), jobNumber: String(job.order_id),
-                poNumber: job.customer_po_number || '', jobName: job.job_name || '',
-                customerName: custName,
-                status: job.order_status_name || mapDecoStatus(job.order_status),
-                dateOrdered: job.date_ordered,
-                productionDueDate: job.date_scheduled || '',
-                dateDue: job.date_due,
-                dateShipped: job.date_shipped || job.date_completed,
-                itemsProduced: 0, totalItems: 0,
-                notes: '', productCode: '', items: [],
-                orderTotal: parseFloat(job.item_amount) || parseFloat(job.total) || undefined,
-                orderSubtotal: parseFloat(job.item_amount) || undefined,
-                orderTax: parseFloat(job.tax_amount) || parseFloat(job.tax) || undefined,
-                paymentStatus: job.payment_status?.toString(),
-                paymentMethod: job.payment_details?.payment_type_name || job.payment_method || undefined,
-                discount: parseFloat(job.discount_amount) || undefined,
-                couponCode: job.coupon_code || undefined,
-                outstandingBalance: parseFloat(job.outstanding_balance) || 0,
-                billableAmount: parseFloat(job.billable_amount) || 0,
-                creditUsed: parseFloat(job.credit_used) || 0,
-                accountTerms: job.account_terms || undefined,
-                dateInvoiced: job.date_invoiced || undefined,
-                isQuote: true,
-                payments: [],
-                refunds: [],
-            });
-        }
-
-        quoteOffset += quotes.length;
-        if (quotes.length < BATCH) break;
-        await delay(50);
     }
+
+    console.log('[Deco] Total jobs:', allJobs.length, 'of which quotes:', allJobs.filter(j => j.isQuote).length);
 
     return allJobs;
 };
