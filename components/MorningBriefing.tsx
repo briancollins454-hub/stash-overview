@@ -44,6 +44,12 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
 
 const defaultColor = { bg: 'bg-gray-500/15', text: 'text-gray-400', dot: 'bg-gray-400' };
 
+const daysOverdueFn = (j: DecoJob, now: Date) => {
+  const due = parseDate(j.dateDue) || parseDate(j.productionDueDate);
+  if (!due) return 0;
+  return Math.ceil((now.getTime() - due.getTime()) / 86400000);
+};
+
 export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }: Props) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     attention: true,
@@ -205,14 +211,211 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     };
   }, [decoJobs, now]);
 
+  // ─── AI NARRATIVE ENGINE ───
+  const briefing = useMemo(() => {
+    const d = data;
+    const issues: { icon: string; severity: 'critical' | 'warning' | 'info'; title: string; detail: string }[] = [];
+    const positives: { icon: string; title: string; detail: string }[] = [];
+    const actions: { priority: 'high' | 'medium' | 'low'; action: string }[] = [];
+
+    // ── ISSUES ──
+
+    // Overdue analysis
+    if (d.overdue.length > 0) {
+      const worst = d.overdue[0];
+      const worstDays = daysOverdueFn(worst, now);
+      const overdueValue = d.overdue.reduce((s, j) => s + (j.orderTotal || j.billableAmount || 0), 0);
+      const uniqueCustomers = new Set(d.overdue.map(j => j.customerName)).size;
+      issues.push({
+        icon: '🚨',
+        severity: d.overdue.length > 5 ? 'critical' : 'warning',
+        title: `${d.overdue.length} order${d.overdue.length !== 1 ? 's are' : ' is'} past the scheduled ship date`,
+        detail: `The most overdue is #${worst.jobNumber} for ${worst.customerName}, now ${worstDays} day${worstDays !== 1 ? 's' : ''} late. ` +
+          `These overdue orders span ${uniqueCustomers} customer${uniqueCustomers !== 1 ? 's' : ''} and represent ${formatCurrency(overdueValue)} in pipeline value. ` +
+          (d.overdue.length > 10 ? 'This is a significant backlog that needs urgent attention from the team.' :
+           d.overdue.length > 3 ? 'Prioritise getting these cleared today where possible.' :
+           'These should be manageable to resolve today.'),
+      });
+      actions.push({ priority: 'high', action: `Follow up on ${d.overdue.length} overdue order${d.overdue.length !== 1 ? 's' : ''}, starting with #${worst.jobNumber} (${worst.customerName})` });
+    }
+
+    // At risk analysis
+    if (d.atRisk.length > 0) {
+      const blockedRisk = d.atRisk.filter(j => {
+        const s = (j.status || '').toLowerCase();
+        return s === 'awaiting stock' || s === 'not ordered';
+      });
+      issues.push({
+        icon: '⏰',
+        severity: d.atRisk.length > 3 ? 'warning' : 'info',
+        title: `${d.atRisk.length} order${d.atRisk.length !== 1 ? 's' : ''} due in the next 48 hours ${d.atRisk.length !== 1 ? 'are' : 'is'} not in production yet`,
+        detail: (blockedRisk.length > 0
+          ? `${blockedRisk.length} of these ${blockedRisk.length !== 1 ? 'are' : 'is'} waiting on stock or purchase orders, so ${blockedRisk.length !== 1 ? 'they' : 'it'} cannot progress until that is resolved. `
+          : '') +
+          `If these orders miss their ship date, they will become overdue. Check with production whether any can be fast-tracked.`,
+      });
+      if (blockedRisk.length > 0) {
+        actions.push({ priority: 'high', action: `Chase stock/PO for ${blockedRisk.length} at-risk order${blockedRisk.length !== 1 ? 's' : ''} due within 48 hours` });
+      }
+    }
+
+    // Blocker bottleneck analysis
+    const blockerEntries = Object.entries(d.blockers);
+    if (blockerEntries.length > 0) {
+      const totalBlocked = blockerEntries.reduce((s, [, jobs]) => s + jobs.length, 0);
+      const blockedValue = blockerEntries.reduce((s, [, jobs]) => s + jobs.reduce((t, j) => t + (j.orderTotal || j.billableAmount || 0), 0), 0);
+      const biggest = blockerEntries.sort((a, b) => b[1].length - a[1].length)[0];
+      issues.push({
+        icon: '🔒',
+        severity: totalBlocked > 30 ? 'critical' : totalBlocked > 10 ? 'warning' : 'info',
+        title: `${totalBlocked} orders worth ${formatCurrency(blockedValue)} are currently blocked`,
+        detail: `The biggest bottleneck is "${biggest[0]}" with ${biggest[1].length} order${biggest[1].length !== 1 ? 's' : ''}. ` +
+          (biggest[0] === 'Awaiting Stock' ? 'Check supplier delivery dates and whether any alternative stock sources are available. ' :
+           biggest[0] === 'Not Ordered' ? 'These need purchase orders raised. Check if any can be consolidated into bulk orders for better pricing. ' :
+           biggest[0] === 'Awaiting Artwork' ? 'Chase artwork approvals from customers. Consider sending reminder emails today. ' :
+           biggest[0] === 'On Hold' ? 'Review whether any held orders can now be released. ' : '') +
+          `Until these are unblocked, they cannot enter production.`,
+      });
+      if (biggest[0] === 'Not Ordered') {
+        actions.push({ priority: 'high', action: `Raise purchase orders for ${biggest[1].length} "Not Ordered" jobs` });
+      }
+      if (biggest[0] === 'Awaiting Stock') {
+        actions.push({ priority: 'medium', action: `Check supplier ETAs for ${biggest[1].length} orders waiting on stock` });
+      }
+    }
+
+    // Heavy shipping day warning
+    if (d.shippingToday.length > 8) {
+      issues.push({
+        icon: '📦',
+        severity: 'info',
+        title: `Heavy shipping day: ${d.shippingToday.length} orders are due out today`,
+        detail: `That is above a typical day. Make sure the shipping team is aware and has capacity. Prioritise orders with the earliest cut-off times.`,
+      });
+    }
+
+    // Pipeline concentration risk
+    const inProd = d.pipelineValues['In Production']?.count || 0;
+    const readyToShip = d.pipelineValues['Ready for Shipping']?.count || 0;
+    if (inProd === 0 && d.totalActive > 10) {
+      issues.push({
+        icon: '⚠️',
+        severity: 'warning',
+        title: 'Nothing is currently in production',
+        detail: `There are ${d.totalActive} active orders but none are in the "In Production" stage. This may indicate a gap in the production schedule that could cause delays later in the week.`,
+      });
+    }
+
+    // ── POSITIVES ──
+
+    if (d.shippedYesterday.length > 0) {
+      const shippedValue = d.shippedYesterday.reduce((s, j) => s + (j.orderTotal || j.billableAmount || 0), 0);
+      positives.push({
+        icon: '🚚',
+        title: `${d.shippedYesterday.length} order${d.shippedYesterday.length !== 1 ? 's' : ''} shipped yesterday`,
+        detail: shippedValue > 0
+          ? `Worth a combined ${formatCurrency(shippedValue)}. Great work getting those out the door.`
+          : 'Good throughput from the shipping team.',
+      });
+    }
+
+    if (d.newOrders.length > 0) {
+      const newValue = d.newOrders.reduce((s, j) => s + (j.orderTotal || j.billableAmount || 0), 0);
+      positives.push({
+        icon: '📈',
+        title: `${d.newOrders.length} new order${d.newOrders.length !== 1 ? 's' : ''} received in the last 24 hours`,
+        detail: newValue > 0
+          ? `Bringing in ${formatCurrency(newValue)} of new business.${d.newOrders.length > 5 ? ' Strong day for incoming orders.' : ''}`
+          : 'New business coming through the pipeline.',
+      });
+    }
+
+    if (readyToShip > 0) {
+      const readyValue = d.pipelineValues['Ready for Shipping']?.value || 0;
+      positives.push({
+        icon: '✅',
+        title: `${readyToShip} order${readyToShip !== 1 ? 's are' : ' is'} ready to ship`,
+        detail: `Worth ${formatCurrency(readyValue)}. These are complete and just need to go out.`,
+      });
+    }
+
+    if (inProd > 0) {
+      const prodValue = d.pipelineValues['In Production']?.value || 0;
+      positives.push({
+        icon: '⚙️',
+        title: `${inProd} order${inProd !== 1 ? 's' : ''} currently in production`,
+        detail: `${formatCurrency(prodValue)} worth of work actively being produced. These should move to shipping once complete.`,
+      });
+    }
+
+    if (d.overdue.length === 0 && d.totalActive > 0) {
+      positives.push({
+        icon: '🎯',
+        title: 'No overdue orders today',
+        detail: 'Every order is currently on track. Great job keeping on schedule.',
+      });
+    }
+
+    // Week distribution insight
+    const busiestDay = d.weekDays.reduce((best, day) =>
+      day.jobs.length > best.jobs.length ? day : best, d.weekDays[0]);
+    if (busiestDay.jobs.length > 0) {
+      positives.push({
+        icon: '📅',
+        title: `Busiest day this week: ${busiestDay.label} with ${busiestDay.jobs.length} order${busiestDay.jobs.length !== 1 ? 's' : ''}`,
+        detail: `Plan production capacity around ${busiestDay.label} to avoid a last-minute rush.`,
+      });
+    }
+
+    // ── ACTIONS ──
+    if (d.shippingToday.length > 0) {
+      const notReady = d.shippingToday.filter(j => {
+        const s = (j.status || '').toLowerCase();
+        return s !== 'ready for shipping' && s !== 'completed' && s !== 'shipped';
+      });
+      if (notReady.length > 0) {
+        actions.push({ priority: 'high', action: `${notReady.length} of today's ${d.shippingToday.length} shipments are not yet ready. Check production status.` });
+      }
+    }
+
+    const awaitingArt = d.pipeline['Awaiting Artwork']?.length || 0;
+    if (awaitingArt > 0) {
+      actions.push({ priority: 'medium', action: `Send artwork approval reminders for ${awaitingArt} order${awaitingArt !== 1 ? 's' : ''}` });
+    }
+
+    const awaitingReview = d.pipeline['Awaiting Review']?.length || 0;
+    if (awaitingReview > 0) {
+      actions.push({ priority: 'low', action: `Review ${awaitingReview} order${awaitingReview !== 1 ? 's' : ''} in the review queue` });
+    }
+
+    // Summary sentence
+    const summaryParts: string[] = [];
+    if (d.overdue.length > 0) summaryParts.push(`${d.overdue.length} overdue`);
+    if (d.atRisk.length > 0) summaryParts.push(`${d.atRisk.length} at risk`);
+    if (d.shippingToday.length > 0) summaryParts.push(`${d.shippingToday.length} shipping today`);
+
+    const overallSentiment: 'good' | 'mixed' | 'needs-attention' =
+      d.overdue.length > 5 || (d.overdue.length > 0 && d.atRisk.length > 3) ? 'needs-attention' :
+      d.overdue.length > 0 || d.atRisk.length > 0 ? 'mixed' : 'good';
+
+    const summary =
+      overallSentiment === 'good'
+        ? `Looking good today. ${d.totalActive} active orders are all on track with no overdue items. ` +
+          (d.shippingToday.length > 0 ? `${d.shippingToday.length} order${d.shippingToday.length !== 1 ? 's' : ''} ${d.shippingToday.length !== 1 ? 'are' : 'is'} due to ship today.` : 'No shipments scheduled for today.')
+        : overallSentiment === 'mixed'
+        ? `A mixed picture this morning. We have ${d.totalActive} active orders, ` +
+          summaryParts.join(', ') + '. ' +
+          'Some areas need attention but the pipeline is moving.'
+        : `A busy day ahead. We have ${summaryParts.join(', ')} across ${d.totalActive} active orders. ` +
+          'The team should focus on clearing the overdue backlog and unblocking any held orders.';
+
+    return { issues, positives, actions, summary, overallSentiment };
+  }, [data, now]);
+
   const card = 'bg-[#1e1e3a] rounded-xl border border-white/5';
   const sectionHeader = 'flex items-center justify-between cursor-pointer select-none px-5 py-4';
 
-  const daysOverdue = (j: DecoJob) => {
-    const due = parseDate(j.dateDue) || parseDate(j.productionDueDate);
-    if (!due) return 0;
-    return Math.ceil((now.getTime() - due.getTime()) / 86400000);
-  };
+  const daysOverdue = (j: DecoJob) => daysOverdueFn(j, now);
 
   const statusBadge = (status: string) => {
     const c = STATUS_COLORS[status] || defaultColor;
@@ -301,6 +504,119 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
         />
         <PulseCard label="Pipeline Value" value={formatCurrency(data.totalPipelineValue)} small />
         <PulseCard label="New Orders (24h)" value={String(data.newOrders.length)} accent="green" />
+      </div>
+
+      {/* ─── AI BRIEFING NARRATIVE ─── */}
+      <div className={`${card} overflow-hidden`}>
+        <div className="px-6 py-5 border-b border-white/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${
+                briefing.overallSentiment === 'good' ? 'bg-emerald-500/20' :
+                briefing.overallSentiment === 'mixed' ? 'bg-amber-500/20' : 'bg-red-500/20'
+              }`}>
+                {briefing.overallSentiment === 'good' ? '✨' : briefing.overallSentiment === 'mixed' ? '📋' : '🔥'}
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-white">Today's Intelligence Brief</h2>
+                <p className="text-[11px] text-white/30">Auto-generated analysis of current operations</p>
+              </div>
+            </div>
+            <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              briefing.overallSentiment === 'good' ? 'bg-emerald-500/15 text-emerald-400' :
+              briefing.overallSentiment === 'mixed' ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
+            }`}>
+              {briefing.overallSentiment === 'good' ? 'All Clear' : briefing.overallSentiment === 'mixed' ? 'Attention Needed' : 'Action Required'}
+            </div>
+          </div>
+          <p className="text-sm text-white/70 mt-4 leading-relaxed">{briefing.summary}</p>
+        </div>
+
+        <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/5">
+          {/* Issues */}
+          <div className="p-5">
+            <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              Issues &amp; Risks ({briefing.issues.length})
+            </h3>
+            {briefing.issues.length === 0 ? (
+              <p className="text-sm text-white/30 italic">No issues identified. Everything is running smoothly.</p>
+            ) : (
+              <div className="space-y-3">
+                {briefing.issues.map((issue, i) => (
+                  <div key={i} className={`rounded-lg p-3 ${
+                    issue.severity === 'critical' ? 'bg-red-500/10 border border-red-500/20' :
+                    issue.severity === 'warning' ? 'bg-amber-500/8 border border-amber-500/15' :
+                    'bg-white/[0.03] border border-white/5'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <span className="text-sm shrink-0 mt-0.5">{issue.icon}</span>
+                      <div>
+                        <p className={`text-xs font-semibold ${
+                          issue.severity === 'critical' ? 'text-red-400' :
+                          issue.severity === 'warning' ? 'text-amber-400' : 'text-white/70'
+                        }`}>{issue.title}</p>
+                        <p className="text-[11px] text-white/50 mt-1 leading-relaxed">{issue.detail}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Positives */}
+          <div className="p-5">
+            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Positive Highlights ({briefing.positives.length})
+            </h3>
+            {briefing.positives.length === 0 ? (
+              <p className="text-sm text-white/30 italic">Quiet period. No major highlights to report.</p>
+            ) : (
+              <div className="space-y-3">
+                {briefing.positives.map((pos, i) => (
+                  <div key={i} className="rounded-lg p-3 bg-emerald-500/5 border border-emerald-500/10">
+                    <div className="flex items-start gap-2">
+                      <span className="text-sm shrink-0 mt-0.5">{pos.icon}</span>
+                      <div>
+                        <p className="text-xs font-semibold text-emerald-400">{pos.title}</p>
+                        <p className="text-[11px] text-white/50 mt-1 leading-relaxed">{pos.detail}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Action Items */}
+        {briefing.actions.length > 0 && (
+          <div className="border-t border-white/5 px-6 py-4">
+            <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+              Recommended Actions
+            </h3>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {briefing.actions.map((a, i) => (
+                <div key={i} className="flex items-start gap-2.5 px-3 py-2 rounded-lg bg-white/[0.02]">
+                  <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                    a.priority === 'high' ? 'bg-red-400' :
+                    a.priority === 'medium' ? 'bg-amber-400' : 'bg-blue-400'
+                  }`} />
+                  <span className="text-[11px] text-white/60 leading-relaxed">{a.action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ─── IMMEDIATE ATTENTION ─── */}
