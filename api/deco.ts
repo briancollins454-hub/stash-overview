@@ -66,8 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Only allow safe Deco API paths
-  if (!endpoint.startsWith('api/json/manage_orders/') && !endpoint.startsWith('api/json/manage_products/') && !endpoint.startsWith('api/json/manage_quotes/')) {
-    return res.status(403).json({ error: 'Only manage_orders, manage_products, and manage_quotes API endpoints are allowed' });
+  if (!endpoint.startsWith('api/json/manage_orders/') && !endpoint.startsWith('api/json/manage_products/') && !endpoint.startsWith('api/json/manage_quotes/') && !endpoint.startsWith('api/json/quotes/') && !endpoint.startsWith('api/json/manage_sales/')) {
+    return res.status(403).json({ error: 'API endpoint not allowed' });
   }
 
   try {

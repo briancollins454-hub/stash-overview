@@ -437,41 +437,37 @@ export const fetchDecoFinancials = async (
         await delay(50); // throttle
     }
 
-    // Fetch quotes — try multiple approaches to find them in the Deco API
-    // Approach 1: Try fetching a known quote by ID to diagnose
-    try {
-        const diagData = await robustDecoFetch(settings, 'api/json/manage_orders/find', {
-            field: '1', condition: '1', string: '224761', limit: '1', skip_login_token: '1',
-        });
-        const diagOrder = diagData?.orders?.[0];
-        if (diagOrder) {
-            console.log('[Deco Quote Diag] Found quote 224761 in orders API!', {
-                order_id: diagOrder.order_id, order_status: diagOrder.order_status,
-                order_status_name: diagOrder.order_status_name, order_type: diagOrder.order_type,
-                is_quote: diagOrder.is_quote, payment_status: diagOrder.payment_status,
-                billable: diagOrder.billable_amount, total: diagOrder.total, item_amount: diagOrder.item_amount,
-                outstanding: diagOrder.outstanding_balance,
+    // Fetch quotes — try all known DecoNetwork API patterns
+    const quoteEndpoints = [
+        'api/json/manage_quotes/list',
+        'api/json/quotes/find',
+        'api/json/manage_orders/quotes',
+        'api/json/manage_sales/quotes',
+    ];
+    for (const ep of quoteEndpoints) {
+        try {
+            const qData = await robustDecoFetch(settings, ep, {
+                field: '1', condition: '4', date1: dateStr,
+                limit: '5', offset: '0', skip_login_token: '1',
             });
-        } else {
-            console.log('[Deco Quote Diag] Quote 224761 NOT found in orders API — quotes are separate entities');
+            const items = qData?.orders || qData?.quotes || qData?.results || [];
+            console.log(`[Deco Quote] ${ep} returned:`, items.length, 'items', qData?.total ? `(total: ${qData.total})` : '');
+            if (items.length > 0) {
+                console.log('[Deco Quote] Sample:', JSON.stringify(items[0]).substring(0, 300));
+            }
+        } catch (e: any) {
+            console.log(`[Deco Quote] ${ep} failed:`, e.message?.substring(0, 80));
         }
-    } catch (e: any) {
-        console.warn('[Deco Quote Diag] Failed to search for quote 224761:', e.message);
     }
 
-    // Approach 2: Try status-based search (quotes might be status 5 or 6)
-    for (const testStatus of ['5', '6', '0', '14', '15']) {
+    // Also try manage_orders/find with condition=1 (equals) and various order_status values
+    for (const status of ['5', '6', '14', '15', '16', '20']) {
         try {
-            const statusData = await robustDecoFetch(settings, 'api/json/manage_orders/find', {
-                field: '6', condition: '1', string: testStatus, limit: '5', skip_login_token: '1',
+            const sData = await robustDecoFetch(settings, 'api/json/manage_orders/find', {
+                field: '6', condition: '1', string: status, limit: '3', skip_login_token: '1',
             });
-            const count = statusData?.total || statusData?.orders?.length || 0;
-            if (count > 0) {
-                const sample = statusData.orders?.[0];
-                console.log(`[Deco Quote Diag] Status ${testStatus} has ${count} orders, sample:`, {
-                    id: sample?.order_id, status: sample?.order_status, status_name: sample?.order_status_name,
-                    is_quote: sample?.is_quote, type: sample?.order_type,
-                });
+            if ((sData?.total || 0) > 0) {
+                console.log(`[Deco Quote] order_status=${status} has ${sData.total} results, sample status_name:`, sData.orders?.[0]?.order_status_name);
             }
         } catch { /* skip */ }
     }
