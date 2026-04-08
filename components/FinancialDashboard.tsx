@@ -425,10 +425,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
 
 
-    // Jobs in Progress breakdown by order status (exclude cancelled)
-    // Count ALL active jobs per status, but £ values = outstanding balance only
+    // Jobs in Progress: invoiced but not fully paid
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
-    activeJobs.forEach(j => {
+    activeJobs.filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
       const status = j.status || 'Unknown';
       if (!inProgressByStatus[status]) inProgressByStatus[status] = { value: 0, count: 0 };
       inProgressByStatus[status].value += (j.outstandingBalance || 0);
@@ -813,11 +812,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <div className="text-xl sm:text-2xl font-black text-red-600 dark:text-red-400 mt-1">{formatCurrency(summary.invoicedOutstanding)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Orders with invoice date</div>
         </div>
-        {/* Jobs in Progress */}
+        {/* Invoiced Unpaid */}
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
-          <div className={headerText}>Jobs in Progress</div>
-          <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(summary.inProgressValue)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">Not yet invoiced</div>
+          <div className={headerText}>Invoiced Unpaid</div>
+          <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(summary.invoicedOutstanding)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">Invoiced but not paid</div>
         </div>
         {/* Combined Total Outstanding */}
         <div className={`${card} p-4`}>
@@ -891,7 +890,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
           <div className={`${headerText} mb-3`}>
             <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
-            Jobs in Progress — By Status
+            Invoiced Unpaid — By Status
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {Object.entries(summary.inProgressByStatus)
