@@ -30,6 +30,8 @@ interface CustomerAccount {
   customerId: string;
   jobs: DecoJob[];
   totalOutstanding: number;
+  invoicedOutstanding: number;
+  inProgressValue: number;
   totalBillable: number;
   totalPaid: number;
   totalCreditUsed: number;
@@ -340,11 +342,19 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       const totalPaid = totalBillable - totalOutstanding;
       const totalCreditUsed = jobs.reduce((s, j) => s + (j.creditUsed || 0), 0);
 
-      // Find the oldest unpaid invoice/order date
+      // Split outstanding into invoiced vs in-progress
+      const invoicedOutstanding = jobs
+        .filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0)
+        .reduce((s, j) => s + (j.outstandingBalance || 0), 0);
+      const inProgressValue = jobs
+        .filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0)
+        .reduce((s, j) => s + (j.outstandingBalance || 0), 0);
+
+      // Find the oldest unpaid INVOICED date (aging only for invoiced jobs)
       const unpaidJobs = jobs.filter(j => (j.outstandingBalance || 0) > 0);
-      const oldestDates = unpaidJobs
-        .map(j => j.dateInvoiced || j.dateOrdered)
-        .filter(Boolean)
+      const invoicedUnpaidJobs = unpaidJobs.filter(j => !!j.dateInvoiced);
+      const oldestDates = invoicedUnpaidJobs
+        .map(j => j.dateInvoiced!)
         .sort();
       const oldestUnpaidDate = oldestDates[0] || null;
       const agingDays = oldestUnpaidDate ? daysSince(oldestUnpaidDate) : 0;
@@ -366,6 +376,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         customerId: name.toLowerCase().replace(/\s+/g, '_'),
         jobs,
         totalOutstanding,
+        invoicedOutstanding,
+        inProgressValue,
         totalBillable,
         totalPaid: Math.max(0, totalPaid),
         totalCreditUsed,
@@ -383,18 +395,47 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   // Global summary stats
   const summary = useMemo(() => {
     const total = customerAccounts.reduce((s, a) => s + a.totalOutstanding, 0);
+    const invoicedOutstanding = customerAccounts.reduce((s, a) => s + a.invoicedOutstanding, 0);
+    const inProgressValue = customerAccounts.reduce((s, a) => s + a.inProgressValue, 0);
     const totalBillable = customerAccounts.reduce((s, a) => s + a.totalBillable, 0);
     const totalPaid = customerAccounts.reduce((s, a) => s + a.totalPaid, 0);
     const customersWithBalance = customerAccounts.filter(a => a.totalOutstanding > 0);
-    const overdue90 = customersWithBalance.filter(a => a.agingBucket === '90+');
-    const overdue60 = customersWithBalance.filter(a => a.agingBucket === '61-90' || a.agingBucket === '90+');
+    const customersWithInvoicedBalance = customerAccounts.filter(a => a.invoicedOutstanding > 0);
+    const overdue90 = customersWithInvoicedBalance.filter(a => a.agingBucket === '90+');
+    const overdue60 = customersWithInvoicedBalance.filter(a => a.agingBucket === '61-90' || a.agingBucket === '90+');
 
-    // Aging buckets
+    // Aging buckets — only for invoiced orders (jobs with dateInvoiced)
     const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-    customersWithBalance.forEach(a => { aging[a.agingBucket] += a.totalOutstanding; });
+    allJobs.filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+      const days = daysSince(j.dateInvoiced!);
+      const bucket = getAgingBucket(days);
+      aging[bucket] += (j.outstandingBalance || 0);
+    });
 
-    return { total, totalBillable, totalPaid, customersWithBalance: customersWithBalance.length, overdue90: overdue90.length, overdue60: overdue60.length, aging, totalJobs: allJobs.length, totalCustomers: customerAccounts.length };
-  }, [customerAccounts]);
+    // Total value of Quotes
+    const quotesTotal = allJobs
+      .filter(j => (j.status || '').toLowerCase().includes('quote'))
+      .reduce((s, j) => s + (j.billableAmount || j.outstandingBalance || 0), 0);
+    const quotesCount = allJobs.filter(j => (j.status || '').toLowerCase().includes('quote')).length;
+
+    // Jobs in Progress breakdown by order status
+    const inProgressByStatus: Record<string, { value: number; count: number }> = {};
+    allJobs.filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+      const status = j.status || 'Unknown';
+      if (!inProgressByStatus[status]) inProgressByStatus[status] = { value: 0, count: 0 };
+      inProgressByStatus[status].value += (j.outstandingBalance || 0);
+      inProgressByStatus[status].count += 1;
+    });
+
+    return {
+      total, invoicedOutstanding, inProgressValue,
+      totalBillable, totalPaid,
+      customersWithBalance: customersWithBalance.length,
+      overdue90: overdue90.length, overdue60: overdue60.length,
+      aging, totalJobs: allJobs.length, totalCustomers: customerAccounts.length,
+      quotesTotal, quotesCount, inProgressByStatus,
+    };
+  }, [customerAccounts, allJobs]);
 
   // Filtered & sorted data
   const filteredAccounts = useMemo(() => {
@@ -757,12 +798,35 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        {/* Invoiced Outstanding */}
+        <div className={`${card} p-4 border-l-4 border-l-red-500`}>
+          <div className={headerText}>Invoiced Outstanding</div>
+          <div className="text-xl sm:text-2xl font-black text-red-600 dark:text-red-400 mt-1">{formatCurrency(summary.invoicedOutstanding)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">Orders with invoice date</div>
+        </div>
+        {/* Jobs in Progress */}
+        <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
+          <div className={headerText}>Jobs in Progress</div>
+          <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(summary.inProgressValue)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">Not yet invoiced</div>
+        </div>
+        {/* Combined Total Outstanding */}
         <div className={`${card} p-4`}>
           <div className={headerText}>Total Outstanding</div>
-          <div className="text-xl sm:text-2xl font-black text-red-600 dark:text-red-400 mt-1">{formatCurrency(summary.total)}</div>
+          <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(summary.total)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">{summary.customersWithBalance} account{summary.customersWithBalance !== 1 ? 's' : ''}</div>
         </div>
+        {/* Total Quotes */}
+        <div className={`${card} p-4 border-l-4 border-l-purple-500`}>
+          <div className={headerText}>Total Quotes</div>
+          <div className="text-xl sm:text-2xl font-black text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(summary.quotesTotal)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">{summary.quotesCount} quote{summary.quotesCount !== 1 ? 's' : ''}</div>
+        </div>
+      </div>
+
+      {/* Second row: Billing + Aging */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className={`${card} p-4`}>
           <div className={headerText}>Total Billed</div>
           <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(summary.totalBillable)}</div>
@@ -776,7 +840,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         <div className={`${card} p-4 cursor-pointer hover:ring-2 ring-yellow-400 transition-all ${agingFilter === '31-60' ? 'ring-2' : ''}`} onClick={() => setAgingFilter(f => f === '31-60' ? 'all' : '31-60')}>
           <div className={headerText}>31–60 Days</div>
           <div className="text-xl sm:text-2xl font-black text-yellow-600 dark:text-yellow-400 mt-1">{formatCurrency(summary.aging['31-60'])}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">Aging</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">Invoiced aging</div>
         </div>
         <div className={`${card} p-4 cursor-pointer hover:ring-2 ring-orange-400 transition-all ${agingFilter === '61-90' ? 'ring-2' : ''}`} onClick={() => setAgingFilter(f => f === '61-90' ? 'all' : '61-90')}>
           <div className={headerText}>61–90 Days</div>
@@ -791,12 +855,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       </div>
 
       {/* Aging Bar Visualization */}
-      {summary.total > 0 && (
+      {summary.invoicedOutstanding > 0 && (
         <div className={`${card} p-4`}>
-          <div className={`${headerText} mb-3`}>Outstanding Balance Aging Distribution</div>
+          <div className={`${headerText} mb-3`}>Invoice Aging Distribution</div>
           <div className="flex h-8 rounded-lg overflow-hidden">
             {(['0-30', '31-60', '61-90', '90+'] as AgingBucket[]).map(bucket => {
-              const pct = summary.total > 0 ? (summary.aging[bucket] / summary.total) * 100 : 0;
+              const pct = summary.invoicedOutstanding > 0 ? (summary.aging[bucket] / summary.invoicedOutstanding) * 100 : 0;
               if (pct === 0) return null;
               const colors = { '0-30': 'bg-green-500', '31-60': 'bg-yellow-500', '61-90': 'bg-orange-500', '90+': 'bg-red-500' };
               return (
@@ -815,6 +879,43 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                 <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>{agingBucketLabel[bucket]}: {formatCurrency(summary.aging[bucket])}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Jobs in Progress — Status Breakdown */}
+      {summary.inProgressValue > 0 && (
+        <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
+          <div className={`${headerText} mb-3`}>
+            <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
+            Jobs in Progress — By Status
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {Object.entries(summary.inProgressByStatus)
+              .sort((a, b) => b[1].value - a[1].value)
+              .map(([status, { value, count }]) => (
+                <div key={status} className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg ${isDark ? 'bg-slate-700/50' : 'bg-amber-50/50'}`}>
+                  <div className="min-w-0">
+                    <div className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-800'}`}>{status}</div>
+                    <div className="text-[10px] text-gray-400">{count} job{count !== 1 ? 's' : ''}</div>
+                  </div>
+                  <div className="text-sm font-black text-amber-600 dark:text-amber-400 shrink-0">{formatCurrency(value)}</div>
+                </div>
+              ))}
+          </div>
+          {/* Progress bar showing proportion per status */}
+          <div className="flex h-3 rounded-full overflow-hidden mt-3">
+            {Object.entries(summary.inProgressByStatus)
+              .sort((a, b) => b[1].value - a[1].value)
+              .map(([status, { value }], i) => {
+                const pct = summary.inProgressValue > 0 ? (value / summary.inProgressValue) * 100 : 0;
+                const colors = ['bg-amber-500', 'bg-amber-400', 'bg-yellow-500', 'bg-yellow-400', 'bg-orange-400', 'bg-orange-300'];
+                return (
+                  <div key={status} className={`${colors[i % colors.length]} transition-all`}
+                    style={{ width: `${Math.max(pct, 3)}%` }}
+                    title={`${status}: ${formatCurrency(value)} (${pct.toFixed(1)}%)`} />
+                );
+              })}
           </div>
         </div>
       )}
@@ -1137,13 +1238,22 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         </div>
       )}
 
-      {/* Aging Report View */}
+      {/* Aging Report View — Invoiced Orders Only */}
       {viewMode === 'aging' && (
         <div className="space-y-4">
+          <div className={`${card} p-3`}>
+            <div className="flex items-center gap-2">
+              <Receipt className="w-3.5 h-3.5 text-indigo-500" />
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                Aging report based on invoiced orders only (orders with an invoice date)
+              </span>
+            </div>
+          </div>
+
           {(['0-30', '31-60', '61-90', '90+'] as AgingBucket[]).map(bucket => {
-            const bucketAccounts = customerAccounts.filter(a => a.totalOutstanding > 0 && a.agingBucket === bucket)
-              .sort((a, b) => b.totalOutstanding - a.totalOutstanding);
-            const bucketTotal = bucketAccounts.reduce((s, a) => s + a.totalOutstanding, 0);
+            const bucketAccounts = customerAccounts.filter(a => a.invoicedOutstanding > 0 && a.agingBucket === bucket)
+              .sort((a, b) => b.invoicedOutstanding - a.invoicedOutstanding);
+            const bucketTotal = bucketAccounts.reduce((s, a) => s + a.invoicedOutstanding, 0);
             if (bucketAccounts.length === 0) return null;
 
             const borderColors = { '0-30': 'border-l-green-500', '31-60': 'border-l-yellow-500', '61-90': 'border-l-orange-500', '90+': 'border-l-red-500' };
@@ -1167,12 +1277,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                       {priorityNotes[account.customerId] && <span className="text-[10px] text-amber-500 ml-2">📝 {priorityNotes[account.customerId]}</span>}
                     </div>
                     <span className="text-[10px] font-bold text-gray-400">{account.agingDays} days</span>
-                    <span className="text-sm font-black text-red-600 dark:text-red-400 min-w-[90px] text-right">{formatCurrency(account.totalOutstanding)}</span>
+                    <span className="text-sm font-black text-red-600 dark:text-red-400 min-w-[90px] text-right">{formatCurrency(account.invoicedOutstanding)}</span>
                     {/* Proportion bar */}
                     <div className="w-20 hidden sm:block">
                       <div className={`h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-gray-100'}`}>
                         <div className={`h-full rounded-full ${{ '0-30': 'bg-green-500', '31-60': 'bg-yellow-500', '61-90': 'bg-orange-500', '90+': 'bg-red-500' }[bucket]}`}
-                          style={{ width: `${bucketTotal > 0 ? Math.max((account.totalOutstanding / bucketTotal) * 100, 5) : 0}%` }} />
+                          style={{ width: `${bucketTotal > 0 ? Math.max((account.invoicedOutstanding / bucketTotal) * 100, 5) : 0}%` }} />
                       </div>
                     </div>
                   </div>
@@ -1181,10 +1291,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             );
           })}
 
-          {customerAccounts.filter(a => a.totalOutstanding > 0).length === 0 && (
+          {customerAccounts.filter(a => a.invoicedOutstanding > 0).length === 0 && (
             <div className={`${card} text-center py-12 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
               <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-500 opacity-50" />
-              <p className="text-sm font-medium">All accounts are clear — no outstanding balances</p>
+              <p className="text-sm font-medium">No outstanding invoiced balances</p>
             </div>
           )}
         </div>
