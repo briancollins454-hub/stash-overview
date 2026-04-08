@@ -272,7 +272,7 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                                       className="w-24 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm font-black text-indigo-400 outline-none focus:ring-2 focus:ring-indigo-500" 
                                   />
                                   <div className="flex-1 flex gap-1 bg-slate-800/50 p-1 rounded-xl border border-slate-700 overflow-x-auto">
-                                      {[0, 2, 5, 10, 15].map(mins => (
+                                      {[0, 2, 5, 10, 15, 30, 60].map(mins => (
                                           <button 
                                               key={mins}
                                               onClick={() => handleApiChange('autoRefreshInterval', mins)}
