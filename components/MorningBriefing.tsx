@@ -957,12 +957,12 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       <div className="grid grid-cols-2 gap-4">
 
         {/* LEFT: Shopify — exact hero card clone */}
-        <div className="relative rounded-2xl overflow-hidden border border-green-500/30 bg-gradient-to-br from-green-500/15 via-green-600/5 to-transparent">
+        <div className={`relative rounded-2xl overflow-hidden border ${data.shopifyUnlinked > 50 ? 'border-red-500/30 bg-gradient-to-br from-red-500/15 via-rose-600/5 to-transparent' : 'border-green-500/30 bg-gradient-to-br from-green-500/15 via-green-600/5 to-transparent'}`}>
           <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h1 className="text-xl font-black text-white tracking-tight">Shopify Orders</h1>
-                <p className="text-xs text-white/35 mt-0.5">Open &amp; unfulfilled orders from Shopify</p>
+                <p className="text-xs text-white/35 mt-0.5">Orders placed on Shopify, imported to Deco for production</p>
               </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-green-500/20 text-green-400">
                 {data.totalShopifyOpen} Open
@@ -976,25 +976,36 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
               <HeroStat label="Paid" value={data.shopifyByPayment['Paid']?.count || 0} good={(data.shopifyByPayment['Paid']?.count || 0) > 0} />
               <HeroStat label="Pending Payment" value={data.shopifyByPayment['Pending']?.count || 0} warn={(data.shopifyByPayment['Pending']?.count || 0) > 0} />
               <HeroStat label="Total Value" value={fmtK(data.totalShopifyVal)} />
-              <HeroStat label="Linked to Deco" value={data.shopifyLinked} good={data.shopifyLinked > 0} />
-              <HeroStat label="No Deco Link" value={data.shopifyUnlinked} warn={data.shopifyUnlinked > 0} />
+              <HeroStat label="Imported to Deco" value={data.shopifyLinked} good={data.shopifyLinked > 0} />
+              <HeroStat label="Not Imported" value={data.shopifyUnlinked} warn={data.shopifyUnlinked > 0} />
             </div>
 
-            {/* Fulfillment progress bar */}
+            {/* Deco import progress bar */}
             {data.totalShopifyOpen > 0 && (() => {
-              const fulfilledPct = pct(data.shopifyByFulfillment['Partially Fulfilled']?.count || 0, data.totalShopifyOpen);
+              const importPct = pct(data.shopifyLinked, data.totalShopifyOpen);
               return (
                 <div className="mb-4">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Fulfillment Progress</span>
-                    <span className="text-[10px] text-white/40">{data.shopifyByFulfillment['Partially Fulfilled']?.count || 0} partially fulfilled of {data.totalShopifyOpen}</span>
+                    <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Deco Import Progress</span>
+                    <span className="text-[10px] text-white/40">{data.shopifyLinked} of {data.totalShopifyOpen} imported ({Math.round(importPct)}%)</span>
                   </div>
                   <div className="h-2 bg-black/30 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(fulfilledPct, 100)}%` }} />
+                    <div className={`h-full rounded-full transition-all ${importPct >= 90 ? 'bg-emerald-500' : importPct >= 70 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${Math.min(importPct, 100)}%` }} />
                   </div>
                 </div>
               );
             })()}
+
+            {/* Unlinked warning */}
+            {data.shopifyUnlinked > 0 && (
+              <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 flex items-start gap-3">
+                <span className="text-red-400 text-lg mt-0.5">⚠</span>
+                <div>
+                  <p className="text-sm font-semibold text-red-300">{data.shopifyUnlinked} orders not imported to Deco</p>
+                  <p className="text-xs text-red-300/60 mt-0.5">These Shopify orders have not been manually imported into DecoNetwork yet — no production tracking, no fulfilment visibility.</p>
+                </div>
+              </div>
+            )}
 
             {/* Brief */}
             <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
@@ -1003,7 +1014,8 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                 {data.totalShopifyOpen.toLocaleString()} open orders worth {fmtK(data.totalShopifyVal)}.
                 {' '}{data.shopifyByFulfillment['Unfulfilled']?.count || 0} unfulfilled, {data.shopifyByFulfillment['Partially Fulfilled']?.count || 0} partially fulfilled.
                 {' '}{data.shopifyByPayment['Paid']?.count || 0} paid, {data.shopifyByPayment['Pending']?.count || 0} pending payment{data.shopifyByPayment['Refunded'] ? `, ${data.shopifyByPayment['Refunded'].count} refunded` : ''}.
-                {data.shopifyUnlinked > 0 ? ` ${data.shopifyUnlinked} orders have no linked Deco job — these can't be tracked for production status.` : ' All orders are linked to Deco jobs.'}
+                {' '}{data.shopifyLinked} of {data.totalShopifyOpen} have been imported to Deco ({Math.round(pct(data.shopifyLinked, data.totalShopifyOpen))}%).
+                {data.shopifyUnlinked > 0 ? ` ${data.shopifyUnlinked} orders still need to be manually imported — these have no production tracking until they are.` : ''}
               </p>
             </div>
           </div>
@@ -1015,7 +1027,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h1 className="text-xl font-black text-white tracking-tight">DecoNetwork Jobs</h1>
-                <p className="text-xs text-white/35 mt-0.5">Production &amp; fulfilment via DecoNetwork</p>
+                <p className="text-xs text-white/35 mt-0.5">Shopify orders imported to Deco for production &amp; fulfilment</p>
               </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
                 {data.totalDecoLive} Live
