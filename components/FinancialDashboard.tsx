@@ -425,12 +425,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
 
 
-    // Work in Progress: jobs still being worked on (not shipped/completed) with open balance
+    // Work in Progress: all active jobs by status (not shipped/completed)
+    // Job count = all jobs, £ value = only outstanding balance
     const FINISHED = new Set(['shipped', 'completed']);
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
     const wipJobs = activeJobs.filter(j => {
       const st = (j.status || '').toLowerCase();
-      return !FINISHED.has(st) && (j.outstandingBalance || 0) > 0;
+      return !FINISHED.has(st);
     });
     wipJobs.forEach(j => {
       const status = j.status || 'Unknown';
@@ -894,9 +895,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       {/* Jobs in Progress — Status Breakdown */}
       {Object.keys(summary.inProgressByStatus).length > 0 && (
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
-          <div className={`${headerText} mb-3`}>
-            <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
-            Work in Progress — By Status
+          <div className={`${headerText} mb-3 flex items-center justify-between`}>
+            <span>
+              <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
+              Work in Progress — By Status
+            </span>
+            <span className="text-[10px] font-normal text-gray-400">
+              {Object.values(summary.inProgressByStatus).reduce((s, x) => s + x.count, 0)} active jobs
+              {summary.totalJobs ? ` / ${summary.totalJobs} total loaded` : ''}
+            </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {Object.entries(summary.inProgressByStatus)
