@@ -448,13 +448,10 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     }
 
     // ── DECO-ONLY: exclude Shopify-imported orders ──
-    // Exclude if customer contains "stash shop" OR poNumber looks like a Shopify order number (numeric)
+    // Exclude if customer contains "stash shop"
     const isShopifyImport = (j: DecoJob) => {
       const n = (j.customerName || '').toLowerCase().replace(/\s+/g, '');
-      if (n.includes('stashshop')) return true;
-      const po = (j.poNumber || '').trim();
-      if (po && /^\d+$/.test(po)) return true;
-      return false;
+      return n.includes('stashshop');
     };
     const decoOnlyLive = live.filter(j => !isShopifyImport(j));
     const decoOnlyActive = decoOnlyLive.filter(j => {
