@@ -510,6 +510,10 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       const n = decoOnlyActive.filter(j => j.status === st).length;
       return n > top.count ? { stage: st, count: n } : top;
     }, { stage: '', count: 0 });
+    // Recent shipped/completed (last 30 days only)
+    const thirtyAgo = new Date(t0); thirtyAgo.setDate(t0.getDate() - 30);
+    const decoOnlyShippedRecent = decoOnlyShipped.filter(j => { const d = pd(j.dateShipped); return d && d >= thirtyAgo; });
+    const decoOnlyCompletedRecent = decoOnlyCompleted.filter(j => { const d = pd(j.dateShipped) || pd(j.dateDue); return d && d >= thirtyAgo; });
     // Shopify orders grouped by their linked Deco job status
     const shopifyByDecoStatus: Record<string, { count: number; value: number }> = {};
     let shopifyLinked = 0;
@@ -557,6 +561,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       decoOnlyBlocked, decoOnlyProducing, decoOnlyOverdue, decoOnlyOverdueVal,
       decoOnlyVal, decoOnlyPipelineVal, decoOnlyItems, decoOnlyProduced, decoOnlyProdPct,
       decoOnlyByStatus, decoOnlyBottleneck,
+      decoOnlyShippedRecent, decoOnlyCompletedRecent,
     };
   }, [allDecoJobs, orders, now, t0]);
 
@@ -1131,12 +1136,11 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
               </div>
             )}
 
-            {/* Completed work */}
-            <h3 className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2 mt-1">Completed Work</h3>
+            {/* Completed work — last 30 days */}
+            <h3 className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2 mt-1">Last 30 Days</h3>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
-              <HeroStat label="Shipped" value={data.decoOnlyShipped.length} good={data.decoOnlyShipped.length > 0} />
-              <HeroStat label="Completed" value={data.decoOnlyCompleted.length} good={data.decoOnlyCompleted.length > 0} />
-              <HeroStat label="Delivered Value" value={fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)} />
+              <HeroStat label="Shipped" value={data.decoOnlyShippedRecent.length} good={data.decoOnlyShippedRecent.length > 0} />
+              <HeroStat label="Completed" value={data.decoOnlyCompletedRecent.length} good={data.decoOnlyCompletedRecent.length > 0} />
             </div>
 
             {/* Brief */}
@@ -1147,7 +1151,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                 {' '}{data.decoOnlyBlocked} blocked ({data.decoOnlyActive.length > 0 ? pct(data.decoOnlyBlocked, data.decoOnlyActive.length) : 0}%), {data.decoOnlyProducing} in production.
                 {data.decoOnlyOverdue.length > 0 ? ` ${data.decoOnlyOverdue.length} overdue totalling ${fmtK(data.decoOnlyOverdueVal)}.` : ' No overdue.'}
                 {data.decoOnlyBottleneck.count > 0 ? ` Biggest queue: ${data.decoOnlyBottleneck.stage} with ${data.decoOnlyBottleneck.count} job${s(data.decoOnlyBottleneck.count)}.` : ''}
-                {' '}{data.decoOnlyShipped.length} shipped and {data.decoOnlyCompleted.length} completed worth {fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)}.
+                {` ${data.decoOnlyShippedRecent.length} shipped in the last 30 days.`}
               </p>
             </div>
           </div>
