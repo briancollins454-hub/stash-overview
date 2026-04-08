@@ -942,18 +942,29 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
 
       {/* ═══ PLATFORM OVERVIEW: SHOPIFY vs DECO ═══ */}
       <div className="grid grid-cols-2 gap-4">
-        {/* LEFT: Shopify */}
-        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
-          <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-2 -mt-0.5" />Shopify Orders
-            </h2>
-            <span className="text-[10px] text-white/25">{data.totalShopifyOpen} open · {fmtK(data.totalShopifyVal)}</span>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Fulfillment Status</div>
-              <div className="space-y-1.5">
+
+        {/* LEFT: Shopify — same style as hero box */}
+        <div className="relative rounded-2xl overflow-hidden border border-green-500/30 bg-gradient-to-br from-green-500/15 via-green-600/5 to-transparent">
+          <div className="px-6 py-6">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-lg font-black text-white tracking-tight">Shopify Orders</h2>
+              <div className="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500/20 text-green-400">
+                {data.totalShopifyOpen} open
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm mb-5">
+              {Object.entries(data.shopifyByFulfillment)
+                .sort((a, b) => b[1].count - a[1].count)
+                .map(([status, { count, value }]) => (
+                  <HeroStat key={status} label={status} value={count} warn={status === 'Unfulfilled'} />
+                ))}
+              <HeroStat label="Total Value" value={fmtK(data.totalShopifyVal)} />
+            </div>
+
+            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5 space-y-3">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Fulfillment Status</h3>
+              <div className="space-y-2">
                 {Object.entries(data.shopifyByFulfillment)
                   .sort((a, b) => b[1].count - a[1].count)
                   .map(([status, { count, value }]) => {
@@ -963,74 +974,84 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                       <div key={status}>
                         <div className="flex items-center justify-between mb-0.5">
                           <div className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-sm ${color}`} />
-                            <span className="text-[11px] text-white/70">{status}</span>
+                            <span className={`w-2 h-2 rounded-full ${color}`} />
+                            <span className="text-xs text-white/70">{status}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-white/40">{count} order{s(count)}</span>
-                            <span className="text-[11px] font-semibold text-white/60">{fmtK(value)}</span>
+                            <span className="text-xs font-semibold text-white/60">{fmtK(value)}</span>
                           </div>
                         </div>
-                        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                          <div className={`h-full rounded-full ${color}/60`} style={{ width: `${pctW}%` }} />
+                        <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
                         </div>
                       </div>
                     );
                   })}
               </div>
-            </div>
-            <div className="border-t border-white/5 pt-3">
-              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Payment Status</div>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(data.shopifyByPayment)
-                  .sort((a, b) => b[1].count - a[1].count)
-                  .map(([status, { count, value }]) => {
-                    const color = status === 'Paid' ? 'text-emerald-400' : status === 'Pending' ? 'text-amber-400' : 'text-red-400';
-                    const bg = status === 'Paid' ? 'bg-emerald-500/10' : status === 'Pending' ? 'bg-amber-500/10' : 'bg-red-500/10';
-                    return (
-                      <div key={status} className={`px-3 py-2 rounded-lg ${bg} text-center`}>
-                        <div className={`text-sm font-black ${color}`}>{count}</div>
-                        <div className="text-[10px] text-white/35">{status}</div>
-                        <div className="text-[9px] text-white/20 mt-0.5">{fmtK(value)}</div>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-            {Object.keys(data.shopifyItemStatuses).length > 0 && (
+
               <div className="border-t border-white/5 pt-3">
-                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Line Items</div>
-                <div className="flex gap-3">
-                  {Object.entries(data.shopifyItemStatuses)
-                    .sort((a, b) => b[1].items - a[1].items)
-                    .map(([status, { count, items }]) => {
-                      const color = status === 'Fulfilled' ? 'text-emerald-400' : status === 'Restocked' ? 'text-red-400' : 'text-amber-400';
+                <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Payment Status</h3>
+                <div className="flex gap-2">
+                  {Object.entries(data.shopifyByPayment)
+                    .sort((a, b) => b[1].count - a[1].count)
+                    .map(([status, { count, value }]) => {
+                      const color = status === 'Paid' ? 'text-emerald-400' : status === 'Pending' ? 'text-amber-400' : 'text-red-400';
+                      const bg = status === 'Paid' ? 'bg-emerald-500/10' : status === 'Pending' ? 'bg-amber-500/10' : 'bg-red-500/10';
                       return (
-                        <div key={status} className="text-center flex-1">
-                          <div className={`text-sm font-bold ${color}`}>{items}</div>
-                          <div className="text-[9px] text-white/30">{status}</div>
-                          <div className="text-[9px] text-white/15">{count} lines</div>
+                        <div key={status} className={`flex-1 px-3 py-2 rounded-lg ${bg} text-center`}>
+                          <div className={`text-sm font-black ${color}`}>{count}</div>
+                          <div className="text-[10px] text-white/35">{status}</div>
+                          <div className="text-[9px] text-white/20 mt-0.5">{fmtK(value)}</div>
                         </div>
                       );
                     })}
                 </div>
               </div>
-            )}
+
+              {Object.keys(data.shopifyItemStatuses).length > 0 && (
+                <div className="border-t border-white/5 pt-3">
+                  <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Line Items</h3>
+                  <div className="flex gap-3">
+                    {Object.entries(data.shopifyItemStatuses)
+                      .sort((a, b) => b[1].items - a[1].items)
+                      .map(([status, { count, items }]) => {
+                        const color = status === 'Fulfilled' ? 'text-emerald-400' : status === 'Restocked' ? 'text-red-400' : 'text-amber-400';
+                        return (
+                          <div key={status} className="text-center flex-1">
+                            <div className={`text-sm font-bold ${color}`}>{items}</div>
+                            <div className="text-[9px] text-white/30">{status}</div>
+                            <div className="text-[9px] text-white/15">{count} lines</div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* RIGHT: Deco */}
-        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
-          <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">
-              <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-2 -mt-0.5" />DecoNetwork Jobs
-            </h2>
-            <span className="text-[10px] text-white/25">{data.totalDecoLive} live · {fmtK(data.totalDecoVal)}</span>
-          </div>
-          <div className="p-4 space-y-3">
-            <div>
-              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Production Status</div>
-              <div className="space-y-1.5">
+        {/* RIGHT: Deco — same style as hero box */}
+        <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-indigo-600/5 to-transparent">
+          <div className="px-6 py-6">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-lg font-black text-white tracking-tight">DecoNetwork Jobs</h2>
+              <div className="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
+                {data.totalDecoLive} live
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm mb-5">
+              <HeroStat label="Active" value={data.active.length} />
+              <HeroStat label="Blocked" value={data.blockedCount} warn={data.blockedCount > data.producingCount} />
+              <HeroStat label="Producing" value={data.producingCount} good={data.producingCount > 0} />
+              <HeroStat label="Total Value" value={fmtK(data.totalDecoVal)} />
+            </div>
+
+            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5 space-y-3">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Production Status</h3>
+              <div className="space-y-2">
                 {Object.entries(data.decoByStatus)
                   .sort((a, b) => {
                     const order = [...FLOW, 'Shipped'];
@@ -1044,39 +1065,42 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                       <div key={status}>
                         <div className="flex items-center justify-between mb-0.5">
                           <div className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-sm ${color}`} />
-                            <span className={`text-[11px] ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
-                            {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase">blocked</span>}
+                            <span className={`w-2 h-2 rounded-full ${color}`} />
+                            <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
+                            {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-white/40">{count} job{s(count)}</span>
-                            <span className="text-[11px] font-semibold text-white/60">{fmtK(value)}</span>
+                            <span className="text-xs font-semibold text-white/60">{fmtK(value)}</span>
                           </div>
                         </div>
-                        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                          <div className={`h-full rounded-full ${color.replace('bg-', 'bg-')}/60`} style={{ width: `${pctW}%` }} />
+                        <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
                         </div>
                       </div>
                     );
                   })}
               </div>
-            </div>
-            <div className="border-t border-white/5 pt-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="px-3 py-2.5 rounded-lg bg-amber-500/10 text-center">
-                  <div className="text-sm font-black text-amber-400">{data.blockedCount}</div>
-                  <div className="text-[10px] text-white/35">Blocked</div>
-                  <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}% of active</div>
-                </div>
-                <div className="px-3 py-2.5 rounded-lg bg-emerald-500/10 text-center">
-                  <div className="text-sm font-black text-emerald-400">{data.producingCount}</div>
-                  <div className="text-[10px] text-white/35">Producing</div>
-                  <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.producingCount, data.active.length) : 0}% of active</div>
+
+              <div className="border-t border-white/5 pt-3">
+                <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Summary</h3>
+                <div className="flex gap-2">
+                  <div className="flex-1 px-3 py-2 rounded-lg bg-amber-500/10 text-center">
+                    <div className="text-sm font-black text-amber-400">{data.blockedCount}</div>
+                    <div className="text-[10px] text-white/35">Blocked</div>
+                    <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}%</div>
+                  </div>
+                  <div className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/10 text-center">
+                    <div className="text-sm font-black text-emerald-400">{data.producingCount}</div>
+                    <div className="text-[10px] text-white/35">Producing</div>
+                    <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.producingCount, data.active.length) : 0}%</div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+
       </div>
 
       {/* ═══ DO FIRST ═══ */}
