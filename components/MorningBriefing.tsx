@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { DecoJob, UnifiedOrder } from '../types';
+import { getItem } from '../services/localStore';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -51,6 +52,26 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
   const [expandedStage, setExpandedStage] = useState<string | null>(null);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [expandedIssue, setExpandedIssue] = useState<number | null>(0);
+  const [financeJobs, setFinanceJobs] = useState<DecoJob[] | null>(null);
+
+  // Load cached finance data (same source as Financial Dashboard) for complete Deco picture
+  useEffect(() => {
+    (async () => {
+      try {
+        const cached = await getItem<DecoJob[]>('stash_finance_jobs');
+        if (cached && cached.length > 0) setFinanceJobs(cached);
+      } catch { /* no cache available */ }
+    })();
+  }, []);
+
+  // Use whichever data source is more complete
+  const allDecoJobs = useMemo(() => {
+    if (!financeJobs || financeJobs.length <= decoJobs.length) return decoJobs;
+    // Merge: finance cache as base, override with fresher prop data
+    const propMap = new Map(decoJobs.map(j => [j.jobNumber, j]));
+    return financeJobs.map(j => propMap.get(j.jobNumber) || j)
+      .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
+  }, [decoJobs, financeJobs]);
 
   const now = useMemo(() => new Date(), []);
   const t0 = useMemo(() => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }, [now]);
@@ -66,7 +87,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const fourteenAgo = new Date(t0); fourteenAgo.setDate(t0.getDate() - 14);
     const todayEnd = new Date(t0); todayEnd.setHours(23, 59, 59, 999);
 
-    const live = decoJobs.filter(j => !isCancelled(j));
+    const live = allDecoJobs.filter(j => !isCancelled(j));
     const active = live.filter(j => {
       const st = (j.status || '').toLowerCase();
       return st !== 'shipped' && st !== 'completed';
@@ -537,7 +558,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       decoOnlyVal, decoOnlyPipelineVal, decoOnlyItems, decoOnlyProduced, decoOnlyProdPct,
       decoOnlyByStatus, decoOnlyBottleneck,
     };
-  }, [decoJobs, orders, now, t0]);
+  }, [allDecoJobs, orders, now, t0]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // INTELLIGENCE ENGINE
