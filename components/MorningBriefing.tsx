@@ -1081,19 +1081,20 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                 <p className="text-xs text-white/35 mt-0.5">Phone &amp; direct orders — excludes Shopify imports</p>
               </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
-                {data.decoOnlyLive.length} Live
+                {data.decoOnlyActive.length} Active
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
+            {/* Active pipeline — needs attention */}
+            <h3 className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2">Active Pipeline</h3>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-4">
               <HeroStat label="Active Jobs" value={data.decoOnlyActive.length} />
+              <HeroStat label="Pipeline Value" value={fmtK(data.decoOnlyPipelineVal)} />
               <HeroStat label="In Production" value={data.decoOnlyProducing} good={data.decoOnlyProducing > 0} warn={data.decoOnlyProducing === 0} />
               <HeroStat label="Blocked" value={data.decoOnlyBlocked} warn={data.decoOnlyBlocked > data.decoOnlyProducing} />
               <HeroStat label="Overdue" value={data.decoOnlyOverdue.length} warn={data.decoOnlyOverdue.length > 0} />
               <HeroStat label="Awaiting Stock" value={data.decoOnlyByStatus['Awaiting Stock']?.count || 0} warn={(data.decoOnlyByStatus['Awaiting Stock']?.count || 0) > 5} />
               <HeroStat label="Awaiting Processing" value={data.decoOnlyByStatus['Awaiting Processing']?.count || 0} />
-              <HeroStat label="Total Value" value={fmtK(data.decoOnlyVal)} />
-              <HeroStat label="Shipped" value={data.decoOnlyByStatus['Shipped']?.count || 0} good={(data.decoOnlyByStatus['Shipped']?.count || 0) > 0} />
             </div>
 
             {/* Production progress bar */}
@@ -1112,15 +1113,23 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
               </div>
             )}
 
+            {/* Completed work */}
+            <h3 className="text-[10px] font-bold text-white/30 uppercase tracking-wider mb-2 mt-1">Completed Work</h3>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
+              <HeroStat label="Shipped" value={data.decoOnlyShipped.length} good={data.decoOnlyShipped.length > 0} />
+              <HeroStat label="Completed" value={data.decoOnlyCompleted.length} good={data.decoOnlyCompleted.length > 0} />
+              <HeroStat label="Total Value (all)" value={fmtK(data.decoOnlyVal)} />
+            </div>
+
             {/* Brief */}
             <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
               <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Deco Direct Summary</h3>
               <p className="text-sm text-white/70 leading-relaxed">
-                {data.decoOnlyActive.length} active direct jobs worth {fmtK(data.decoOnlyPipelineVal)} ({data.decoOnlyLive.length} total live).
+                {data.decoOnlyActive.length} active jobs worth {fmtK(data.decoOnlyPipelineVal)} need attention.
                 {' '}{data.decoOnlyBlocked} blocked ({data.decoOnlyActive.length > 0 ? pct(data.decoOnlyBlocked, data.decoOnlyActive.length) : 0}%), {data.decoOnlyProducing} in production.
                 {data.decoOnlyOverdue.length > 0 ? ` ${data.decoOnlyOverdue.length} overdue totalling ${fmtK(data.decoOnlyOverdueVal)}.` : ' No overdue.'}
                 {data.decoOnlyBottleneck.count > 0 ? ` Biggest queue: ${data.decoOnlyBottleneck.stage} with ${data.decoOnlyBottleneck.count} job${s(data.decoOnlyBottleneck.count)}.` : ''}
-                {data.decoOnlyByStatus['Shipped'] ? ` ${data.decoOnlyByStatus['Shipped'].count} shipped, ${data.decoOnlyByStatus['Completed']?.count || 0} completed.` : ''}
+                {' '}Separately, {data.decoOnlyShipped.length} shipped and {data.decoOnlyCompleted.length} completed worth {fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)}.
               </p>
             </div>
           </div>
