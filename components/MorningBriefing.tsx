@@ -292,6 +292,115 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const totalRefunded = recentRefunds.reduce((acc, j) =>
       acc + (j.refunds || []).reduce((a, r) => a + (r.amount || 0), 0), 0);
 
+    // ══════════════════════════════════════════════════════════════════════
+    // UPGRADES 1-8
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── 1. DO FIRST PRIORITY LIST ────────────────────────────────────────
+    const doFirst = active.map(j => {
+      let score = 0;
+      const due = pd(j.dateDue) || pd(j.productionDueDate);
+      const val = j.orderTotal || j.billableAmount || 0;
+      if (due && due < t0) { const dl = daysBetween(due, now); score += dl > 30 ? 100 : dl > 14 ? 70 : dl > 7 ? 50 : 30; }
+      if (due && due >= t0 && due <= todayEnd) score += 60;
+      else if (due && due >= t0 && due <= in48h) score += 40;
+      if (BLOCKED.has(j.status || '')) score += 10;
+      if (val > 1000) score += 15; else if (val > 500) score += 10;
+      const ord = pd(j.dateOrdered);
+      if (ord && daysBetween(ord, now) > 30 && BLOCKED.has(j.status || '')) score += 25;
+      if (PRODUCING.has(j.status || '') && (j.outstandingBalance || 0) > 0) score += 15;
+      return { job: j, score, due, reason:
+        due && due < t0 ? `${daysBetween(due, now)}d overdue` :
+        due && due >= t0 && due <= todayEnd ? 'Due today' :
+        due && due >= t0 && due <= in48h ? 'Due in 48h' :
+        ord && daysBetween(ord, now) > 30 && BLOCKED.has(j.status || '') ? 'Stale 30d+' :
+        BLOCKED.has(j.status || '') ? 'Blocked' : 'Review'
+      };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 10);
+
+    // ── 2. REVENUE VELOCITY ──────────────────────────────────────────────
+    const ordersIn7d = live.filter(j => { const o = pd(j.dateOrdered); return o && o >= sevenAgo; });
+    const ordersInPrev7d = live.filter(j => { const o = pd(j.dateOrdered); return o && o >= fourteenAgo && o < sevenAgo; });
+    const revIn7d = ordersIn7d.reduce((acc, j) => acc + (j.orderTotal || j.billableAmount || 0), 0);
+    const revInPrev7d = ordersInPrev7d.reduce((acc, j) => acc + (j.orderTotal || j.billableAmount || 0), 0);
+    const revOut7d = shipped7d.reduce((acc, j) => acc + (j.orderTotal || j.billableAmount || 0), 0);
+    const revOutPrev7d = shippedPrev7d.reduce((acc, j) => acc + (j.orderTotal || j.billableAmount || 0), 0);
+    const netFlow7d = revIn7d - revOut7d;
+
+    // ── 3. TOP CUSTOMERS AT RISK ─────────────────────────────────────────
+    const customerRiskMap = new Map<string, { name: string; overdue: number; atRisk: number; blocked: number; total: number; value: number }>();
+    active.forEach(j => {
+      const name = j.customerName || 'Unknown';
+      const entry = customerRiskMap.get(name) || { name, overdue: 0, atRisk: 0, blocked: 0, total: 0, value: 0 };
+      entry.total++;
+      entry.value += j.orderTotal || j.billableAmount || 0;
+      const due = pd(j.dateDue) || pd(j.productionDueDate);
+      if (due && due < t0) entry.overdue++;
+      if (due && due >= t0 && due <= in48h && BLOCKED.has(j.status || '')) entry.atRisk++;
+      if (BLOCKED.has(j.status || '')) entry.blocked++;
+      customerRiskMap.set(name, entry);
+    });
+    const customersAtRisk = Array.from(customerRiskMap.values())
+      .filter(c => c.overdue > 0 || c.atRisk > 0)
+      .sort((a, b) => (b.overdue * 3 + b.atRisk * 2 + b.blocked) - (a.overdue * 3 + a.atRisk * 2 + a.blocked))
+      .slice(0, 10);
+
+    // ── 4. VENDOR BOTTLENECK INTELLIGENCE ────────────────────────────────
+    const vendorMap = new Map<string, { vendor: string; totalItems: number; orderCount: number; blockedOrders: number; overdueOrders: number; value: number }>();
+    orders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled').forEach(o => {
+      const isBlk = o.deco ? BLOCKED.has(o.deco.status || '') : false;
+      const isOvd = o.daysRemaining !== undefined && o.daysRemaining < 0;
+      const vendors = new Set(o.shopify.items.map(i => i.vendor || 'Unknown'));
+      vendors.forEach(vendor => {
+        const entry = vendorMap.get(vendor) || { vendor, totalItems: 0, orderCount: 0, blockedOrders: 0, overdueOrders: 0, value: 0 };
+        const vi = o.shopify.items.filter(i => (i.vendor || 'Unknown') === vendor);
+        entry.totalItems += vi.reduce((acc, i) => acc + i.quantity, 0);
+        entry.orderCount++;
+        if (isBlk) entry.blockedOrders++;
+        if (isOvd) entry.overdueOrders++;
+        entry.value += vi.reduce((acc, i) => acc + parseFloat(i.price || '0') * i.quantity, 0);
+        vendorMap.set(vendor, entry);
+      });
+    });
+    const vendorBottlenecks = Array.from(vendorMap.values())
+      .filter(v => v.totalItems >= 3)
+      .sort((a, b) => (b.overdueOrders * 3 + b.blockedOrders) - (a.overdueOrders * 3 + a.blockedOrders))
+      .slice(0, 8);
+
+    // ── 5. CAPACITY FORECAST ─────────────────────────────────────────────
+    const dailyThroughput = shipped7d.length > 0 ? +(shipped7d.length / 7).toFixed(1) : null;
+    const daysToClear = dailyThroughput && dailyThroughput > 0 ? Math.ceil(active.length / dailyThroughput) : null;
+
+    // ── 6. DAYS-IN-STAGE AGING ───────────────────────────────────────────
+    const stageAging = FLOW.filter(st => (stages[st] || []).length > 0).map(st => {
+      const stJobs = stages[st]!;
+      const ages = stJobs.map(j => {
+        const ord = pd(j.dateOrdered);
+        return ord ? daysBetween(ord, now) : 0;
+      }).filter(a => a > 0);
+      const avgAge = ages.length > 0 ? +(ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1) : 0;
+      const maxAge = ages.length > 0 ? Math.max(...ages) : 0;
+      return { stage: st, count: stJobs.length, avgAge, maxAge };
+    });
+
+    // ── 7. EMAIL ENQUIRY ALERTS ──────────────────────────────────────────
+    const emailEnquiries = orders.filter(o =>
+      o.hasEmailEnquiry && o.shopify.fulfillmentStatus !== 'fulfilled'
+    );
+
+    // ── 8. CARRIER & SHIPPING COST SUMMARY ───────────────────────────────
+    const carrierMap = new Map<string, { carrier: string; shipments: number; totalCost: number }>();
+    orders.filter(o => o.shipStationTracking).forEach(o => {
+      const tr = o.shipStationTracking!;
+      const carrier = tr.carrier || tr.carrierCode || 'Unknown';
+      const entry = carrierMap.get(carrier) || { carrier, shipments: 0, totalCost: 0 };
+      entry.shipments++;
+      entry.totalCost += tr.shippingCost || 0;
+      carrierMap.set(carrier, entry);
+    });
+    const carriers = Array.from(carrierMap.values()).sort((a, b) => b.shipments - a.shipments);
+    const totalShippingCost = carriers.reduce((acc, c) => acc + c.totalCost, 0);
+
     return {
       active, shipped, stages, overdue, overdueAging, overdueByStatus,
       overdueByCustomer, repeatOverdueCustomers, atRisk, todayShip, todayReady,
@@ -307,6 +416,12 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       mtoOrders, stockOrders, mixedOrders, avgMtoCompletion, avgStockCompletion,
       clubs, slaUrgent, mappingGaps, avgMapping,
       recentRefunds, totalRefunded,
+      // Upgrades 1-8
+      doFirst, revIn7d, revInPrev7d, revOut7d, revOutPrev7d, netFlow7d,
+      customersAtRisk, vendorBottlenecks,
+      dailyThroughput, daysToClear,
+      stageAging, emailEnquiries,
+      carriers, totalShippingCost,
     };
   }, [decoJobs, orders, now, t0]);
 
@@ -522,6 +637,33 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       });
     }
 
+    // 12. Email enquiry alerts
+    if (data.emailEnquiries.length > 0) {
+      issues.push({
+        severity: data.emailEnquiries.length > 5 ? 'warning' : 'info',
+        title: `${data.emailEnquiries.length} order${s(data.emailEnquiries.length)} with email enquiries pending`,
+        brief: `These orders have unanswered email enquiries from customers. Delayed responses can lead to cancellations and poor customer experience.`,
+        detail: data.emailEnquiries.slice(0, 10).map(o =>
+          `\u2022 #${o.shopify.orderNumber} ${o.shopify.customerName} \u2014 ${o.productionStatus || 'unknown status'}`
+        ).join('\n') + (data.emailEnquiries.length > 10 ? `\n\u2022 ...and ${data.emailEnquiries.length - 10} more` : ''),
+        action: `Respond to customer enquiries today. Prioritise oldest emails first. A prompt reply prevents escalation and keeps orders moving.`,
+      });
+    }
+
+    // 13. Vendor bottleneck alert
+    const problemVendors = data.vendorBottlenecks.filter(v => v.overdueOrders > 0 || v.blockedOrders > 3);
+    if (problemVendors.length > 0) {
+      issues.push({
+        severity: problemVendors.some(v => v.overdueOrders > 5) ? 'warning' : 'info',
+        title: `${problemVendors.length} vendor${s(problemVendors.length)} causing bottlenecks`,
+        brief: `Some vendors have a high number of blocked or overdue items in the pipeline. This may indicate supply chain issues.`,
+        detail: problemVendors.map(v =>
+          `\u2022 ${v.vendor}: ${v.totalItems} items across ${v.orderCount} orders, ${v.blockedOrders} blocked, ${v.overdueOrders} overdue (${fmtK(v.value)})`
+        ).join('\n'),
+        action: `Contact underperforming vendors for ETAs. Consider alternative suppliers for vendors with consistently delayed deliveries.`,
+      });
+    }
+
     // ── POSITIVES ──────────────────────────────────────────────────────────
     const positives: { title: string; detail: string }[] = [];
 
@@ -717,6 +859,8 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             {data.avgCycle && <HeroStat label="Avg Turnaround" value={`${data.avgCycle}d`} />}
             {data.productionPct !== null && <HeroStat label="Items Produced" value={`${data.productionPct}%`} warn={data.productionPct < 30} good={data.productionPct >= 70} />}
             {data.totalAR > 500 && <HeroStat label="Outstanding AR" value={fmtK(data.totalAR)} warn={data.arOverdue.length > 0} />}
+            {data.dailyThroughput !== null && <HeroStat label="Daily Output" value={data.dailyThroughput} />}
+            {data.daysToClear !== null && <HeroStat label="Days to Clear" value={`${data.daysToClear}d`} warn={data.daysToClear > 30} good={data.daysToClear <= 14} />}
           </div>
 
           {/* Production progress bar */}
@@ -742,6 +886,54 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
           </div>
         </div>
       </div>
+
+      {/* ═══ DO FIRST ═══ */}
+      {data.doFirst.length > 0 && (
+        <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 overflow-hidden">
+          <button
+            className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+            onClick={() => toggleSection('doFirst')}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/15 flex items-center justify-center">
+                <span className="text-indigo-400 text-sm font-black">!</span>
+              </div>
+              <div className="text-left">
+                <h2 className="text-sm font-bold text-indigo-300">Do First</h2>
+                <p className="text-[11px] text-white/40">Top {data.doFirst.length} auto-prioritised action items</p>
+              </div>
+            </div>
+            <Chevron open={expandedSection === 'doFirst'} />
+          </button>
+          {expandedSection === 'doFirst' && (
+            <div className="border-t border-white/5 px-3 py-2 space-y-0.5">
+              {data.doFirst.map((item, i) => (
+                <div
+                  key={item.job.id}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                  onClick={() => onNavigateToOrder(item.job.jobNumber)}
+                >
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                    i < 3 ? 'bg-red-500/20 text-red-400' : i < 6 ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
+                  }`}>{i + 1}</span>
+                  <span className="text-[10px] font-mono text-indigo-400/70 w-12 shrink-0">#{item.job.jobNumber}</span>
+                  <span className="text-xs text-white/70 truncate flex-1 min-w-0">{item.job.customerName}</span>
+                  <span className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ${
+                    item.reason.includes('overdue') ? 'bg-red-500/10 text-red-400' :
+                    item.reason.includes('today') ? 'bg-amber-500/10 text-amber-400' :
+                    item.reason.includes('48h') ? 'bg-orange-500/10 text-orange-400' :
+                    'bg-blue-500/10 text-blue-400'
+                  }`}>{item.reason}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+                    BLOCKED.has(item.job.status || '') ? 'text-amber-400/60' : 'text-emerald-400/60'
+                  }`}>{item.job.status}</span>
+                  <span className="text-[9px] text-white/15 w-12 text-right shrink-0">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ ISSUES & ROOT CAUSES ═══ */}
       {intelligence.issues.length > 0 && (
@@ -1043,6 +1235,155 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
           )}
         </div>
       )}
+
+      {/* ═══ INSIGHTS GRID ═══ */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        {/* Revenue Velocity */}
+        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/5">
+            <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Revenue Velocity</h2>
+          </div>
+          <div className="px-5 py-4">
+            <div className="grid grid-cols-2 gap-4 mb-3">
+              <div>
+                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">In (7d)</div>
+                <div className="text-lg font-black text-emerald-400">{fmtK(data.revIn7d)}</div>
+                {data.revInPrev7d > 0 && (
+                  <div className={`text-[10px] mt-0.5 ${data.revIn7d >= data.revInPrev7d ? 'text-emerald-400/60' : 'text-red-400/60'}`}>
+                    {data.revIn7d >= data.revInPrev7d ? '\u25b2' : '\u25bc'} vs {fmtK(data.revInPrev7d)} prev
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-1">Out (7d)</div>
+                <div className="text-lg font-black text-sky-400">{fmtK(data.revOut7d)}</div>
+                {data.revOutPrev7d > 0 && (
+                  <div className={`text-[10px] mt-0.5 ${data.revOut7d >= data.revOutPrev7d ? 'text-emerald-400/60' : 'text-red-400/60'}`}>
+                    {data.revOut7d >= data.revOutPrev7d ? '\u25b2' : '\u25bc'} vs {fmtK(data.revOutPrev7d)} prev
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className={`text-xs font-semibold px-3 py-2 rounded-lg ${data.netFlow7d >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+              Net flow: {data.netFlow7d >= 0 ? `+${fmtK(data.netFlow7d)}` : `-${fmtK(Math.abs(data.netFlow7d))}`}
+              <span className="text-white/30 font-normal ml-1">{data.netFlow7d >= 0 ? 'pipeline growing' : 'pipeline shrinking'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Top Customers at Risk */}
+        {data.customersAtRisk.length > 0 && (
+          <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Customers at Risk</h2>
+              <span className="text-[10px] text-red-400/60">{data.customersAtRisk.length} account{s(data.customersAtRisk.length)}</span>
+            </div>
+            <div className="px-3 py-2 max-h-52 overflow-y-auto">
+              {data.customersAtRisk.map(c => (
+                <div key={c.name} className="flex items-center gap-2 px-2.5 py-2 hover:bg-white/[0.03] rounded-lg transition-colors">
+                  <span className="text-xs text-white/60 flex-1 truncate min-w-0">{c.name}</span>
+                  <span className="text-xs font-bold text-white/50">{c.total}</span>
+                  {c.overdue > 0 && <span className="text-[9px] text-red-400 font-semibold">{c.overdue} late</span>}
+                  {c.atRisk > 0 && <span className="text-[9px] text-amber-400 font-semibold">{c.atRisk} at risk</span>}
+                  <span className="text-[10px] text-white/20 w-14 text-right shrink-0">{fmtK(c.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Vendor Bottleneck */}
+        {data.vendorBottlenecks.length > 0 && (
+          <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Vendor Intelligence</h2>
+              <span className="text-[10px] text-white/25">{data.vendorBottlenecks.length} vendor{s(data.vendorBottlenecks.length)}</span>
+            </div>
+            <div className="px-3 py-2 max-h-52 overflow-y-auto">
+              {data.vendorBottlenecks.map(v => (
+                <div key={v.vendor} className="flex items-center gap-2 px-2.5 py-2 hover:bg-white/[0.03] rounded-lg transition-colors">
+                  <span className="text-xs text-white/60 flex-1 truncate min-w-0">{v.vendor}</span>
+                  <span className="text-[10px] text-white/30">{v.totalItems} items</span>
+                  {v.overdueOrders > 0 && <span className="text-[9px] text-red-400 font-semibold">{v.overdueOrders} late</span>}
+                  {v.blockedOrders > 0 && <span className="text-[9px] text-amber-400/70">{v.blockedOrders} blocked</span>}
+                  <span className="text-[10px] text-white/20 w-12 text-right shrink-0">{fmtK(v.value)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Days-in-Stage Aging */}
+        {data.stageAging.length > 0 && (
+          <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5">
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Days-in-Stage Aging</h2>
+            </div>
+            <div className="px-3 py-2">
+              {data.stageAging.map(sa => (
+                <div key={sa.stage} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-white/[0.03] rounded-lg transition-colors">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${DOT[sa.stage] || 'bg-gray-400'}`} />
+                  <span className="text-xs text-white/50 flex-1 truncate min-w-0">{sa.stage}</span>
+                  <span className="text-xs font-bold text-white/60 w-6 text-right">{sa.count}</span>
+                  <span className={`text-[10px] w-14 text-right shrink-0 ${sa.avgAge > 21 ? 'text-red-400' : sa.avgAge > 10 ? 'text-amber-400' : 'text-white/30'}`}>~{sa.avgAge}d avg</span>
+                  <span className={`text-[9px] w-12 text-right shrink-0 ${sa.maxAge > 30 ? 'text-red-400/50' : 'text-white/15'}`}>max {sa.maxAge}d</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Carrier & Shipping */}
+        {data.carriers.length > 0 && (
+          <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Carrier Summary</h2>
+              <span className="text-[10px] text-white/25">{fmt(data.totalShippingCost)} total</span>
+            </div>
+            <div className="px-3 py-2">
+              {data.carriers.map(c => {
+                const avgCost = c.shipments > 0 ? c.totalCost / c.shipments : 0;
+                return (
+                  <div key={c.carrier} className="flex items-center gap-2 px-2.5 py-2 hover:bg-white/[0.03] rounded-lg transition-colors">
+                    <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
+                    <span className="text-xs text-white/60 flex-1 truncate min-w-0">{c.carrier}</span>
+                    <span className="text-[10px] text-white/40">{c.shipments} shipment{s(c.shipments)}</span>
+                    <span className="text-xs text-white/50 font-semibold w-16 text-right">{fmt(c.totalCost)}</span>
+                    <span className="text-[9px] text-white/20 w-14 text-right">{fmt(avgCost)}/ea</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Capacity Forecast */}
+        {data.daysToClear !== null && (
+          <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+            <div className="px-5 py-3 border-b border-white/5">
+              <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">Capacity Forecast</h2>
+            </div>
+            <div className="px-5 py-4 text-center">
+              <div className={`text-3xl font-black ${data.daysToClear > 30 ? 'text-red-400' : data.daysToClear > 14 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {data.daysToClear}
+              </div>
+              <div className="text-[10px] text-white/30 mt-0.5 uppercase tracking-wider">Days to clear pipeline</div>
+              <div className="text-xs text-white/40 mt-2">
+                At {data.dailyThroughput}/day throughput
+                <span className="text-white/20"> \u00b7 </span>
+                {data.active.length} active orders
+              </div>
+              <div className={`text-[10px] mt-3 px-3 py-1.5 rounded-lg inline-block ${
+                data.daysToClear > 30 ? 'bg-red-500/10 text-red-400' : data.daysToClear > 14 ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+              }`}>
+                {data.daysToClear > 30 ? 'Pipeline congested \u2014 consider adding capacity' : data.daysToClear > 14 ? 'Manageable but watch for new order spikes' : 'Healthy capacity \u2014 pipeline is light'}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
 
       {/* ═══ TWO-COLUMN: PIPELINE + WEEK ═══ */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
