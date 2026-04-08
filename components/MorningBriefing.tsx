@@ -446,6 +446,18 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     if (completedJobs.length > 0) {
       decoByStatus['Completed'] = { count: completedJobs.length, value: completedJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
     }
+    // Shopify orders grouped by their linked Deco job status
+    const shopifyByDecoStatus: Record<string, { count: number; value: number }> = {};
+    let shopifyLinked = 0;
+    let shopifyUnlinked = 0;
+    openOrders.forEach(o => {
+      const decoStatus = o.deco ? (o.deco.status || 'Unknown') : 'No Deco Link';
+      if (o.deco) shopifyLinked++; else shopifyUnlinked++;
+      if (!shopifyByDecoStatus[decoStatus]) shopifyByDecoStatus[decoStatus] = { count: 0, value: 0 };
+      shopifyByDecoStatus[decoStatus].count++;
+      shopifyByDecoStatus[decoStatus].value += parseFloat(o.shopify.totalPrice || '0');
+    });
+
     const totalShopifyOpen = openOrders.length;
     const totalShopifyVal = openOrders.reduce((a, o) => a + parseFloat(o.shopify.totalPrice || '0'), 0);
     const totalDecoLive = live.length;
@@ -474,7 +486,8 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       carriers, totalShippingCost,
       // Platform comparison
       shopifyByFulfillment, shopifyByPayment, shopifyItemStatuses,
-      decoByStatus, totalShopifyOpen, totalShopifyVal, totalDecoLive, totalDecoVal,
+      decoByStatus, shopifyByDecoStatus, shopifyLinked, shopifyUnlinked,
+      totalShopifyOpen, totalShopifyVal, totalDecoLive, totalDecoVal,
     };
   }, [decoJobs, orders, now, t0]);
 
@@ -941,167 +954,140 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       </div>
 
       {/* ═══ PLATFORM OVERVIEW: SHOPIFY vs DECO ═══ */}
+      {(() => {
+        const allStatuses = [...FLOW, 'Shipped', 'No Deco Link'].filter(st =>
+          (data.shopifyByDecoStatus[st]?.count || 0) > 0 || (data.decoByStatus[st]?.count || 0) > 0
+        );
+        return (
       <div className="grid grid-cols-2 gap-4">
 
-        {/* LEFT: Shopify — same style as hero box */}
-        <div className="relative rounded-2xl overflow-hidden border border-green-500/30 bg-gradient-to-br from-green-500/15 via-green-600/5 to-transparent">
-          <div className="px-6 py-6">
+        {/* LEFT: Shopify */}
+        <div className={`relative rounded-2xl overflow-hidden border ${
+          sentiment === 'green' ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-transparent' :
+          sentiment === 'amber' ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-600/5 to-transparent' :
+          'border-red-500/30 bg-gradient-to-br from-red-500/15 via-rose-600/5 to-transparent'
+        }`}>
+          <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-black text-white tracking-tight">Shopify Orders</h2>
-              <div className="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500/20 text-green-400">
-                {data.totalShopifyOpen} open
+              <h1 className="text-xl font-black text-white tracking-tight">Shopify Orders</h1>
+              <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-green-500/20 text-green-400">
+                {data.totalShopifyOpen} Open
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm mb-5">
-              {Object.entries(data.shopifyByFulfillment)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([status, { count, value }]) => (
-                  <HeroStat key={status} label={status} value={count} warn={status === 'Unfulfilled'} />
-                ))}
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
+              <HeroStat label="Open Orders" value={data.totalShopifyOpen} />
+              <HeroStat label="Linked to Deco" value={data.shopifyLinked} good={data.shopifyLinked > 0} />
+              <HeroStat label="No Deco Link" value={data.shopifyUnlinked} warn={data.shopifyUnlinked > 0} />
               <HeroStat label="Total Value" value={fmtK(data.totalShopifyVal)} />
             </div>
 
-            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5 space-y-3">
-              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Fulfillment Status</h3>
+            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Production Status (via linked Deco jobs)</h3>
               <div className="space-y-2">
-                {Object.entries(data.shopifyByFulfillment)
-                  .sort((a, b) => b[1].count - a[1].count)
-                  .map(([status, { count, value }]) => {
-                    const pctW = data.totalShopifyOpen > 0 ? Math.max((count / data.totalShopifyOpen) * 100, 4) : 0;
-                    const color = status === 'Unfulfilled' ? 'bg-amber-500' : status === 'Partially Fulfilled' ? 'bg-blue-500' : 'bg-gray-500';
-                    return (
-                      <div key={status}>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${color}`} />
-                            <span className="text-xs text-white/70">{status}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-white/40">{count} order{s(count)}</span>
-                            <span className="text-xs font-semibold text-white/60">{fmtK(value)}</span>
-                          </div>
+                {allStatuses.map(status => {
+                  const entry = data.shopifyByDecoStatus[status] || { count: 0, value: 0 };
+                  if (entry.count === 0) return (
+                    <div key={status} className="flex items-center justify-between py-1 opacity-30">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${DOT[status] || 'bg-gray-400'}`} />
+                        <span className="text-xs text-white/50">{status}</span>
+                      </div>
+                      <span className="text-[10px] text-white/20">—</span>
+                    </div>
+                  );
+                  const pctW = data.totalShopifyOpen > 0 ? Math.max((entry.count / data.totalShopifyOpen) * 100, 4) : 0;
+                  const isBlocked = BLOCKED.has(status);
+                  const color = DOT[status] || 'bg-gray-400';
+                  return (
+                    <div key={status}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${color}`} />
+                          <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
+                          {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
                         </div>
-                        <div className="h-2 bg-black/30 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-white/40">{entry.count} order{s(entry.count)}</span>
+                          <span className="text-xs font-semibold text-white/60">{fmtK(entry.value)}</span>
                         </div>
                       </div>
-                    );
-                  })}
+                      <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-
-              <div className="border-t border-white/5 pt-3">
-                <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Payment Status</h3>
-                <div className="flex gap-2">
-                  {Object.entries(data.shopifyByPayment)
-                    .sort((a, b) => b[1].count - a[1].count)
-                    .map(([status, { count, value }]) => {
-                      const color = status === 'Paid' ? 'text-emerald-400' : status === 'Pending' ? 'text-amber-400' : 'text-red-400';
-                      const bg = status === 'Paid' ? 'bg-emerald-500/10' : status === 'Pending' ? 'bg-amber-500/10' : 'bg-red-500/10';
-                      return (
-                        <div key={status} className={`flex-1 px-3 py-2 rounded-lg ${bg} text-center`}>
-                          <div className={`text-sm font-black ${color}`}>{count}</div>
-                          <div className="text-[10px] text-white/35">{status}</div>
-                          <div className="text-[9px] text-white/20 mt-0.5">{fmtK(value)}</div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              {Object.keys(data.shopifyItemStatuses).length > 0 && (
-                <div className="border-t border-white/5 pt-3">
-                  <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Line Items</h3>
-                  <div className="flex gap-3">
-                    {Object.entries(data.shopifyItemStatuses)
-                      .sort((a, b) => b[1].items - a[1].items)
-                      .map(([status, { count, items }]) => {
-                        const color = status === 'Fulfilled' ? 'text-emerald-400' : status === 'Restocked' ? 'text-red-400' : 'text-amber-400';
-                        return (
-                          <div key={status} className="text-center flex-1">
-                            <div className={`text-sm font-bold ${color}`}>{items}</div>
-                            <div className="text-[9px] text-white/30">{status}</div>
-                            <div className="text-[9px] text-white/15">{count} lines</div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
 
-        {/* RIGHT: Deco — same style as hero box */}
-        <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-indigo-600/5 to-transparent">
-          <div className="px-6 py-6">
+        {/* RIGHT: Deco */}
+        <div className={`relative rounded-2xl overflow-hidden border ${
+          sentiment === 'green' ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-transparent' :
+          sentiment === 'amber' ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-600/5 to-transparent' :
+          'border-red-500/30 bg-gradient-to-br from-red-500/15 via-rose-600/5 to-transparent'
+        }`}>
+          <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-black text-white tracking-tight">DecoNetwork Jobs</h2>
-              <div className="px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
-                {data.totalDecoLive} live
+              <h1 className="text-xl font-black text-white tracking-tight">DecoNetwork Jobs</h1>
+              <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
+                {data.totalDecoLive} Live
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm mb-5">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
               <HeroStat label="Active" value={data.active.length} />
               <HeroStat label="Blocked" value={data.blockedCount} warn={data.blockedCount > data.producingCount} />
               <HeroStat label="Producing" value={data.producingCount} good={data.producingCount > 0} />
               <HeroStat label="Total Value" value={fmtK(data.totalDecoVal)} />
             </div>
 
-            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5 space-y-3">
-              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider">Production Status</h3>
+            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Production Status</h3>
               <div className="space-y-2">
-                {Object.entries(data.decoByStatus)
-                  .sort((a, b) => {
-                    const order = [...FLOW, 'Shipped'];
-                    return order.indexOf(a[0]) - order.indexOf(b[0]);
-                  })
-                  .map(([status, { count, value }]) => {
-                    const pctW = data.totalDecoLive > 0 ? Math.max((count / data.totalDecoLive) * 100, 4) : 0;
-                    const isBlocked = BLOCKED.has(status);
-                    const color = DOT[status] || 'bg-gray-400';
-                    return (
-                      <div key={status}>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${color}`} />
-                            <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
-                            {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-white/40">{count} job{s(count)}</span>
-                            <span className="text-xs font-semibold text-white/60">{fmtK(value)}</span>
-                          </div>
+                {allStatuses.filter(st => st !== 'No Deco Link').map(status => {
+                  const entry = data.decoByStatus[status] || { count: 0, value: 0 };
+                  if (entry.count === 0) return (
+                    <div key={status} className="flex items-center justify-between py-1 opacity-30">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${DOT[status] || 'bg-gray-400'}`} />
+                        <span className="text-xs text-white/50">{status}</span>
+                      </div>
+                      <span className="text-[10px] text-white/20">—</span>
+                    </div>
+                  );
+                  const pctW = data.totalDecoLive > 0 ? Math.max((entry.count / data.totalDecoLive) * 100, 4) : 0;
+                  const isBlocked = BLOCKED.has(status);
+                  const color = DOT[status] || 'bg-gray-400';
+                  return (
+                    <div key={status}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${color}`} />
+                          <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
+                          {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
                         </div>
-                        <div className="h-2 bg-black/30 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-white/40">{entry.count} job{s(entry.count)}</span>
+                          <span className="text-xs font-semibold text-white/60">{fmtK(entry.value)}</span>
                         </div>
                       </div>
-                    );
-                  })}
-              </div>
-
-              <div className="border-t border-white/5 pt-3">
-                <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Summary</h3>
-                <div className="flex gap-2">
-                  <div className="flex-1 px-3 py-2 rounded-lg bg-amber-500/10 text-center">
-                    <div className="text-sm font-black text-amber-400">{data.blockedCount}</div>
-                    <div className="text-[10px] text-white/35">Blocked</div>
-                    <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}%</div>
-                  </div>
-                  <div className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/10 text-center">
-                    <div className="text-sm font-black text-emerald-400">{data.producingCount}</div>
-                    <div className="text-[10px] text-white/35">Producing</div>
-                    <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.producingCount, data.active.length) : 0}%</div>
-                  </div>
-                </div>
+                      <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
         </div>
 
       </div>
+        );
+      })()}
 
       {/* ═══ DO FIRST ═══ */}
       {data.doFirst.length > 0 && (
