@@ -92,14 +92,13 @@ const paymentStatusLabel = (ps: string | undefined): string => {
   return ps;
 };
 
-const paymentStatusColor = (ps: string | undefined): string => {
-  const label = paymentStatusLabel(ps);
-
 const isCancelled = (j: DecoJob): boolean => {
   const status = (j.status || '').toLowerCase();
-  const ps = j.paymentStatus;
-  return status === 'cancelled' || ps === '7';
+  return status === 'cancelled' || j.paymentStatus === '7';
 };
+
+const paymentStatusColor = (ps: string | undefined): string => {
+  const label = paymentStatusLabel(ps);
   if (label === 'Paid') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300';
   if (label === 'Invoiced') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
   if (label === 'Unpaid') return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
