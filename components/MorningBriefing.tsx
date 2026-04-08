@@ -447,12 +447,16 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       decoByStatus['Completed'] = { count: completedJobs.length, value: completedJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
     }
 
-    // ── DECO-ONLY: exclude Shopify-imported orders (customer contains "stash shop") ──
-    const isStashShop = (name: string) => {
-      const n = (name || '').toLowerCase().replace(/\s+/g, '');
-      return n.includes('stashshop');
+    // ── DECO-ONLY: exclude Shopify-imported orders ──
+    // Exclude if customer contains "stash shop" OR poNumber looks like a Shopify order number (numeric)
+    const isShopifyImport = (j: DecoJob) => {
+      const n = (j.customerName || '').toLowerCase().replace(/\s+/g, '');
+      if (n.includes('stashshop')) return true;
+      const po = (j.poNumber || '').trim();
+      if (po && /^\d+$/.test(po)) return true;
+      return false;
     };
-    const decoOnlyLive = live.filter(j => !isStashShop(j.customerName));
+    const decoOnlyLive = live.filter(j => !isShopifyImport(j));
     const decoOnlyActive = decoOnlyLive.filter(j => {
       const st = (j.status || '').toLowerCase();
       return st !== 'shipped' && st !== 'completed';
