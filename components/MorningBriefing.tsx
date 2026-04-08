@@ -1115,7 +1115,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
               <HeroStat label="Shipped" value={data.decoOnlyShipped.length} good={data.decoOnlyShipped.length > 0} />
               <HeroStat label="Completed" value={data.decoOnlyCompleted.length} good={data.decoOnlyCompleted.length > 0} />
-              <HeroStat label="Total Value (all)" value={fmtK(data.decoOnlyVal)} />
+              <HeroStat label="Delivered Value" value={fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)} />
             </div>
 
             {/* Brief */}
@@ -1126,7 +1126,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                 {' '}{data.decoOnlyBlocked} blocked ({data.decoOnlyActive.length > 0 ? pct(data.decoOnlyBlocked, data.decoOnlyActive.length) : 0}%), {data.decoOnlyProducing} in production.
                 {data.decoOnlyOverdue.length > 0 ? ` ${data.decoOnlyOverdue.length} overdue totalling ${fmtK(data.decoOnlyOverdueVal)}.` : ' No overdue.'}
                 {data.decoOnlyBottleneck.count > 0 ? ` Biggest queue: ${data.decoOnlyBottleneck.stage} with ${data.decoOnlyBottleneck.count} job${s(data.decoOnlyBottleneck.count)}.` : ''}
-                {' '}Separately, {data.decoOnlyShipped.length} shipped and {data.decoOnlyCompleted.length} completed worth {fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)}.
+                {' '}{data.decoOnlyShipped.length} shipped and {data.decoOnlyCompleted.length} completed worth {fmtK(data.decoOnlyVal - data.decoOnlyPipelineVal)}.
               </p>
             </div>
           </div>
