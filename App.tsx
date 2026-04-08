@@ -285,7 +285,7 @@ const App: React.FC = () => {
           decoPassword: '',
           syncLookbackDays: 365,
           connectionMethod: 'proxy',
-          autoRefreshInterval: 60,
+          autoRefreshInterval: 0,
           holidayRanges: [
               { id: 'xmas-2025', start: '2025-12-22', end: '2026-01-04', label: 'Christmas Closure' }
           ],
@@ -658,7 +658,7 @@ const App: React.FC = () => {
   // Auto-refresh: delta sync on configurable interval
   useEffect(() => {
     if (!user || isConfigMissing || !apiSettings.autoRefreshInterval) return;
-    const intervalMs = (apiSettings.autoRefreshInterval || 60) * 60 * 1000;
+    const intervalMs = apiSettings.autoRefreshInterval * 60 * 1000;
     const interval = setInterval(() => autoRefreshRef.current(), intervalMs);
     return () => clearInterval(interval);
   }, [user, isConfigMissing, apiSettings.autoRefreshInterval]);
@@ -667,7 +667,8 @@ const App: React.FC = () => {
   const lastSyncRef = useRef(lastSyncTime);
   lastSyncRef.current = lastSyncTime;
   useEffect(() => {
-    const refreshMs = (apiSettings.autoRefreshInterval || 60) * 60 * 1000;
+    if (!apiSettings.autoRefreshInterval) return; // respect OFF setting
+    const refreshMs = apiSettings.autoRefreshInterval * 60 * 1000;
     const handleVisibility = () => {
       if (!document.hidden && lastSyncRef.current && Date.now() - lastSyncRef.current > refreshMs) {
         autoRefreshRef.current();

@@ -267,7 +267,7 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                                   <input 
                                       type="number" 
                                       min="0"
-                                      value={apiSettings.autoRefreshInterval ?? 5} 
+                                      value={apiSettings.autoRefreshInterval ?? 0} 
                                       onChange={e => handleApiChange('autoRefreshInterval', parseInt(e.target.value) || 0)} 
                                       className="w-24 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm font-black text-indigo-400 outline-none focus:ring-2 focus:ring-indigo-500" 
                                   />
@@ -276,7 +276,7 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                                           <button 
                                               key={mins}
                                               onClick={() => handleApiChange('autoRefreshInterval', mins)}
-                                              className={`flex-1 min-w-[40px] py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all ${(apiSettings.autoRefreshInterval ?? 5) === mins ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
+                                              className={`flex-1 min-w-[40px] py-1 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all ${(apiSettings.autoRefreshInterval ?? 0) === mins ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                                           >
                                               {mins === 0 ? 'OFF' : `${mins}m`}
                                           </button>
@@ -288,7 +288,7 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                           <div className="flex items-start gap-3 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
                               <Info className="w-5 h-5 text-indigo-400 shrink-0" />
                               <p className="text-[9px] text-indigo-200/70 font-bold uppercase leading-relaxed">
-                                  Lookback is currently set to <span className="text-white italic">{apiSettings.syncLookbackDays} days</span>. Auto-refresh performs a delta sync every <span className="text-white italic">{apiSettings.autoRefreshInterval ?? 5} minutes</span>. Set to 0 to disable.
+                                  Lookback is currently set to <span className="text-white italic">{apiSettings.syncLookbackDays} days</span>. Auto-refresh {apiSettings.autoRefreshInterval ? <>performs a delta sync every <span className="text-white italic">{apiSettings.autoRefreshInterval} minutes</span></> : <span className="text-white italic">is OFF</span>}. Set to 0 to disable.
                               </p>
                           </div>
                       </div>
