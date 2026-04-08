@@ -426,8 +426,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
 
     // Jobs in Progress breakdown by order status (exclude cancelled)
+    // Count ALL active jobs per status, but £ values = outstanding balance only
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
-    activeJobs.filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+    activeJobs.forEach(j => {
       const status = j.status || 'Unknown';
       if (!inProgressByStatus[status]) inProgressByStatus[status] = { value: 0, count: 0 };
       inProgressByStatus[status].value += (j.outstandingBalance || 0);
@@ -886,7 +887,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       )}
 
       {/* Jobs in Progress — Status Breakdown */}
-      {summary.inProgressValue > 0 && (
+      {Object.keys(summary.inProgressByStatus).length > 0 && (
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
           <div className={`${headerText} mb-3`}>
             <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
@@ -906,11 +907,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
               ))}
           </div>
           {/* Progress bar showing proportion per status */}
+          {(() => {
+            const totalStatusValue = Object.values(summary.inProgressByStatus).reduce((s, x) => s + x.value, 0);
+            return totalStatusValue > 0 ? (
           <div className="flex h-3 rounded-full overflow-hidden mt-3">
             {Object.entries(summary.inProgressByStatus)
               .sort((a, b) => b[1].value - a[1].value)
               .map(([status, { value }], i) => {
-                const pct = summary.inProgressValue > 0 ? (value / summary.inProgressValue) * 100 : 0;
+                const pct = totalStatusValue > 0 ? (value / totalStatusValue) * 100 : 0;
                 const colors = ['bg-amber-500', 'bg-amber-400', 'bg-yellow-500', 'bg-yellow-400', 'bg-orange-400', 'bg-orange-300'];
                 return (
                   <div key={status} className={`${colors[i % colors.length]} transition-all`}
@@ -919,6 +923,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                 );
               })}
           </div>
+            ) : null;
+          })()}
         </div>
       )}
 

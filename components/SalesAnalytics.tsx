@@ -331,10 +331,10 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
   const displayed = useMemo(() => {
     let items = aggregated;
     if (vendorFilter !== 'all') items = items.filter(i => i.vendor === vendorFilter);
-    // Keyword filter: match all space-separated words against product title
+    // Keyword filter: exact phrase match against product title
     if (keyword.trim()) {
-      const words = keyword.trim().toLowerCase().split(/\s+/);
-      items = items.filter(i => words.every(w => i.itemName.toLowerCase().includes(w)));
+      const phrase = keyword.trim().toLowerCase();
+      items = items.filter(i => i.itemName.toLowerCase().includes(phrase));
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -425,7 +425,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
     const rows: (string | number)[][] = [];
     const vendorFilterLower = vendorFilter !== 'all' ? vendorFilter : null;
     const searchQ = searchTerm ? searchTerm.toLowerCase() : null;
-    const keywordWords = keyword.trim() ? keyword.trim().toLowerCase().split(/\s+/) : null;
+    const keywordPhrase = keyword.trim() ? keyword.trim().toLowerCase() : null;
 
     for (const order of filteredOrders) {
       const orderDate = order.createdAt ? order.createdAt.split('T')[0] : '';
@@ -441,7 +441,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
 
         // Apply same filters as displayed
         if (vendorFilterLower && vendor !== vendorFilter) continue;
-        if (keywordWords && !keywordWords.every(w => li.title.toLowerCase().includes(w))) continue;
+        if (keywordPhrase && !li.title.toLowerCase().includes(keywordPhrase)) continue;
         if (searchQ && !li.title.toLowerCase().includes(searchQ) && !vendor.toLowerCase().includes(searchQ) && !variant.toLowerCase().includes(searchQ)) continue;
 
         const gross = money(li.originalTotalSet?.shopMoney);
