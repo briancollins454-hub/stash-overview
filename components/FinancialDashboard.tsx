@@ -425,14 +425,20 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
 
 
-    // Jobs in Progress: invoiced but not fully paid
+    // Work in Progress: jobs still being worked on (not shipped/completed) with open balance
+    const FINISHED = new Set(['shipped', 'completed']);
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
-    activeJobs.filter(j => !!j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {
+    const wipJobs = activeJobs.filter(j => {
+      const st = (j.status || '').toLowerCase();
+      return !FINISHED.has(st) && (j.outstandingBalance || 0) > 0;
+    });
+    wipJobs.forEach(j => {
       const status = j.status || 'Unknown';
       if (!inProgressByStatus[status]) inProgressByStatus[status] = { value: 0, count: 0 };
       inProgressByStatus[status].value += (j.outstandingBalance || 0);
       inProgressByStatus[status].count += 1;
     });
+    const wipValue = wipJobs.reduce((s, j) => s + (j.outstandingBalance || 0), 0);
 
     return {
       total, invoicedOutstanding, inProgressValue,
@@ -440,7 +446,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       customersWithBalance: customersWithBalance.length,
       overdue90: overdue90.length, overdue60: overdue60.length,
       aging, totalJobs: allJobs.length, totalCustomers: customerAccounts.length,
-      inProgressByStatus,
+      inProgressByStatus, wipValue,
     };
   }, [customerAccounts, allJobs]);
 
@@ -812,11 +818,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <div className="text-xl sm:text-2xl font-black text-red-600 dark:text-red-400 mt-1">{formatCurrency(summary.invoicedOutstanding)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">Orders with invoice date</div>
         </div>
-        {/* Invoiced Unpaid */}
+        {/* Work in Progress */}
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
-          <div className={headerText}>Invoiced Unpaid</div>
-          <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(summary.invoicedOutstanding)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">Invoiced but not paid</div>
+          <div className={headerText}>Work in Progress</div>
+          <div className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(summary.wipValue)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">Open balance on active jobs</div>
         </div>
         {/* Combined Total Outstanding */}
         <div className={`${card} p-4`}>
@@ -890,7 +896,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         <div className={`${card} p-4 border-l-4 border-l-amber-500`}>
           <div className={`${headerText} mb-3`}>
             <Clock className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5 text-amber-500" />
-            Invoiced Unpaid — By Status
+            Work in Progress — By Status
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {Object.entries(summary.inProgressByStatus)
