@@ -446,6 +446,48 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     if (completedJobs.length > 0) {
       decoByStatus['Completed'] = { count: completedJobs.length, value: completedJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
     }
+
+    // ── DECO-ONLY: exclude Shopify-imported orders (customer contains "stash shop") ──
+    const isStashShop = (name: string) => {
+      const n = (name || '').toLowerCase().replace(/\s+/g, '');
+      return n.includes('stashshop');
+    };
+    const decoOnlyLive = live.filter(j => !isStashShop(j.customerName));
+    const decoOnlyActive = decoOnlyLive.filter(j => {
+      const st = (j.status || '').toLowerCase();
+      return st !== 'shipped' && st !== 'completed';
+    });
+    const decoOnlyShipped = decoOnlyLive.filter(j => (j.status || '').toLowerCase() === 'shipped');
+    const decoOnlyCompleted = decoOnlyLive.filter(j => (j.status || '').toLowerCase() === 'completed');
+    const decoOnlyBlocked = decoOnlyActive.filter(j => BLOCKED.has(j.status || '')).length;
+    const decoOnlyProducing = decoOnlyActive.filter(j => PRODUCING.has(j.status || '')).length;
+    const decoOnlyOverdue = decoOnlyActive.filter(j => {
+      const due = pd(j.dateDue) || pd(j.productionDueDate);
+      return due && due < t0;
+    });
+    const decoOnlyVal = decoOnlyLive.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0);
+    const decoOnlyPipelineVal = decoOnlyActive.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0);
+    const decoOnlyOverdueVal = decoOnlyOverdue.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0);
+    const decoOnlyItems = decoOnlyActive.reduce((a, j) => a + (j.totalItems || 0), 0);
+    const decoOnlyProduced = decoOnlyActive.reduce((a, j) => a + (j.itemsProduced || 0), 0);
+    const decoOnlyProdPct = decoOnlyItems > 0 ? pct(decoOnlyProduced, decoOnlyItems) : null;
+    const decoOnlyByStatus: Record<string, { count: number; value: number }> = {};
+    decoOnlyActive.forEach(j => {
+      const st = j.status || 'Unknown';
+      if (!decoOnlyByStatus[st]) decoOnlyByStatus[st] = { count: 0, value: 0 };
+      decoOnlyByStatus[st].count++;
+      decoOnlyByStatus[st].value += (j.orderTotal || j.billableAmount || 0);
+    });
+    if (decoOnlyShipped.length > 0) {
+      decoOnlyByStatus['Shipped'] = { count: decoOnlyShipped.length, value: decoOnlyShipped.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
+    }
+    if (decoOnlyCompleted.length > 0) {
+      decoOnlyByStatus['Completed'] = { count: decoOnlyCompleted.length, value: decoOnlyCompleted.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
+    }
+    const decoOnlyBottleneck = FLOW.reduce((top, st) => {
+      const n = decoOnlyActive.filter(j => j.status === st).length;
+      return n > top.count ? { stage: st, count: n } : top;
+    }, { stage: '', count: 0 });
     // Shopify orders grouped by their linked Deco job status
     const shopifyByDecoStatus: Record<string, { count: number; value: number }> = {};
     let shopifyLinked = 0;
@@ -488,6 +530,11 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       shopifyByFulfillment, shopifyByPayment, shopifyItemStatuses,
       decoByStatus, shopifyByDecoStatus, shopifyLinked, shopifyUnlinked,
       totalShopifyOpen, totalShopifyVal, totalDecoLive, totalDecoVal,
+      // Deco-only (non-Shopify)
+      decoOnlyLive, decoOnlyActive, decoOnlyShipped, decoOnlyCompleted,
+      decoOnlyBlocked, decoOnlyProducing, decoOnlyOverdue, decoOnlyOverdueVal,
+      decoOnlyVal, decoOnlyPipelineVal, decoOnlyItems, decoOnlyProduced, decoOnlyProdPct,
+      decoOnlyByStatus, decoOnlyBottleneck,
     };
   }, [decoJobs, orders, now, t0]);
 
@@ -1021,41 +1068,41 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
           </div>
         </div>
 
-        {/* RIGHT: Deco — exact hero card clone */}
+        {/* RIGHT: Deco-only (phone/direct orders, not from Shopify) */}
         <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-indigo-600/5 to-transparent">
           <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h1 className="text-xl font-black text-white tracking-tight">DecoNetwork Jobs</h1>
-                <p className="text-xs text-white/35 mt-0.5">Shopify orders imported to Deco for production &amp; fulfilment</p>
+                <h1 className="text-xl font-black text-white tracking-tight">Deco Direct Jobs</h1>
+                <p className="text-xs text-white/35 mt-0.5">Phone &amp; direct orders — excludes Shopify imports</p>
               </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
-                {data.totalDecoLive} Live
+                {data.decoOnlyLive.length} Live
               </div>
             </div>
 
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
-              <HeroStat label="Active Jobs" value={data.active.length} />
-              <HeroStat label="In Production" value={data.producingCount} good={data.producingCount > 0} warn={data.producingCount === 0} />
-              <HeroStat label="Blocked" value={data.blockedCount} warn={data.blockedCount > data.producingCount} />
-              <HeroStat label="Overdue" value={data.overdue.length} warn={data.overdue.length > 0} />
-              <HeroStat label="Awaiting Stock" value={data.decoByStatus['Awaiting Stock']?.count || 0} warn={(data.decoByStatus['Awaiting Stock']?.count || 0) > 10} />
-              <HeroStat label="Awaiting Processing" value={data.decoByStatus['Awaiting Processing']?.count || 0} />
-              <HeroStat label="Total Value" value={fmtK(data.totalDecoVal)} />
-              <HeroStat label="Shipped" value={data.decoByStatus['Shipped']?.count || 0} good={(data.decoByStatus['Shipped']?.count || 0) > 0} />
+              <HeroStat label="Active Jobs" value={data.decoOnlyActive.length} />
+              <HeroStat label="In Production" value={data.decoOnlyProducing} good={data.decoOnlyProducing > 0} warn={data.decoOnlyProducing === 0} />
+              <HeroStat label="Blocked" value={data.decoOnlyBlocked} warn={data.decoOnlyBlocked > data.decoOnlyProducing} />
+              <HeroStat label="Overdue" value={data.decoOnlyOverdue.length} warn={data.decoOnlyOverdue.length > 0} />
+              <HeroStat label="Awaiting Stock" value={data.decoOnlyByStatus['Awaiting Stock']?.count || 0} warn={(data.decoOnlyByStatus['Awaiting Stock']?.count || 0) > 5} />
+              <HeroStat label="Awaiting Processing" value={data.decoOnlyByStatus['Awaiting Processing']?.count || 0} />
+              <HeroStat label="Total Value" value={fmtK(data.decoOnlyVal)} />
+              <HeroStat label="Shipped" value={data.decoOnlyByStatus['Shipped']?.count || 0} good={(data.decoOnlyByStatus['Shipped']?.count || 0) > 0} />
             </div>
 
             {/* Production progress bar */}
-            {data.productionPct !== null && data.totalItemsCount > 0 && (
+            {data.decoOnlyProdPct !== null && data.decoOnlyItems > 0 && (
               <div className="mb-4">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Production Progress</span>
-                  <span className="text-[10px] text-white/40">{data.itemsProducedCount.toLocaleString()} / {data.totalItemsCount.toLocaleString()} items</span>
+                  <span className="text-[10px] text-white/40">{data.decoOnlyProduced.toLocaleString()} / {data.decoOnlyItems.toLocaleString()} items</span>
                 </div>
                 <div className="h-2 bg-black/30 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${data.productionPct >= 70 ? 'bg-emerald-500' : data.productionPct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(data.productionPct, 100)}%` }}
+                    className={`h-full rounded-full transition-all ${data.decoOnlyProdPct >= 70 ? 'bg-emerald-500' : data.decoOnlyProdPct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(data.decoOnlyProdPct, 100)}%` }}
                   />
                 </div>
               </div>
@@ -1063,13 +1110,13 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
 
             {/* Brief */}
             <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
-              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Deco Summary</h3>
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Deco Direct Summary</h3>
               <p className="text-sm text-white/70 leading-relaxed">
-                {data.active.length} active jobs worth {fmtK(data.pipelineVal)}.
-                {' '}{data.blockedCount} blocked ({data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}%), {data.producingCount} in production.
-                {data.overdue.length > 0 ? ` ${data.overdue.length} orders are overdue totalling ${fmtK(data.overdueVal)}.` : ' No overdue orders.'}
-                {' '}Biggest queue: {data.bottleneck.stage || 'none'} with {data.bottleneck.count} job{s(data.bottleneck.count)}.
-                {data.decoByStatus['Shipped'] ? ` ${data.decoByStatus['Shipped'].count} shipped, ${data.decoByStatus['Completed']?.count || 0} completed.` : ''}
+                {data.decoOnlyActive.length} active direct jobs worth {fmtK(data.decoOnlyPipelineVal)} ({data.decoOnlyLive.length} total live).
+                {' '}{data.decoOnlyBlocked} blocked ({data.decoOnlyActive.length > 0 ? pct(data.decoOnlyBlocked, data.decoOnlyActive.length) : 0}%), {data.decoOnlyProducing} in production.
+                {data.decoOnlyOverdue.length > 0 ? ` ${data.decoOnlyOverdue.length} overdue totalling ${fmtK(data.decoOnlyOverdueVal)}.` : ' No overdue.'}
+                {data.decoOnlyBottleneck.count > 0 ? ` Biggest queue: ${data.decoOnlyBottleneck.stage} with ${data.decoOnlyBottleneck.count} job${s(data.decoOnlyBottleneck.count)}.` : ''}
+                {data.decoOnlyByStatus['Shipped'] ? ` ${data.decoOnlyByStatus['Shipped'].count} shipped, ${data.decoOnlyByStatus['Completed']?.count || 0} completed.` : ''}
               </p>
             </div>
           </div>
