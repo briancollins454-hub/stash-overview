@@ -219,6 +219,79 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       return ord && daysBetween(ord, now) > 30 && BLOCKED.has(j.status || '');
     });
 
+    // ── PRODUCTION PROGRESS ──────────────────────────────────────────────
+    const totalItemsCount = active.reduce((acc, j) => acc + (j.totalItems || 0), 0);
+    const itemsProducedCount = active.reduce((acc, j) => acc + (j.itemsProduced || 0), 0);
+    const productionPct = totalItemsCount > 0 ? pct(itemsProducedCount, totalItemsCount) : null;
+    const ordersWithProgress = active.filter(j => (j.totalItems || 0) > 0);
+    const ordersNoProgress = ordersWithProgress.filter(j => (j.itemsProduced || 0) === 0);
+
+    // ── ACCOUNTS RECEIVABLE ──────────────────────────────────────────────
+    const arJobs = live.filter(j => (j.outstandingBalance || 0) > 0);
+    const totalAR = arJobs.reduce((acc, j) => acc + (j.outstandingBalance || 0), 0);
+    const arOverdue = arJobs.filter(j => {
+      const inv = pd(j.dateInvoiced);
+      return inv && daysBetween(inv, now) > 30;
+    });
+    const totalAROverdue = arOverdue.reduce((acc, j) => acc + (j.outstandingBalance || 0), 0);
+
+    // ── PAYMENT RISK ─────────────────────────────────────────────────────
+    const paymentRisk = active.filter(j => {
+      const bal = j.outstandingBalance || 0;
+      const inProd = PRODUCING.has(j.status || '');
+      return inProd && bal > 0;
+    });
+    const paymentRiskVal = paymentRisk.reduce((acc, j) => acc + (j.outstandingBalance || 0), 0);
+
+    // ── MTO vs STOCK ─────────────────────────────────────────────────────
+    const mtoOrders = orders.filter(o => o.isMto && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const stockOrders = orders.filter(o => o.hasStockItems && !o.isMto && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const mixedOrders = orders.filter(o => o.isMto && o.hasStockItems && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const avgMtoCompletion = mtoOrders.length > 0
+      ? Math.round(mtoOrders.reduce((acc, o) => acc + (o.mtoCompletionPercentage || 0), 0) / mtoOrders.length) : null;
+    const avgStockCompletion = stockOrders.length > 0
+      ? Math.round(stockOrders.reduce((acc, o) => acc + (o.stockCompletionPercentage || 0), 0) / stockOrders.length) : null;
+
+    // ── CLUB BREAKDOWN ───────────────────────────────────────────────────
+    const clubMap = new Map<string, { total: number; overdue: number; ready: number; value: number }>();
+    orders.filter(o => o.clubName && o.shopify.fulfillmentStatus !== 'fulfilled').forEach(o => {
+      const club = o.clubName!;
+      const entry = clubMap.get(club) || { total: 0, overdue: 0, ready: 0, value: 0 };
+      entry.total++;
+      if (o.daysRemaining !== undefined && o.daysRemaining < 0) entry.overdue++;
+      if (o.isStockDispatchReady) entry.ready++;
+      entry.value += parseFloat(o.shopify.totalPrice || '0');
+      clubMap.set(club, entry);
+    });
+    const clubs = Array.from(clubMap.entries())
+      .map(([name, info]) => ({ name, ...info }))
+      .sort((a, b) => b.total - a.total);
+
+    // ── SLA COUNTDOWN ────────────────────────────────────────────────────
+    const slaUrgent = orders.filter(o => {
+      return o.shopify.fulfillmentStatus !== 'fulfilled'
+        && o.daysRemaining !== undefined
+        && o.daysRemaining >= 0
+        && o.daysRemaining <= 2;
+    }).sort((a, b) => (a.daysRemaining ?? 0) - (b.daysRemaining ?? 0));
+
+    // ── MAPPING GAPS ─────────────────────────────────────────────────────
+    const mappingGaps = orders.filter(o =>
+      o.shopify.fulfillmentStatus !== 'fulfilled'
+      && (o.eligibleCount || 0) > 0
+      && (o.mappedPercentage || 0) < 100
+    );
+    const avgMapping = mappingGaps.length > 0
+      ? Math.round(orders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled' && (o.eligibleCount || 0) > 0)
+          .reduce((acc, o) => acc + (o.mappedPercentage || 0), 0)
+        / orders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled' && (o.eligibleCount || 0) > 0).length)
+      : 100;
+
+    // ── REFUNDS ──────────────────────────────────────────────────────────
+    const recentRefunds = live.filter(j => j.refunds && j.refunds.length > 0);
+    const totalRefunded = recentRefunds.reduce((acc, j) =>
+      acc + (j.refunds || []).reduce((a, r) => a + (r.amount || 0), 0), 0);
+
     return {
       active, shipped, stages, overdue, overdueAging, overdueByStatus,
       overdueByCustomer, repeatOverdueCustomers, atRisk, todayShip, todayReady,
@@ -227,6 +300,13 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       pipelineVal, overdueVal, shippedYestVal, newVal,
       producingCount, blockedCount, bottleneck, blockedStages, stockReady,
       noDueDate, onTimeRate, onTimeCount, uniqueCustomers, staleOrders,
+      // New data
+      totalItemsCount, itemsProducedCount, productionPct, ordersNoProgress,
+      arJobs, totalAR, arOverdue, totalAROverdue,
+      paymentRisk, paymentRiskVal,
+      mtoOrders, stockOrders, mixedOrders, avgMtoCompletion, avgStockCompletion,
+      clubs, slaUrgent, mappingGaps, avgMapping,
+      recentRefunds, totalRefunded,
     };
   }, [decoJobs, orders, now, t0]);
 
@@ -366,6 +446,82 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       });
     }
 
+    // 7. Accounts Receivable alert
+    if (data.totalAR > 500) {
+      issues.push({
+        severity: data.totalAROverdue > 1000 ? 'critical' : data.totalAR > 2000 ? 'warning' : 'info',
+        title: `${fmt(data.totalAR)} outstanding across ${data.arJobs.length} order${s(data.arJobs.length)}`,
+        brief: `Accounts receivable is at ${fmt(data.totalAR)}.`
+          + (data.arOverdue.length > 0 ? ` ${data.arOverdue.length} invoice${s(data.arOverdue.length)} totalling ${fmt(data.totalAROverdue)} are 30+ days overdue \u2014 these need chasing.` : ' All invoices are within terms.'),
+        detail: data.arOverdue.length > 0
+          ? `Invoices overdue by 30+ days:\n\n${data.arOverdue.slice(0, 10).map(j => {
+              const inv = pd(j.dateInvoiced);
+              const age = inv ? daysBetween(inv, now) : 0;
+              return `\u2022 #${j.jobNumber} ${j.customerName} \u2014 ${fmt(j.outstandingBalance || 0)} invoiced ${age} days ago`;
+            }).join('\n')}${data.arOverdue.length > 10 ? `\n\u2022 ...and ${data.arOverdue.length - 10} more` : ''}`
+          : `All ${data.arJobs.length} outstanding invoices are within payment terms. Total: ${fmt(data.totalAR)}.`,
+        action: data.arOverdue.length > 0
+          ? `Send payment reminders for the ${data.arOverdue.length} overdue invoice${s(data.arOverdue.length)}. Escalate accounts over 60 days to management. Consider pausing new work for customers with outstanding aged debt.`
+          : `Monitor \u2014 no action needed yet, all invoices are within terms.`,
+      });
+    }
+
+    // 8. Payment risk \u2014 in production but unpaid
+    if (data.paymentRisk.length > 0) {
+      issues.push({
+        severity: data.paymentRiskVal > 2000 ? 'warning' : 'info',
+        title: `${data.paymentRisk.length} order${s(data.paymentRisk.length)} in production with unpaid balance (${fmt(data.paymentRiskVal)})`,
+        brief: `These orders are being produced but still have outstanding payment. You're doing the work before receiving full payment, which is a financial risk.`,
+        detail: data.paymentRisk.slice(0, 10).map(j =>
+          `\u2022 #${j.jobNumber} ${j.customerName} \u2014 ${j.status}, outstanding: ${fmt(j.outstandingBalance || 0)}`
+        ).join('\n') + (data.paymentRisk.length > 10 ? `\n\u2022 ...and ${data.paymentRisk.length - 10} more` : ''),
+        jobs: data.paymentRisk,
+        action: `Review payment terms for these orders. Consider holding shipment until payment is received for any that aren't on approved credit terms.`,
+      });
+    }
+
+    // 9. Mapping gaps
+    if (data.mappingGaps.length > 3 && data.avgMapping < 80) {
+      issues.push({
+        severity: data.avgMapping < 50 ? 'warning' : 'info',
+        title: `Product mapping coverage at ${data.avgMapping}%`,
+        brief: `${data.mappingGaps.length} order${s(data.mappingGaps.length)} have items that aren't fully mapped to Deco products. This means stock levels and production tracking may be inaccurate for these orders.`,
+        detail: `Orders with incomplete mappings:\n\n${data.mappingGaps.slice(0, 8).map(o =>
+          `\u2022 #${o.shopify.orderNumber} \u2014 ${o.mappedCount}/${o.eligibleCount} mapped (${o.mappedPercentage || 0}%)`
+        ).join('\n')}${data.mappingGaps.length > 8 ? `\n\u2022 ...and ${data.mappingGaps.length - 8} more orders` : ''}`,
+        action: `Review unmapped items and match them to Deco products. Better mapping coverage improves production tracking accuracy and stock readiness checks.`,
+      });
+    }
+
+    // 10. Refund activity
+    if (data.recentRefunds.length > 0) {
+      issues.push({
+        severity: data.totalRefunded > 500 ? 'warning' : 'info',
+        title: `${data.recentRefunds.length} order${s(data.recentRefunds.length)} with refunds (${fmt(data.totalRefunded)})`,
+        brief: `Refund activity detected. ${data.recentRefunds.length} order${s(data.recentRefunds.length)} have had refunds processed totalling ${fmt(data.totalRefunded)}. Review to understand if there are quality or service issues.`,
+        detail: data.recentRefunds.slice(0, 8).map(j => {
+          const refAmt = (j.refunds || []).reduce((a, r) => a + (r.amount || 0), 0);
+          return `\u2022 #${j.jobNumber} ${j.customerName} \u2014 refund: ${fmt(refAmt)} (order total: ${fmt(j.orderTotal || 0)})`;
+        }).join('\n') + (data.recentRefunds.length > 8 ? `\n\u2022 ...and ${data.recentRefunds.length - 8} more` : ''),
+        action: `Review refund reasons. If there's a pattern (wrong items, quality issues, late delivery), address the root cause to reduce future refunds.`,
+      });
+    }
+
+    // 11. SLA countdown \u2014 orders about to breach SLA
+    if (data.slaUrgent.length > 0) {
+      issues.push({
+        severity: 'warning',
+        title: `${data.slaUrgent.length} order${s(data.slaUrgent.length)} within 2 days of SLA target`,
+        brief: `These orders are approaching their SLA deadline and need to ship within 48 hours to stay on-time.`,
+        detail: data.slaUrgent.slice(0, 10).map(o => {
+          const days = o.daysRemaining ?? 0;
+          const target = o.slaTargetDate ? new Date(o.slaTargetDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '?';
+          return `\u2022 #${o.shopify.orderNumber} \u2014 ${days === 0 ? 'DUE TODAY' : `${days} day${s(days)} left`} (target: ${target}), ${o.productionStatus || 'unknown status'}`;
+        }).join('\n') + (data.slaUrgent.length > 10 ? `\n\u2022 ...and ${data.slaUrgent.length - 10} more` : ''),
+        action: `Prioritise these for immediate dispatch. Check production status and ensure nothing is blocked.`,
+      });
+    }
+
     // ── POSITIVES ──────────────────────────────────────────────────────────
     const positives: { title: string; detail: string }[] = [];
 
@@ -415,6 +571,24 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       positives.push({
         title: `Serving ${data.uniqueCustomers} different customers`,
         detail: `Good customer diversity in the active pipeline. Revenue isn't over-concentrated on any single account.`,
+      });
+    }
+
+    if (data.productionPct !== null && data.productionPct > 0) {
+      positives.push({
+        title: `Production progress: ${data.itemsProducedCount} of ${data.totalItemsCount} items (${data.productionPct}%)`,
+        detail: `Across all active orders${data.ordersNoProgress.length > 0 ? `. ${data.ordersNoProgress.length} order${s(data.ordersNoProgress.length)} with tracked items haven't started production yet.` : '. All orders with tracked items have some progress.'}`,
+      });
+    }
+
+    if (data.mtoOrders.length > 0 || data.stockOrders.length > 0) {
+      const parts: string[] = [];
+      if (data.mtoOrders.length > 0) parts.push(`${data.mtoOrders.length} MTO${data.avgMtoCompletion !== null ? ` (${data.avgMtoCompletion}% avg completion)` : ''}`);
+      if (data.stockOrders.length > 0) parts.push(`${data.stockOrders.length} stock-only${data.avgStockCompletion !== null ? ` (${data.avgStockCompletion}% avg completion)` : ''}`);
+      if (data.mixedOrders.length > 0) parts.push(`${data.mixedOrders.length} mixed`);
+      positives.push({
+        title: `Order mix: ${parts.join(', ')}`,
+        detail: `MTO orders require production lead time. Stock orders can ship faster once items are available.${data.mixedOrders.length > 0 ? ` ${data.mixedOrders.length} order${s(data.mixedOrders.length)} contain both MTO and stock items.` : ''}`,
       });
     }
 
@@ -476,6 +650,21 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       );
     }
 
+    if (data.productionPct !== null) {
+      summaryParts.push(
+        `Production progress: ${data.itemsProducedCount} of ${data.totalItemsCount} items produced (${data.productionPct}%).`
+        + (data.mtoOrders.length > 0 ? ` MTO: ${data.mtoOrders.length} order${s(data.mtoOrders.length)}${data.avgMtoCompletion !== null ? ` at ${data.avgMtoCompletion}% avg completion` : ''}.` : '')
+        + (data.stockOrders.length > 0 ? ` Stock: ${data.stockOrders.length} order${s(data.stockOrders.length)}${data.avgStockCompletion !== null ? ` at ${data.avgStockCompletion}% avg completion` : ''}.` : '')
+      );
+    }
+
+    if (data.totalAR > 500) {
+      summaryParts.push(
+        `Accounts receivable: ${fmt(data.totalAR)} outstanding.`
+        + (data.arOverdue.length > 0 ? ` ${fmt(data.totalAROverdue)} is 30+ days overdue across ${data.arOverdue.length} invoice${s(data.arOverdue.length)}.` : '')
+      );
+    }
+
     return { issues, positives, summary: summaryParts.join('\n\n') };
   }, [data, now]);
 
@@ -526,7 +715,25 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             <HeroStat label="Shipping Today" value={data.todayShip.length} warn={data.todayNotReady.length > 0} />
             <HeroStat label="Pipeline Value" value={fmtK(data.pipelineVal)} />
             {data.avgCycle && <HeroStat label="Avg Turnaround" value={`${data.avgCycle}d`} />}
+            {data.productionPct !== null && <HeroStat label="Items Produced" value={`${data.productionPct}%`} warn={data.productionPct < 30} good={data.productionPct >= 70} />}
+            {data.totalAR > 500 && <HeroStat label="Outstanding AR" value={fmtK(data.totalAR)} warn={data.arOverdue.length > 0} />}
           </div>
+
+          {/* Production progress bar */}
+          {data.productionPct !== null && data.totalItemsCount > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Production Progress</span>
+                <span className="text-[10px] text-white/40">{data.itemsProducedCount.toLocaleString()} / {data.totalItemsCount.toLocaleString()} items</span>
+              </div>
+              <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${data.productionPct >= 70 ? 'bg-emerald-500' : data.productionPct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                  style={{ width: `${Math.min(data.productionPct, 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Situation brief */}
           <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
@@ -761,6 +968,76 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ MTO vs STOCK + CLUB BREAKDOWN ═══ */}
+      {(data.mtoOrders.length > 0 || data.clubs.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+          {/* MTO vs Stock */}
+          {(data.mtoOrders.length > 0 || data.stockOrders.length > 0) && (
+            <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+              <div className="px-5 py-3 border-b border-white/5">
+                <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">MTO vs Stock Orders</h2>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                {/* MTO bar */}
+                {data.mtoOrders.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-purple-300 font-semibold">Made-to-Order</span>
+                      <span className="text-[10px] text-white/40">{data.mtoOrders.length} order{s(data.mtoOrders.length)} {data.avgMtoCompletion !== null && `\u00b7 ${data.avgMtoCompletion}% avg`}</span>
+                    </div>
+                    <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                      <div className="h-full bg-purple-500 rounded-full" style={{ width: `${Math.min(data.avgMtoCompletion || 0, 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+                {/* Stock bar */}
+                {data.stockOrders.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-cyan-300 font-semibold">Stock Only</span>
+                      <span className="text-[10px] text-white/40">{data.stockOrders.length} order{s(data.stockOrders.length)} {data.avgStockCompletion !== null && `\u00b7 ${data.avgStockCompletion}% avg`}</span>
+                    </div>
+                    <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                      <div className="h-full bg-cyan-500 rounded-full" style={{ width: `${Math.min(data.avgStockCompletion || 0, 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+                {/* Mixed bar */}
+                {data.mixedOrders.length > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-white/40 pt-1 border-t border-white/5">
+                    <span>{data.mixedOrders.length} mixed order{s(data.mixedOrders.length)} (MTO + stock items)</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Club Breakdown */}
+          {data.clubs.length > 0 && (
+            <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+              <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+                <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">By Club</h2>
+                <span className="text-[10px] text-white/25">{data.clubs.length} club{s(data.clubs.length)}</span>
+              </div>
+              <div className="px-4 py-2 max-h-60 overflow-y-auto">
+                {data.clubs.slice(0, 12).map(club => (
+                  <div key={club.name} className="flex items-center gap-2 px-2.5 py-2 hover:bg-white/[0.03] rounded-lg transition-colors">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                    <span className="text-xs text-white/60 flex-1 truncate min-w-0">{club.name}</span>
+                    <span className="text-xs font-bold text-white/70 w-6 text-right">{club.total}</span>
+                    {club.overdue > 0 && <span className="text-[9px] text-red-400 font-semibold shrink-0">{club.overdue} late</span>}
+                    {club.ready > 0 && <span className="text-[9px] text-emerald-400/60 shrink-0">{club.ready} ready</span>}
+                    <span className="text-[10px] text-white/20 w-14 text-right shrink-0">{fmtK(club.value)}</span>
+                  </div>
+                ))}
+                {data.clubs.length > 12 && <p className="text-[10px] text-white/20 py-1 pl-4">+ {data.clubs.length - 12} more clubs</p>}
               </div>
             </div>
           )}
