@@ -401,6 +401,56 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const carriers = Array.from(carrierMap.values()).sort((a, b) => b.shipments - a.shipments);
     const totalShippingCost = carriers.reduce((acc, c) => acc + c.totalCost, 0);
 
+    // ── PLATFORM COMPARISON: SHOPIFY vs DECO ─────────────────────────────
+    const openOrders = orders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
+    const shopifyByFulfillment: Record<string, { count: number; value: number }> = {};
+    const shopifyByPayment: Record<string, { count: number; value: number }> = {};
+    openOrders.forEach(o => {
+      const fs = o.shopify.fulfillmentStatus || 'unfulfilled';
+      const label = fs === 'unfulfilled' ? 'Unfulfilled' : fs === 'partial' ? 'Partially Fulfilled' : fs === 'restocked' ? 'Restocked' : fs;
+      if (!shopifyByFulfillment[label]) shopifyByFulfillment[label] = { count: 0, value: 0 };
+      shopifyByFulfillment[label].count++;
+      shopifyByFulfillment[label].value += parseFloat(o.shopify.totalPrice || '0');
+
+      const ps = o.shopify.paymentStatus || 'pending';
+      const pLabel = ps === 'paid' ? 'Paid' : ps === 'pending' ? 'Pending' : ps === 'refunded' ? 'Refunded' : ps;
+      if (!shopifyByPayment[pLabel]) shopifyByPayment[pLabel] = { count: 0, value: 0 };
+      shopifyByPayment[pLabel].count++;
+      shopifyByPayment[pLabel].value += parseFloat(o.shopify.totalPrice || '0');
+    });
+    // Items-level breakdown for Shopify
+    const shopifyItemStatuses: Record<string, { count: number; items: number }> = {};
+    openOrders.forEach(o => {
+      o.shopify.items.forEach(item => {
+        const ist = item.itemStatus === 'fulfilled' ? 'Fulfilled' : item.itemStatus === 'restocked' ? 'Restocked' : 'Unfulfilled';
+        if (!shopifyItemStatuses[ist]) shopifyItemStatuses[ist] = { count: 0, items: 0 };
+        shopifyItemStatuses[ist].count++;
+        shopifyItemStatuses[ist].items += item.quantity;
+      });
+    });
+
+    // Deco statuses for the same comparison
+    const decoByStatus: Record<string, { count: number; value: number }> = {};
+    active.forEach(j => {
+      const st = j.status || 'Unknown';
+      if (!decoByStatus[st]) decoByStatus[st] = { count: 0, value: 0 };
+      decoByStatus[st].count++;
+      decoByStatus[st].value += (j.orderTotal || j.billableAmount || 0);
+    });
+    // Add shipped/completed from live (not active)
+    const shippedJobs = live.filter(j => (j.status || '').toLowerCase() === 'shipped');
+    const completedJobs = live.filter(j => (j.status || '').toLowerCase() === 'completed');
+    if (shippedJobs.length > 0) {
+      decoByStatus['Shipped'] = { count: shippedJobs.length, value: shippedJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
+    }
+    if (completedJobs.length > 0) {
+      decoByStatus['Completed'] = { count: completedJobs.length, value: completedJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0) };
+    }
+    const totalShopifyOpen = openOrders.length;
+    const totalShopifyVal = openOrders.reduce((a, o) => a + parseFloat(o.shopify.totalPrice || '0'), 0);
+    const totalDecoLive = live.length;
+    const totalDecoVal = live.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0);
+
     return {
       active, shipped, stages, overdue, overdueAging, overdueByStatus,
       overdueByCustomer, repeatOverdueCustomers, atRisk, todayShip, todayReady,
@@ -422,6 +472,9 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       dailyThroughput, daysToClear,
       stageAging, emailEnquiries,
       carriers, totalShippingCost,
+      // Platform comparison
+      shopifyByFulfillment, shopifyByPayment, shopifyItemStatuses,
+      decoByStatus, totalShopifyOpen, totalShopifyVal, totalDecoLive, totalDecoVal,
     };
   }, [decoJobs, orders, now, t0]);
 
@@ -1383,6 +1436,145 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
           </div>
         )}
 
+      </div>
+
+      {/* ═══ PLATFORM OVERVIEW: SHOPIFY vs DECO ═══ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* LEFT: Shopify */}
+        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+            <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-2 -mt-0.5" />Shopify Orders
+            </h2>
+            <span className="text-[10px] text-white/25">{data.totalShopifyOpen} open · {fmtK(data.totalShopifyVal)}</span>
+          </div>
+          <div className="p-4 space-y-3">
+            <div>
+              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Fulfillment Status</div>
+              <div className="space-y-1.5">
+                {Object.entries(data.shopifyByFulfillment)
+                  .sort((a, b) => b[1].count - a[1].count)
+                  .map(([status, { count, value }]) => {
+                    const pctW = data.totalShopifyOpen > 0 ? Math.max((count / data.totalShopifyOpen) * 100, 4) : 0;
+                    const color = status === 'Unfulfilled' ? 'bg-amber-500' : status === 'Partially Fulfilled' ? 'bg-blue-500' : 'bg-gray-500';
+                    return (
+                      <div key={status}>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-sm ${color}`} />
+                            <span className="text-[11px] text-white/70">{status}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-white/40">{count} order{s(count)}</span>
+                            <span className="text-[11px] font-semibold text-white/60">{fmtK(value)}</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                          <div className={`h-full rounded-full ${color}/60`} style={{ width: `${pctW}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+            <div className="border-t border-white/5 pt-3">
+              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Payment Status</div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(data.shopifyByPayment)
+                  .sort((a, b) => b[1].count - a[1].count)
+                  .map(([status, { count, value }]) => {
+                    const color = status === 'Paid' ? 'text-emerald-400' : status === 'Pending' ? 'text-amber-400' : 'text-red-400';
+                    const bg = status === 'Paid' ? 'bg-emerald-500/10' : status === 'Pending' ? 'bg-amber-500/10' : 'bg-red-500/10';
+                    return (
+                      <div key={status} className={`px-3 py-2 rounded-lg ${bg} text-center`}>
+                        <div className={`text-sm font-black ${color}`}>{count}</div>
+                        <div className="text-[10px] text-white/35">{status}</div>
+                        <div className="text-[9px] text-white/20 mt-0.5">{fmtK(value)}</div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+            {Object.keys(data.shopifyItemStatuses).length > 0 && (
+              <div className="border-t border-white/5 pt-3">
+                <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Line Items</div>
+                <div className="flex gap-3">
+                  {Object.entries(data.shopifyItemStatuses)
+                    .sort((a, b) => b[1].items - a[1].items)
+                    .map(([status, { count, items }]) => {
+                      const color = status === 'Fulfilled' ? 'text-emerald-400' : status === 'Restocked' ? 'text-red-400' : 'text-amber-400';
+                      return (
+                        <div key={status} className="text-center flex-1">
+                          <div className={`text-sm font-bold ${color}`}>{items}</div>
+                          <div className="text-[9px] text-white/30">{status}</div>
+                          <div className="text-[9px] text-white/15">{count} lines</div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: Deco */}
+        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+            <h2 className="text-xs font-bold text-white/60 uppercase tracking-wider">
+              <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-2 -mt-0.5" />DecoNetwork Jobs
+            </h2>
+            <span className="text-[10px] text-white/25">{data.totalDecoLive} live · {fmtK(data.totalDecoVal)}</span>
+          </div>
+          <div className="p-4 space-y-3">
+            <div>
+              <div className="text-[10px] text-white/30 uppercase tracking-wider mb-2">Production Status</div>
+              <div className="space-y-1.5">
+                {Object.entries(data.decoByStatus)
+                  .sort((a, b) => {
+                    const order = [...FLOW, 'Shipped'];
+                    return order.indexOf(a[0]) - order.indexOf(b[0]);
+                  })
+                  .map(([status, { count, value }]) => {
+                    const pctW = data.totalDecoLive > 0 ? Math.max((count / data.totalDecoLive) * 100, 4) : 0;
+                    const isBlocked = BLOCKED.has(status);
+                    const color = DOT[status] || 'bg-gray-400';
+                    return (
+                      <div key={status}>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`w-2 h-2 rounded-sm ${color}`} />
+                            <span className={`text-[11px] ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
+                            {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase">blocked</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-white/40">{count} job{s(count)}</span>
+                            <span className="text-[11px] font-semibold text-white/60">{fmtK(value)}</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                          <div className={`h-full rounded-full ${color.replace('bg-', 'bg-')}/60`} style={{ width: `${pctW}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+            <div className="border-t border-white/5 pt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="px-3 py-2.5 rounded-lg bg-amber-500/10 text-center">
+                  <div className="text-sm font-black text-amber-400">{data.blockedCount}</div>
+                  <div className="text-[10px] text-white/35">Blocked</div>
+                  <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}% of active</div>
+                </div>
+                <div className="px-3 py-2.5 rounded-lg bg-emerald-500/10 text-center">
+                  <div className="text-sm font-black text-emerald-400">{data.producingCount}</div>
+                  <div className="text-[10px] text-white/35">Producing</div>
+                  <div className="text-[9px] text-white/20 mt-0.5">{data.active.length > 0 ? pct(data.producingCount, data.active.length) : 0}% of active</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ═══ TWO-COLUMN: PIPELINE + WEEK ═══ */}
