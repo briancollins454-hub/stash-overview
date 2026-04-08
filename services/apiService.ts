@@ -378,6 +378,7 @@ export const fetchDecoFinancials = async (
             field: '1', condition: '4', date1: dateStr,
             limit: BATCH.toString(), offset: offset.toString(),
             skip_login_token: '1',
+            include_workflow_data: '1',
         };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const orders = data.orders || [];
