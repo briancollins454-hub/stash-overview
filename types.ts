@@ -152,6 +152,7 @@ export interface DecoJob {
   creditUsed?: number;
   accountTerms?: string;
   dateInvoiced?: string;
+  isQuote?: boolean;
   payments?: { id: number; datePaid: string; method: string; amount: number; refundedAmount: number }[];
   refunds?: { id: number; amount: number; date: string }[];
 }

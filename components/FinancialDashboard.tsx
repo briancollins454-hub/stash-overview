@@ -423,13 +423,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       aging[bucket] += (j.outstandingBalance || 0);
     });
 
-    // Total value of Quotes — use orderTotal/billableAmount, check status or paymentStatus
-    const isQuote = (j: DecoJob) => {
+    // Total value of Quotes — check isQuote flag, status text, or paymentStatus
+    const isQuoteJob = (j: DecoJob) => {
+      if (j.isQuote) return true;
       const s = (j.status || '').toLowerCase();
-      const ps = j.paymentStatus;
-      return s.includes('quote') || s === 'awaiting review' || ps === '11';
+      return s.includes('quote') || s === 'saved';
     };
-    const quoteJobs = activeJobs.filter(isQuote);
+    const quoteJobs = activeJobs.filter(isQuoteJob);
     const quotesTotal = quoteJobs
       .reduce((s, j) => s + (j.orderTotal || j.billableAmount || j.outstandingBalance || 0), 0);
     const quotesCount = quoteJobs.length;
