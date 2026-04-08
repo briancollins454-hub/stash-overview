@@ -954,22 +954,16 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       </div>
 
       {/* ═══ PLATFORM OVERVIEW: SHOPIFY vs DECO ═══ */}
-      {(() => {
-        const allStatuses = [...FLOW, 'Shipped', 'No Deco Link'].filter(st =>
-          (data.shopifyByDecoStatus[st]?.count || 0) > 0 || (data.decoByStatus[st]?.count || 0) > 0
-        );
-        return (
       <div className="grid grid-cols-2 gap-4">
 
-        {/* LEFT: Shopify */}
-        <div className={`relative rounded-2xl overflow-hidden border ${
-          sentiment === 'green' ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-transparent' :
-          sentiment === 'amber' ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-600/5 to-transparent' :
-          'border-red-500/30 bg-gradient-to-br from-red-500/15 via-rose-600/5 to-transparent'
-        }`}>
+        {/* LEFT: Shopify — exact hero card clone */}
+        <div className="relative rounded-2xl overflow-hidden border border-green-500/30 bg-gradient-to-br from-green-500/15 via-green-600/5 to-transparent">
           <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
-              <h1 className="text-xl font-black text-white tracking-tight">Shopify Orders</h1>
+              <div>
+                <h1 className="text-xl font-black text-white tracking-tight">Shopify Orders</h1>
+                <p className="text-xs text-white/35 mt-0.5">Open &amp; unfulfilled orders from Shopify</p>
+              </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-green-500/20 text-green-400">
                 {data.totalShopifyOpen} Open
               </div>
@@ -977,117 +971,99 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
 
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
               <HeroStat label="Open Orders" value={data.totalShopifyOpen} />
+              <HeroStat label="Unfulfilled" value={data.shopifyByFulfillment['Unfulfilled']?.count || 0} warn={(data.shopifyByFulfillment['Unfulfilled']?.count || 0) > 0} />
+              <HeroStat label="Partial" value={data.shopifyByFulfillment['Partially Fulfilled']?.count || 0} />
+              <HeroStat label="Paid" value={data.shopifyByPayment['Paid']?.count || 0} good={(data.shopifyByPayment['Paid']?.count || 0) > 0} />
+              <HeroStat label="Pending Payment" value={data.shopifyByPayment['Pending']?.count || 0} warn={(data.shopifyByPayment['Pending']?.count || 0) > 0} />
+              <HeroStat label="Total Value" value={fmtK(data.totalShopifyVal)} />
               <HeroStat label="Linked to Deco" value={data.shopifyLinked} good={data.shopifyLinked > 0} />
               <HeroStat label="No Deco Link" value={data.shopifyUnlinked} warn={data.shopifyUnlinked > 0} />
-              <HeroStat label="Total Value" value={fmtK(data.totalShopifyVal)} />
             </div>
 
+            {/* Fulfillment progress bar */}
+            {data.totalShopifyOpen > 0 && (() => {
+              const fulfilledPct = pct(data.shopifyByFulfillment['Partially Fulfilled']?.count || 0, data.totalShopifyOpen);
+              return (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Fulfillment Progress</span>
+                    <span className="text-[10px] text-white/40">{data.shopifyByFulfillment['Partially Fulfilled']?.count || 0} partially fulfilled of {data.totalShopifyOpen}</span>
+                  </div>
+                  <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.min(fulfilledPct, 100)}%` }} />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Brief */}
             <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
-              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Production Status (via linked Deco jobs)</h3>
-              <div className="space-y-2">
-                {allStatuses.map(status => {
-                  const entry = data.shopifyByDecoStatus[status] || { count: 0, value: 0 };
-                  if (entry.count === 0) return (
-                    <div key={status} className="flex items-center justify-between py-1 opacity-30">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${DOT[status] || 'bg-gray-400'}`} />
-                        <span className="text-xs text-white/50">{status}</span>
-                      </div>
-                      <span className="text-[10px] text-white/20">—</span>
-                    </div>
-                  );
-                  const pctW = data.totalShopifyOpen > 0 ? Math.max((entry.count / data.totalShopifyOpen) * 100, 4) : 0;
-                  const isBlocked = BLOCKED.has(status);
-                  const color = DOT[status] || 'bg-gray-400';
-                  return (
-                    <div key={status}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${color}`} />
-                          <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
-                          {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-white/40">{entry.count} order{s(entry.count)}</span>
-                          <span className="text-xs font-semibold text-white/60">{fmtK(entry.value)}</span>
-                        </div>
-                      </div>
-                      <div className="h-2 bg-black/30 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Shopify Summary</h3>
+              <p className="text-sm text-white/70 leading-relaxed">
+                {data.totalShopifyOpen.toLocaleString()} open orders worth {fmtK(data.totalShopifyVal)}.
+                {' '}{data.shopifyByFulfillment['Unfulfilled']?.count || 0} unfulfilled, {data.shopifyByFulfillment['Partially Fulfilled']?.count || 0} partially fulfilled.
+                {' '}{data.shopifyByPayment['Paid']?.count || 0} paid, {data.shopifyByPayment['Pending']?.count || 0} pending payment{data.shopifyByPayment['Refunded'] ? `, ${data.shopifyByPayment['Refunded'].count} refunded` : ''}.
+                {data.shopifyUnlinked > 0 ? ` ${data.shopifyUnlinked} orders have no linked Deco job — these can't be tracked for production status.` : ' All orders are linked to Deco jobs.'}
+              </p>
             </div>
           </div>
         </div>
 
-        {/* RIGHT: Deco */}
-        <div className={`relative rounded-2xl overflow-hidden border ${
-          sentiment === 'green' ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/15 via-emerald-600/5 to-transparent' :
-          sentiment === 'amber' ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/15 via-orange-600/5 to-transparent' :
-          'border-red-500/30 bg-gradient-to-br from-red-500/15 via-rose-600/5 to-transparent'
-        }`}>
+        {/* RIGHT: Deco — exact hero card clone */}
+        <div className="relative rounded-2xl overflow-hidden border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 via-indigo-600/5 to-transparent">
           <div className="px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-start justify-between mb-4">
-              <h1 className="text-xl font-black text-white tracking-tight">DecoNetwork Jobs</h1>
+              <div>
+                <h1 className="text-xl font-black text-white tracking-tight">DecoNetwork Jobs</h1>
+                <p className="text-xs text-white/35 mt-0.5">Production &amp; fulfilment via DecoNetwork</p>
+              </div>
               <div className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-400">
                 {data.totalDecoLive} Live
               </div>
             </div>
 
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm mb-5">
-              <HeroStat label="Active" value={data.active.length} />
+              <HeroStat label="Active Jobs" value={data.active.length} />
+              <HeroStat label="In Production" value={data.producingCount} good={data.producingCount > 0} warn={data.producingCount === 0} />
               <HeroStat label="Blocked" value={data.blockedCount} warn={data.blockedCount > data.producingCount} />
-              <HeroStat label="Producing" value={data.producingCount} good={data.producingCount > 0} />
+              <HeroStat label="Overdue" value={data.overdue.length} warn={data.overdue.length > 0} />
+              <HeroStat label="Awaiting Stock" value={data.decoByStatus['Awaiting Stock']?.count || 0} warn={(data.decoByStatus['Awaiting Stock']?.count || 0) > 10} />
+              <HeroStat label="Awaiting Processing" value={data.decoByStatus['Awaiting Processing']?.count || 0} />
               <HeroStat label="Total Value" value={fmtK(data.totalDecoVal)} />
+              <HeroStat label="Shipped" value={data.decoByStatus['Shipped']?.count || 0} good={(data.decoByStatus['Shipped']?.count || 0) > 0} />
             </div>
 
-            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
-              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-3">Production Status</h3>
-              <div className="space-y-2">
-                {allStatuses.filter(st => st !== 'No Deco Link').map(status => {
-                  const entry = data.decoByStatus[status] || { count: 0, value: 0 };
-                  if (entry.count === 0) return (
-                    <div key={status} className="flex items-center justify-between py-1 opacity-30">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`w-2 h-2 rounded-full ${DOT[status] || 'bg-gray-400'}`} />
-                        <span className="text-xs text-white/50">{status}</span>
-                      </div>
-                      <span className="text-[10px] text-white/20">—</span>
-                    </div>
-                  );
-                  const pctW = data.totalDecoLive > 0 ? Math.max((entry.count / data.totalDecoLive) * 100, 4) : 0;
-                  const isBlocked = BLOCKED.has(status);
-                  const color = DOT[status] || 'bg-gray-400';
-                  return (
-                    <div key={status}>
-                      <div className="flex items-center justify-between mb-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${color}`} />
-                          <span className={`text-xs ${isBlocked ? 'text-amber-300/70' : 'text-white/70'}`}>{status}</span>
-                          {isBlocked && <span className="text-[8px] text-amber-400/40 uppercase ml-1">blocked</span>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-white/40">{entry.count} job{s(entry.count)}</span>
-                          <span className="text-xs font-semibold text-white/60">{fmtK(entry.value)}</span>
-                        </div>
-                      </div>
-                      <div className="h-2 bg-black/30 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${color}`} style={{ width: `${pctW}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
+            {/* Production progress bar */}
+            {data.productionPct !== null && data.totalItemsCount > 0 && (
+              <div className="mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Production Progress</span>
+                  <span className="text-[10px] text-white/40">{data.itemsProducedCount.toLocaleString()} / {data.totalItemsCount.toLocaleString()} items</span>
+                </div>
+                <div className="h-2 bg-black/30 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${data.productionPct >= 70 ? 'bg-emerald-500' : data.productionPct >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(data.productionPct, 100)}%` }}
+                  />
+                </div>
               </div>
+            )}
+
+            {/* Brief */}
+            <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
+              <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Deco Summary</h3>
+              <p className="text-sm text-white/70 leading-relaxed">
+                {data.active.length} active jobs worth {fmtK(data.pipelineVal)}.
+                {' '}{data.blockedCount} blocked ({data.active.length > 0 ? pct(data.blockedCount, data.active.length) : 0}%), {data.producingCount} in production.
+                {data.overdue.length > 0 ? ` ${data.overdue.length} orders are overdue totalling ${fmtK(data.overdueVal)}.` : ' No overdue orders.'}
+                {' '}Biggest queue: {data.bottleneck.stage || 'none'} with {data.bottleneck.count} job{s(data.bottleneck.count)}.
+                {data.decoByStatus['Shipped'] ? ` ${data.decoByStatus['Shipped'].count} shipped, ${data.decoByStatus['Completed']?.count || 0} completed.` : ''}
+              </p>
             </div>
           </div>
         </div>
 
       </div>
-        );
-      })()}
 
       {/* ═══ DO FIRST ═══ */}
       {data.doFirst.length > 0 && (
