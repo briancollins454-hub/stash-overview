@@ -387,10 +387,6 @@ export const fetchDecoFinancials = async (
         for (const job of orders) {
             const custName = job.billing_details?.company ||
                 `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
-            // Debug: log quote-related fields for orders with Saved status or is_quote
-            if (job.is_quote || job.order_type === 2 || job.order_status_name === 'Saved' || job.order_status === 6 || (job.order_status_name || '').toLowerCase().includes('quote')) {
-                console.log('[Deco Quote Debug]', job.order_id, { is_quote: job.is_quote, order_type: job.order_type, status: job.order_status, status_name: job.order_status_name, payment_status: job.payment_status, billable: job.billable_amount, total: job.total, item_amount: job.item_amount });
-            }
             allJobs.push({
                 id: String(job.order_id), jobNumber: String(job.order_id),
                 poNumber: job.customer_po_number || '', jobName: job.job_name || '',
@@ -436,43 +432,6 @@ export const fetchDecoFinancials = async (
         if (orders.length < BATCH || offset >= apiTotal) break;
         await delay(50); // throttle
     }
-
-    // Fetch quotes — try all known DecoNetwork API patterns
-    const quoteEndpoints = [
-        'api/json/manage_quotes/list',
-        'api/json/quotes/find',
-        'api/json/manage_orders/quotes',
-        'api/json/manage_sales/quotes',
-    ];
-    for (const ep of quoteEndpoints) {
-        try {
-            const qData = await robustDecoFetch(settings, ep, {
-                field: '1', condition: '4', date1: dateStr,
-                limit: '5', offset: '0', skip_login_token: '1',
-            });
-            const items = qData?.orders || qData?.quotes || qData?.results || [];
-            console.log(`[Deco Quote] ${ep} returned:`, items.length, 'items', qData?.total ? `(total: ${qData.total})` : '');
-            if (items.length > 0) {
-                console.log('[Deco Quote] Sample:', JSON.stringify(items[0]).substring(0, 300));
-            }
-        } catch (e: any) {
-            console.log(`[Deco Quote] ${ep} failed:`, e.message?.substring(0, 80));
-        }
-    }
-
-    // Also try manage_orders/find with condition=1 (equals) and various order_status values
-    for (const status of ['5', '6', '14', '15', '16', '20']) {
-        try {
-            const sData = await robustDecoFetch(settings, 'api/json/manage_orders/find', {
-                field: '6', condition: '1', string: status, limit: '3', skip_login_token: '1',
-            });
-            if ((sData?.total || 0) > 0) {
-                console.log(`[Deco Quote] order_status=${status} has ${sData.total} results, sample status_name:`, sData.orders?.[0]?.order_status_name);
-            }
-        } catch { /* skip */ }
-    }
-
-    console.log('[Deco] Total jobs:', allJobs.length, 'of which quotes:', allJobs.filter(j => j.isQuote).length);
 
     return allJobs;
 };

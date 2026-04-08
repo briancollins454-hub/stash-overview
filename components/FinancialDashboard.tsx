@@ -423,25 +423,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       aging[bucket] += (j.outstandingBalance || 0);
     });
 
-    // Total value of Quotes — check isQuote flag or status text
-    const isQuoteJob = (j: DecoJob) => {
-      if (j.isQuote) return true;
-      const s = (j.status || '').toLowerCase();
-      return s.includes('quote');
-    };
-    const quoteJobs = allJobs.filter(j => !isCancelled(j) && isQuoteJob(j));
-    const quotesTotal = quoteJobs
-      .reduce((s, j) => s + (j.orderTotal || j.billableAmount || j.outstandingBalance || 0), 0);
-    const quotesCount = quoteJobs.length;
 
-    // Debug: log unique statuses and quote detection
-    if (typeof window !== 'undefined') {
-      const statusCounts: Record<string, number> = {};
-      activeJobs.forEach(j => { statusCounts[j.status || 'null'] = (statusCounts[j.status || 'null'] || 0) + 1; });
-      console.log('[Finance Debug] Unique statuses:', statusCounts);
-      console.log('[Finance Debug] Quote jobs found:', quotesCount, 'total:', quotesTotal);
-      if (quoteJobs.length > 0) console.log('[Finance Debug] Sample quote:', quoteJobs[0].jobNumber, quoteJobs[0].status, quoteJobs[0].isQuote);
-    }
 
     // Jobs in Progress breakdown by order status (exclude cancelled)
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
@@ -458,7 +440,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       customersWithBalance: customersWithBalance.length,
       overdue90: overdue90.length, overdue60: overdue60.length,
       aging, totalJobs: allJobs.length, totalCustomers: customerAccounts.length,
-      quotesTotal, quotesCount, inProgressByStatus,
+      inProgressByStatus,
     };
   }, [customerAccounts, allJobs]);
 
@@ -842,12 +824,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(summary.total)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">{summary.customersWithBalance} account{summary.customersWithBalance !== 1 ? 's' : ''}</div>
         </div>
-        {/* Total Quotes */}
-        <div className={`${card} p-4 border-l-4 border-l-purple-500`}>
-          <div className={headerText}>Total Quotes</div>
-          <div className="text-xl sm:text-2xl font-black text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(summary.quotesTotal)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{summary.quotesCount} quote{summary.quotesCount !== 1 ? 's' : ''}</div>
-        </div>
+
       </div>
 
       {/* Second row: Billing + Aging */}
