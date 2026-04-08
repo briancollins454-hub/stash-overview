@@ -434,6 +434,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       .reduce((s, j) => s + (j.orderTotal || j.billableAmount || j.outstandingBalance || 0), 0);
     const quotesCount = quoteJobs.length;
 
+    // Debug: log unique statuses and quote detection
+    if (typeof window !== 'undefined') {
+      const statusCounts: Record<string, number> = {};
+      activeJobs.forEach(j => { statusCounts[j.status || 'null'] = (statusCounts[j.status || 'null'] || 0) + 1; });
+      console.log('[Finance Debug] Unique statuses:', statusCounts);
+      console.log('[Finance Debug] Quote jobs found:', quotesCount, 'total:', quotesTotal);
+      if (quoteJobs.length > 0) console.log('[Finance Debug] Sample quote:', quoteJobs[0].jobNumber, quoteJobs[0].status, quoteJobs[0].isQuote);
+    }
+
     // Jobs in Progress breakdown by order status (exclude cancelled)
     const inProgressByStatus: Record<string, { value: number; count: number }> = {};
     activeJobs.filter(j => !j.dateInvoiced && (j.outstandingBalance || 0) > 0).forEach(j => {

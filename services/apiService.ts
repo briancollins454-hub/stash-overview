@@ -387,9 +387,9 @@ export const fetchDecoFinancials = async (
         for (const job of orders) {
             const custName = job.billing_details?.company ||
                 `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
-            // Debug: log quote-related fields for first few orders with "Saved" status or is_quote
-            if (offset === 0 && (job.is_quote || job.order_type === 2 || job.order_status_name === 'Saved' || job.order_status === 6)) {
-                console.log('[Deco Quote Debug]', job.order_id, { is_quote: job.is_quote, order_type: job.order_type, status: job.order_status, status_name: job.order_status_name, payment_status: job.payment_status });
+            // Debug: log quote-related fields for orders with Saved status or is_quote
+            if (job.is_quote || job.order_type === 2 || job.order_status_name === 'Saved' || job.order_status === 6 || (job.order_status_name || '').toLowerCase().includes('quote')) {
+                console.log('[Deco Quote Debug]', job.order_id, { is_quote: job.is_quote, order_type: job.order_type, status: job.order_status, status_name: job.order_status_name, payment_status: job.payment_status, billable: job.billable_amount, total: job.total, item_amount: job.item_amount });
             }
             allJobs.push({
                 id: String(job.order_id), jobNumber: String(job.order_id),
