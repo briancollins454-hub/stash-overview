@@ -89,34 +89,36 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: fetch order 224778 (assigned to Matthew Irvine in Deco admin)
+  // Debug: search for the Portadown RFC order by customer name
   useEffect(() => {
-    fetch('/api/deco', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: '224778', criteria: '224778', limit: '1', include_workflow_data: '1', include_user_assignments: '1' } })
-    }).then(r => r.json()).then(data => {
-      const job = data.orders?.[0];
-      if (!job) { console.log('[STAFF] Order 224778 NOT FOUND'); return; }
-      console.log('[STAFF] 224778 ALL keys:', Object.keys(job).sort());
-      console.log('[STAFF] 224778 assigned_to:', JSON.stringify(job.assigned_to));
-      console.log('[STAFF] 224778 created_by:', JSON.stringify(job.created_by));
-      // Deep search for matthew/irvine in every field
-      const targets = ['matthew','irvine'];
-      const findDeep = (obj: any, path: string) => {
-        if (!obj || typeof obj !== 'object') return;
-        for (const [k, v] of Object.entries(obj)) {
-          const p = `${path}.${k}`;
-          if (typeof v === 'string' && targets.some(n => v.toLowerCase().includes(n)))
-            console.log(`[STAFF] FOUND at ${p} = "${v}"`);
-          if (typeof v === 'number' || typeof v === 'boolean') { /* skip */ }
-          else if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
-          else if (typeof v === 'object' && v !== null) findDeep(v, p);
-        }
-      };
-      findDeep(job, 'job');
-      console.log('[STAFF] 224778 FULL JSON:', JSON.stringify(job).slice(0, 8000));
-    }).catch(e => console.log('[STAFF] 224778 error:', e.message));
+    // Search by billing name "Shirley" and "Portadown"
+    ['Shirley', 'Portadown'].forEach(term => {
+      fetch('/api/deco', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '5', condition: '2', string: term, criteria: term, limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
+      }).then(r => r.json()).then(data => {
+        const orders = data.orders || [];
+        console.log(`[STAFF] Search '${term}': ${orders.length} results`);
+        orders.forEach((j: any) => {
+          console.log(`[STAFF] ${term} => order_id=${j.order_id}, customer=${j.billing_details?.company || ''} ${j.billing_details?.firstname || ''} ${j.billing_details?.lastname || ''}`);
+          console.log(`[STAFF] ${term} => assigned_to=${JSON.stringify(j.assigned_to)}, created_by=${JSON.stringify(j.created_by)}`);
+          // Deep search for matthew/irvine
+          const findDeep = (obj: any, path: string) => {
+            if (!obj || typeof obj !== 'object') return;
+            for (const [k, v] of Object.entries(obj)) {
+              const p = `${path}.${k}`;
+              if (typeof v === 'string' && (v.toLowerCase().includes('matthew') || v.toLowerCase().includes('irvine')))
+                console.log(`[STAFF] MATTHEW FOUND at ${p} = "${v}"`);
+              if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
+              else if (typeof v === 'object' && v !== null) findDeep(v, p);
+            }
+          };
+          findDeep(j, 'job');
+          console.log(`[STAFF] ${term} FULL:`, JSON.stringify(j).slice(0, 5000));
+        });
+      }).catch(e => console.log(`[STAFF] ${term} error:`, e.message));
+    });
   }, []);
 
 
