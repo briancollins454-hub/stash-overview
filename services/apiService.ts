@@ -385,16 +385,25 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: dump raw job keys and all values
+    // Debug: dump workflow item keys to find sales assign
     if (allDeco.length > 0) {
-        const j = allDeco[0];
-        const flat: Record<string, any> = {};
-        for (const [k, v] of Object.entries(j)) {
-            if (Array.isArray(v)) flat[k] = `[Array: ${v.length}]`;
-            else if (v && typeof v === 'object') flat[k] = JSON.stringify(v);
-            else flat[k] = v;
+        for (const j of allDeco.slice(0, 10)) {
+            if (j.order_lines?.length > 0) {
+                const line = j.order_lines[0];
+                const lineFlat: Record<string, any> = {};
+                for (const [k, v] of Object.entries(line)) {
+                    if (Array.isArray(v)) lineFlat[k] = `[Array: ${v.length}]`;
+                    else if (v && typeof v === 'object') lineFlat[k] = JSON.stringify(v);
+                    else lineFlat[k] = v;
+                }
+                console.log('[DECO RAW] Order line keys:', JSON.stringify(lineFlat, null, 2));
+                if (line.workflow_items?.length > 0) {
+                    const wf = line.workflow_items[0];
+                    console.log('[DECO RAW] Workflow item ALL fields:', JSON.stringify(wf, null, 2));
+                }
+                break;
+            }
         }
-        console.log('[DECO RAW] Job keys+values:', JSON.stringify(flat, null, 2));
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
