@@ -161,17 +161,26 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
             date: r.date || r.date_refunded || '',
         })) : [],
         salesPerson: (() => {
+            // Try assigned_to first
             const at = job.assigned_to;
             if (at && typeof at === 'object' && (at.firstname || at.lastname))
                 return `${at.firstname || ''} ${at.lastname || ''}`.trim();
             if (at && typeof at === 'string') return at;
+            // Try sales_staff_account / sales_staff
+            const ss = job.sales_staff_account || job.sales_staff || job.staff_account;
+            if (ss && typeof ss === 'object' && (ss.firstname || ss.lastname))
+                return `${ss.firstname || ''} ${ss.lastname || ''}`.trim();
+            if (ss && typeof ss === 'string') return ss;
+            // Try processed_by from first order line
+            const pb = job.order_lines?.[0]?.processed_by || job.order_lines?.[0]?.workflow_items?.[0]?.processed_by;
+            if (pb && typeof pb === 'object' && (pb.firstname || pb.lastname))
+                return `${pb.firstname || ''} ${pb.lastname || ''}`.trim();
+            // Fallback to created_by
             const cb = job.created_by;
             if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
                 return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
             return undefined;
         })(),
-    };
-};
 
 const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
     try {
@@ -362,13 +371,27 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
-        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_user_assignments': '1', 'skip_login_token': '1' };
+        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_user_assignments': '1', 'include_custom_fields': '1', 'include_sales_data': '1', 'skip_login_token': '1' };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
+    // Log field coverage for staff data
+    const counts = { assigned_to: 0, created_by: 0, sales_staff: 0, processed_by: 0 };
+    const names: Record<string, Set<string>> = { assigned_to: new Set(), created_by: new Set(), processed_by: new Set() };
+    for (const j of allDeco) {
+        if (j.assigned_to?.firstname) { counts.assigned_to++; names.assigned_to.add(`${j.assigned_to.firstname} ${j.assigned_to.lastname || ''}`.trim()); }
+        if (j.created_by?.firstname) { counts.created_by++; names.created_by.add(`${j.created_by.firstname} ${j.created_by.lastname || ''}`.trim()); }
+        if (j.sales_staff_account || j.sales_staff || j.staff_account) counts.sales_staff++;
+        const pb = j.order_lines?.[0]?.processed_by || j.order_lines?.[0]?.workflow_items?.[0]?.processed_by;
+        if (pb?.firstname) { counts.processed_by++; names.processed_by.add(`${pb.firstname} ${pb.lastname || ''}`.trim()); }
+    }
+    console.log('[STAFF] Field coverage:', counts);
+    console.log('[STAFF] assigned_to names:', [...names.assigned_to]);
+    console.log('[STAFF] created_by names:', [...names.created_by]);
+    console.log('[STAFF] processed_by names:', [...names.processed_by]);
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
@@ -398,6 +421,8 @@ export const fetchDecoFinancials = async (
             skip_login_token: '1',
             include_workflow_data: '1',
             include_user_assignments: '1',
+            include_custom_fields: '1',
+            include_sales_data: '1',
         };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const orders = data.orders || [];
@@ -448,6 +473,10 @@ export const fetchDecoFinancials = async (
                     if (at && typeof at === 'object' && (at.firstname || at.lastname))
                         return `${at.firstname || ''} ${at.lastname || ''}`.trim();
                     if (at && typeof at === 'string') return at;
+                    const ss = job.sales_staff_account || job.sales_staff || job.staff_account;
+                    if (ss && typeof ss === 'object' && (ss.firstname || ss.lastname))
+                        return `${ss.firstname || ''} ${ss.lastname || ''}`.trim();
+                    if (ss && typeof ss === 'string') return ss;
                     const cb = job.created_by;
                     if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
                         return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
