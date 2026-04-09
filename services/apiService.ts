@@ -394,10 +394,13 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     console.log('[STAFF] assigned_to names:', [...names.assigned_to]);
     console.log('[STAFF] created_by names:', [...names.created_by]);
     console.log('[STAFF] processed_by names:', [...names.processed_by]);
-    return allDeco.map((job: any) => {
+    const result = allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
     });
+    const withSP = result.filter(j => j.salesPerson);
+    console.log(`[STAFF] After buildDecoJob: ${result.length} jobs, ${withSP.length} have salesPerson:`, [...new Set(withSP.map(j => j.salesPerson))]);
+    return result;
 };
 
 // Lightweight financial-only fetch — loads ALL Deco orders from a given year onward
