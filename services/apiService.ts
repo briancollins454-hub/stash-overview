@@ -152,6 +152,8 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
             amount: parseFloat(r.amount || r.refund_amount) || 0,
             date: r.date || r.date_refunded || '',
         })) : [],
+        salesPerson: job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep
+            || items.find(i => i.assignedTo)?.assignedTo || undefined,
     };
 };
 
@@ -424,6 +426,7 @@ export const fetchDecoFinancials = async (
                     amount: parseFloat(r.amount || r.refund_amount) || 0,
                     date: r.date || r.date_refunded || '',
                 })) : [],
+                salesPerson: job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep || undefined,
             });
         }
 

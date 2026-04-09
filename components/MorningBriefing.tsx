@@ -514,6 +514,49 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const thirtyAgo = new Date(t0); thirtyAgo.setDate(t0.getDate() - 30);
     const decoOnlyShippedRecent = decoOnlyShipped.filter(j => { const d = pd(j.dateShipped); return d && d >= thirtyAgo; });
     const decoOnlyCompletedRecent = decoOnlyCompleted.filter(j => { const d = pd(j.dateShipped) || pd(j.dateDue); return d && d >= thirtyAgo; });
+
+    // ── STAFF ANALYTICS ──────────────────────────────────────────────────
+    const staffMap = new Map<string, {
+      name: string; active: number; blocked: number; overdue: number; overdueJobs: DecoJob[];
+      producing: number; pipelineVal: number; stale: number; staleJobs: DecoJob[];
+      shippedRecent: number; totalTurnaround: number; turnaroundCount: number;
+    }>();
+    active.forEach(j => {
+      const sp = j.salesPerson || 'Unassigned';
+      const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
+      e.active++;
+      e.pipelineVal += j.orderTotal || j.billableAmount || 0;
+      if (BLOCKED.has(j.status || '')) e.blocked++;
+      if (PRODUCING.has(j.status || '')) e.producing++;
+      const due = pd(j.dateDue) || pd(j.productionDueDate);
+      if (due && due < t0) { e.overdue++; e.overdueJobs.push(j); }
+      const ord = pd(j.dateOrdered);
+      if (ord && daysBetween(ord, now) > 30 && BLOCKED.has(j.status || '')) { e.stale++; e.staleJobs.push(j); }
+      staffMap.set(sp, e);
+    });
+    // Add turnaround data from recent shipped
+    const ninetyAgo = new Date(t0); ninetyAgo.setDate(t0.getDate() - 90);
+    shipped.filter(j => { const d = pd(j.dateShipped); return d && d >= ninetyAgo; }).forEach(j => {
+      const sp = j.salesPerson || 'Unassigned';
+      const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
+      e.shippedRecent++;
+      const ord = pd(j.dateOrdered); const shp = pd(j.dateShipped);
+      if (ord && shp) { e.totalTurnaround += daysBetween(ord, shp); e.turnaroundCount++; }
+      staffMap.set(sp, e);
+    });
+    const staffSummary = Array.from(staffMap.values())
+      .filter(s => s.name !== 'Unassigned')
+      .sort((a, b) => b.active - a.active);
+    const staffUnassigned = staffMap.get('Unassigned') || null;
+    // Do First grouped by staff
+    const doFirstByStaff = new Map<string, typeof doFirst>();
+    doFirst.forEach(item => {
+      const sp = item.job.salesPerson || 'Unassigned';
+      const arr = doFirstByStaff.get(sp) || [];
+      arr.push(item);
+      doFirstByStaff.set(sp, arr);
+    });
+
     // Shopify orders grouped by their linked Deco job status
     const shopifyByDecoStatus: Record<string, { count: number; value: number }> = {};
     let shopifyLinked = 0;
@@ -562,6 +605,8 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       decoOnlyVal, decoOnlyPipelineVal, decoOnlyItems, decoOnlyProduced, decoOnlyProdPct,
       decoOnlyByStatus, decoOnlyBottleneck,
       decoOnlyShippedRecent, decoOnlyCompletedRecent,
+      // Staff analytics
+      staffSummary, staffUnassigned, doFirstByStaff,
     };
   }, [allDecoJobs, orders, now, t0]);
 
@@ -1019,6 +1064,28 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             </div>
           )}
 
+          {/* Staff workload snapshot */}
+          {data.staffSummary.length > 0 && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Team Workload</span>
+                <span className="text-[10px] text-white/40">{data.staffSummary.length} staff active{data.staffUnassigned ? ` \u00b7 ${data.staffUnassigned.active} unassigned` : ''}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {data.staffSummary.map(st => (
+                  <div key={st.name} className={`px-3 py-1.5 rounded-lg text-xs border ${
+                    st.overdue > 0 ? 'border-red-500/20 bg-red-500/5' : st.blocked > st.producing ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]'
+                  }`}>
+                    <span className="font-semibold text-white/80">{st.name.split(' ')[0]}</span>
+                    <span className="text-white/40 ml-1.5">{st.active} job{s(st.active)}</span>
+                    {st.overdue > 0 && <span className="text-red-400 ml-1.5">({st.overdue} overdue)</span>}
+                    {st.overdue === 0 && st.stale > 0 && <span className="text-amber-400 ml-1.5">({st.stale} stale)</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Situation brief */}
           <div className="bg-black/20 rounded-xl px-5 py-4 border border-white/5">
             <h3 className="text-[10px] font-bold text-white/40 uppercase tracking-wider mb-2">Situation Brief</h3>
@@ -1179,27 +1246,35 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
           </button>
           {expandedSection === 'doFirst' && (
             <div className="border-t border-white/5 px-3 py-2 space-y-0.5">
-              {data.doFirst.map((item, i) => (
-                <div
-                  key={item.job.id}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
-                  onClick={() => onNavigateToOrder(item.job.jobNumber)}
-                >
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
-                    i < 3 ? 'bg-red-500/20 text-red-400' : i < 6 ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
-                  }`}>{i + 1}</span>
-                  <span className="text-[10px] font-mono text-indigo-400/70 w-12 shrink-0">#{item.job.jobNumber}</span>
-                  <span className="text-xs text-white/70 truncate flex-1 min-w-0">{item.job.customerName}</span>
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ${
-                    item.reason.includes('overdue') ? 'bg-red-500/10 text-red-400' :
-                    item.reason.includes('today') ? 'bg-amber-500/10 text-amber-400' :
-                    item.reason.includes('48h') ? 'bg-orange-500/10 text-orange-400' :
-                    'bg-blue-500/10 text-blue-400'
-                  }`}>{item.reason}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                    BLOCKED.has(item.job.status || '') ? 'text-amber-400/60' : 'text-emerald-400/60'
-                  }`}>{item.job.status}</span>
-                  <span className="text-[9px] text-white/15 w-12 text-right shrink-0">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
+              {Array.from(data.doFirstByStaff.entries()).map(([staff, items]) => (
+                <div key={staff}>
+                  <div className="px-2.5 pt-2 pb-1 flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-white/30 uppercase tracking-wider">{staff}</span>
+                    <span className="text-[10px] text-white/15">{items.length} item{s(items.length)}</span>
+                  </div>
+                  {items.map((item, i) => (
+                    <div
+                      key={item.job.id}
+                      className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-white/5 cursor-pointer transition-colors"
+                      onClick={() => onNavigateToOrder(item.job.jobNumber)}
+                    >
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                        item.reason.includes('overdue') ? 'bg-red-500/20 text-red-400' : item.reason.includes('today') ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
+                      }`}>{i + 1}</span>
+                      <span className="text-[10px] font-mono text-indigo-400/70 w-12 shrink-0">#{item.job.jobNumber}</span>
+                      <span className="text-xs text-white/70 truncate flex-1 min-w-0">{item.job.customerName}</span>
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 ${
+                        item.reason.includes('overdue') ? 'bg-red-500/10 text-red-400' :
+                        item.reason.includes('today') ? 'bg-amber-500/10 text-amber-400' :
+                        item.reason.includes('48h') ? 'bg-orange-500/10 text-orange-400' :
+                        'bg-blue-500/10 text-blue-400'
+                      }`}>{item.reason}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+                        BLOCKED.has(item.job.status || '') ? 'text-amber-400/60' : 'text-emerald-400/60'
+                      }`}>{item.job.status}</span>
+                      <span className="text-[9px] text-white/15 w-12 text-right shrink-0">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -1503,6 +1578,152 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                 ))}
                 {data.clubs.length > 12 && <p className="text-[10px] text-white/20 py-1 pl-4">+ {data.clubs.length - 12} more clubs</p>}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ STAFF PERFORMANCE ═══ */}
+      {data.staffSummary.length > 0 && (
+        <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 overflow-hidden">
+          <button
+            className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+            onClick={() => toggleSection('staff')}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-violet-500/15 flex items-center justify-center">
+                <span className="text-violet-400 text-sm font-black">{data.staffSummary.length}</span>
+              </div>
+              <div className="text-left">
+                <h2 className="text-sm font-bold text-violet-300">Staff Performance</h2>
+                <p className="text-[11px] text-white/40">
+                  Overdue, turnaround &amp; stale alerts by team member
+                  {data.staffUnassigned && data.staffUnassigned.active > 0 ? ` \u00b7 ${data.staffUnassigned.active} unassigned` : ''}
+                </p>
+              </div>
+            </div>
+            <Chevron open={expandedSection === 'staff'} />
+          </button>
+          {expandedSection === 'staff' && (
+            <div className="border-t border-white/5">
+              {/* Staff table */}
+              <div className="px-5 py-3">
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-x-4 gap-y-0.5 text-[10px]">
+                  {/* Header */}
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1">Name</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Active</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Overdue</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Blocked</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Stale</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Avg Days</span>
+                  <span className="text-white/25 font-bold uppercase tracking-wider pb-1 text-right">Pipeline</span>
+                  {/* Rows */}
+                  {data.staffSummary.map(st => {
+                    const avgDays = st.turnaroundCount > 0 ? Math.round(st.totalTurnaround / st.turnaroundCount) : null;
+                    return (
+                      <React.Fragment key={st.name}>
+                        <span className="text-xs text-white/70 font-medium py-1.5">{st.name}</span>
+                        <span className="text-xs text-white/60 text-right py-1.5 font-semibold">{st.active}</span>
+                        <span className={`text-xs text-right py-1.5 font-semibold ${st.overdue > 0 ? 'text-red-400' : 'text-white/30'}`}>{st.overdue || '-'}</span>
+                        <span className={`text-xs text-right py-1.5 ${st.blocked > st.producing ? 'text-amber-400 font-semibold' : 'text-white/40'}`}>{st.blocked || '-'}</span>
+                        <span className={`text-xs text-right py-1.5 ${st.stale > 0 ? 'text-orange-400 font-semibold' : 'text-white/30'}`}>{st.stale || '-'}</span>
+                        <span className={`text-xs text-right py-1.5 ${avgDays && avgDays > 21 ? 'text-amber-400' : 'text-white/50'}`}>{avgDays ? `${avgDays}d` : '-'}</span>
+                        <span className="text-xs text-white/40 text-right py-1.5">{fmtK(st.pipelineVal)}</span>
+                      </React.Fragment>
+                    );
+                  })}
+                  {/* Unassigned row */}
+                  {data.staffUnassigned && data.staffUnassigned.active > 0 && (
+                    <>
+                      <span className="text-xs text-white/30 italic py-1.5 border-t border-white/5">Unassigned</span>
+                      <span className="text-xs text-white/30 text-right py-1.5 border-t border-white/5">{data.staffUnassigned.active}</span>
+                      <span className={`text-xs text-right py-1.5 border-t border-white/5 ${data.staffUnassigned.overdue > 0 ? 'text-red-400' : 'text-white/20'}`}>{data.staffUnassigned.overdue || '-'}</span>
+                      <span className="text-xs text-white/20 text-right py-1.5 border-t border-white/5">{data.staffUnassigned.blocked || '-'}</span>
+                      <span className="text-xs text-white/20 text-right py-1.5 border-t border-white/5">{data.staffUnassigned.stale || '-'}</span>
+                      <span className="text-xs text-white/20 text-right py-1.5 border-t border-white/5">-</span>
+                      <span className="text-xs text-white/20 text-right py-1.5 border-t border-white/5">{fmtK(data.staffUnassigned.pipelineVal)}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Stale job alerts */}
+              {data.staffSummary.some(st => st.stale > 0) && (
+                <div className="px-5 py-3 border-t border-white/5">
+                  <h3 className="text-[10px] font-bold text-orange-400/60 uppercase tracking-wider mb-2">Stale Job Alerts (30+ days blocked)</h3>
+                  <div className="space-y-2">
+                    {data.staffSummary.filter(st => st.stale > 0).sort((a, b) => b.stale - a.stale).map(st => (
+                      <div key={st.name}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-white/60">{st.name}</span>
+                          <span className="text-[10px] text-orange-400/70">{st.stale} stale job{s(st.stale)}</span>
+                        </div>
+                        <div className="space-y-0.5 ml-3">
+                          {st.staleJobs.slice(0, 5).map(j => {
+                            const ord = pd(j.dateOrdered);
+                            const age = ord ? daysBetween(ord, now) : 0;
+                            return (
+                              <div
+                                key={j.id}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                                onClick={() => onNavigateToOrder(j.jobNumber)}
+                              >
+                                <span className="text-[10px] font-mono text-indigo-400/70 w-12 shrink-0">#{j.jobNumber}</span>
+                                <span className="text-[11px] text-white/50 truncate flex-1 min-w-0">{j.customerName}</span>
+                                <span className="text-[9px] text-orange-400/60">{age}d old</span>
+                                <span className="text-[9px] text-white/20">{j.status}</span>
+                              </div>
+                            );
+                          })}
+                          {st.staleJobs.length > 5 && <p className="text-[9px] text-white/15 pl-2">+ {st.staleJobs.length - 5} more</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Overdue breakdown */}
+              {data.staffSummary.some(st => st.overdue > 0) && (
+                <div className="px-5 py-3 border-t border-white/5">
+                  <h3 className="text-[10px] font-bold text-red-400/60 uppercase tracking-wider mb-2">Overdue by Staff</h3>
+                  <div className="space-y-2">
+                    {data.staffSummary.filter(st => st.overdue > 0).sort((a, b) => b.overdue - a.overdue).map(st => (
+                      <div key={st.name}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-semibold text-white/60">{st.name}</span>
+                          <span className="text-[10px] text-red-400/70">{st.overdue} overdue</span>
+                          <span className="text-[10px] text-white/20">{fmtK(st.overdueJobs.reduce((a, j) => a + (j.orderTotal || j.billableAmount || 0), 0))}</span>
+                        </div>
+                        <div className="space-y-0.5 ml-3">
+                          {st.overdueJobs.sort((a, b) => {
+                            const da = pd(a.dateDue) || pd(a.productionDueDate);
+                            const db = pd(b.dateDue) || pd(b.productionDueDate);
+                            return (da?.getTime() || 0) - (db?.getTime() || 0);
+                          }).slice(0, 5).map(j => {
+                            const due = pd(j.dateDue) || pd(j.productionDueDate);
+                            const daysLate = due ? daysBetween(due, now) : 0;
+                            return (
+                              <div
+                                key={j.id}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                                onClick={() => onNavigateToOrder(j.jobNumber)}
+                              >
+                                <span className={`text-[10px] font-bold w-8 text-right ${daysLate > 30 ? 'text-red-400' : daysLate > 14 ? 'text-orange-400' : 'text-amber-400'}`}>{daysLate}d</span>
+                                <span className="text-[10px] font-mono text-indigo-400/70 w-12 shrink-0">#{j.jobNumber}</span>
+                                <span className="text-[11px] text-white/50 truncate flex-1 min-w-0">{j.customerName}</span>
+                                <span className="text-[9px] text-white/20">{j.status}</span>
+                                <span className="text-[9px] text-white/15">{fmtK(j.orderTotal || j.billableAmount || 0)}</span>
+                              </div>
+                            );
+                          })}
+                          {st.overdueJobs.length > 5 && <p className="text-[9px] text-white/15 pl-2">+ {st.overdueJobs.length - 5} more</p>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

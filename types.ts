@@ -155,6 +155,7 @@ export interface DecoJob {
   isQuote?: boolean;
   payments?: { id: number; datePaid: string; method: string; amount: number; refundedAmount: number }[];
   refunds?: { id: number; amount: number; date: string }[];
+  salesPerson?: string;
 }
 
 export type ProductionStatus = string;
