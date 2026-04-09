@@ -89,49 +89,23 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: fetch order 224745 with multiple search strategies
+  // Debug: show actual job numbers we have + try to find 224745
   useEffect(() => {
-    const testId = '224745';
-    // Try all field types: 1=OrderID, 2=PO, 7=ExtRef, 5=BillingName + conditions 1=exact, 2=contains
-    const searches = [
-      { field: '1', condition: '1', label: 'OrderID exact' },
-      { field: '1', condition: '2', label: 'OrderID contains' },
-      { field: '2', condition: '1', label: 'PO exact' },
-      { field: '2', condition: '2', label: 'PO contains' },
-      { field: '7', condition: '1', label: 'ExtRef exact' },
-      { field: '7', condition: '2', label: 'ExtRef contains' },
-    ];
-    searches.forEach(({ field, condition, label }) => {
-      fetch('/api/deco', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field, condition, string: testId, criteria: testId, limit: '1', include_workflow_data: '1', include_user_assignments: '1' } })
-      }).then(r => r.json()).then(data => {
-        const job = data.orders?.[0];
-        if (job) {
-          console.log(`[STAFF] Found via ${label}! order_id=${job.order_id}`);
-          console.log(`[STAFF] assigned_to:`, JSON.stringify(job.assigned_to));
-          console.log(`[STAFF] created_by:`, JSON.stringify(job.created_by));
-          // Deep search for matthew/irvine
-          const staffNames = ['matthew','irvine','wendy','jenny','amy'];
-          const findDeep = (obj: any, path: string) => {
-            if (!obj || typeof obj !== 'object') return;
-            for (const [k, v] of Object.entries(obj)) {
-              const p = `${path}.${k}`;
-              if (typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n)))
-                console.log(`[STAFF] FOUND at ${p} = "${v}"`);
-              if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
-              else if (typeof v === 'object' && v !== null) findDeep(v, p);
-            }
-          };
-          findDeep(job, 'job');
-          console.log('[STAFF] FULL:', JSON.stringify(job).slice(0, 5000));
-        } else {
-          console.log(`[STAFF] ${label}: not found`);
-        }
-      }).catch(e => console.log(`[STAFF] ${label} error:`, e.message));
-    });
-  }, []);
+    // Show range of job numbers we have
+    const nums = decoJobs.map(j => parseInt(j.jobNumber)).filter(n => !isNaN(n)).sort((a,b) => a-b);
+    console.log(`[STAFF] Job number range: ${nums[0]} to ${nums[nums.length-1]}, sample:`, nums.slice(0, 10));
+    console.log(`[STAFF] Looking for 224745, closest matches:`, nums.filter(n => Math.abs(n - 224745) < 1000).slice(0, 5));
+    // Also search by customer name for Matthew Irvine's order
+    fetch('/api/deco', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '5', condition: '2', string: 'irvine', criteria: 'irvine', limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
+    }).then(r => r.json()).then(data => {
+      const orders = data.orders || [];
+      console.log(`[STAFF] Search 'irvine' by billing name: ${orders.length} results`);
+      orders.forEach((j: any) => console.log(`[STAFF] irvine result: order_id=${j.order_id}, customer=${j.billing_details?.firstname} ${j.billing_details?.lastname}, assigned_to=${JSON.stringify(j.assigned_to)}`));
+    }).catch(() => {});
+  }, [decoJobs]);
 
 
 
