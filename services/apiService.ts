@@ -161,22 +161,14 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
             date: r.date || r.date_refunded || '',
         })) : [],
         salesPerson: (() => {
-            // Primary: created_by is the "Sales Assign" field in DecoNetwork
+            const at = job.assigned_to;
+            if (at && typeof at === 'object' && (at.firstname || at.lastname))
+                return `${at.firstname || ''} ${at.lastname || ''}`.trim();
+            if (at && typeof at === 'string') return at;
             const cb = job.created_by;
             if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
                 return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
-            // Fallback: other potential fields
-            const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
-            if (raw && typeof raw === 'object') {
-                if (raw.firstname || raw.lastname) return `${raw.firstname || ''} ${raw.lastname || ''}`.trim();
-                if (raw.name) return raw.name;
-                const strVal = Object.values(raw).find(v => typeof v === 'string' && v.length > 1);
-                if (strVal) return strVal as string;
-            }
-            if (raw && typeof raw === 'string') return raw;
-            // Last fallback: item-level assignedTo
-            const itemAssign = items.find(i => i.assignedTo)?.assignedTo;
-            return itemAssign || undefined;
+            return undefined;
         })(),
     };
 };
@@ -370,61 +362,12 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
-        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_custom_fields': '1', 'include_user_assignments': '1', 'include_sales_data': '1', 'skip_login_token': '1' };
+        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'skip_login_token': '1' };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
-    }
-    // Debug: dump ALL keys from first job to find Sales Assign after adding include params
-    if (allDeco.length > 0) {
-        const j = allDeco[0];
-        console.log('[DECO SALES] ALL top-level keys:', Object.keys(j).sort());
-        // Check for any key containing 'assign', 'sales', 'rep', 'staff', 'team', 'custom', 'user'
-        const interesting = Object.keys(j).filter(k => /assign|sales|rep|staff|team|custom|user|agent|owner|member/i.test(k));
-        console.log('[DECO SALES] Interesting keys:', interesting);
-        for (const k of interesting) {
-            console.log(`[DECO SALES] job.${k} =`, JSON.stringify(j[k]));
-        }
-        // Check if custom_fields exists
-        console.log('[DECO SALES] job.custom_fields =', JSON.stringify(j.custom_fields));
-        console.log('[DECO SALES] job.custom_data =', JSON.stringify(j.custom_data));
-        console.log('[DECO SALES] job.extra_fields =', JSON.stringify(j.extra_fields));
-        console.log('[DECO SALES] job.assigned_to =', JSON.stringify(j.assigned_to));
-        console.log('[DECO SALES] job.assigned_user =', JSON.stringify(j.assigned_user));
-        console.log('[DECO SALES] job.sales_assign =', JSON.stringify(j.sales_assign));
-        console.log('[DECO SALES] job.sales_rep =', JSON.stringify(j.sales_rep));
-        console.log('[DECO SALES] job.sales_person =', JSON.stringify(j.sales_person));
-        console.log('[DECO SALES] job.order_assigned_to =', JSON.stringify(j.order_assigned_to));
-        // Deep search for Matthew/Wendy etc
-        const staffNames = ['matthew','wendy','irvine','jenny','amy','gibson'];
-        let found = false;
-        for (const job of allDeco.slice(0, 100)) {
-            const jobStr = JSON.stringify(job).toLowerCase();
-            if (staffNames.some(n => jobStr.includes(n))) {
-                console.log(`[DECO SALES] Staff name found in job ${job.order_id}!`);
-                const findDeep = (obj: any, path: string) => {
-                    if (!obj || typeof obj !== 'object') return;
-                    for (const [k, v] of Object.entries(obj)) {
-                        const p = `${path}.${k}`;
-                        if (typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n)))
-                            console.log(`[DECO SALES] STRING at ${p} = "${v}"`);
-                        if (v && typeof v === 'object' && !Array.isArray(v)) {
-                            const vs = JSON.stringify(v).toLowerCase();
-                            if (staffNames.some(n => vs.includes(n)))
-                                console.log(`[DECO SALES] OBJ at ${p} = ${JSON.stringify(v)}`);
-                        }
-                        if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
-                        else if (typeof v === 'object' && v !== null) findDeep(v, p);
-                    }
-                };
-                findDeep(job, 'job');
-                found = true;
-                break;
-            }
-        }
-        if (!found) console.log('[DECO SALES] No Matthew/Wendy/Jenny found in 100 jobs - field not in API response');
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
@@ -500,13 +443,13 @@ export const fetchDecoFinancials = async (
                     date: r.date || r.date_refunded || '',
                 })) : [],
                 salesPerson: (() => {
+                    const at = job.assigned_to;
+                    if (at && typeof at === 'object' && (at.firstname || at.lastname))
+                        return `${at.firstname || ''} ${at.lastname || ''}`.trim();
+                    if (at && typeof at === 'string') return at;
                     const cb = job.created_by;
                     if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
                         return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
-                    const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
-                    if (raw && typeof raw === 'object' && (raw.firstname || raw.lastname))
-                        return `${raw.firstname || ''} ${raw.lastname || ''}`.trim();
-                    if (raw && typeof raw === 'string') return raw;
                     return undefined;
                 })(),
             });
