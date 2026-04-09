@@ -353,43 +353,51 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: dump ALL job-level keys + search for known staff names in values
+    // Debug: dump ALL keys/values from raw job to find sales assign field
     if (allDeco.length > 0) {
         const sampleJob = allDeco[0];
-        console.log('[DECO DEBUG] ALL job-level keys:', Object.keys(sampleJob));
-        // Search all jobs for any value containing known staff names
-        const staffNames = ['lucian','matthew','jode','baragoi','irvine','johnston'];
-        for (const job of allDeco.slice(0, 50)) {
-            const jobStr = JSON.stringify(job);
-            const found = staffNames.find(n => jobStr.toLowerCase().includes(n));
-            if (found) {
-                // Find which key contains this name
-                const matchingEntries = Object.entries(job).filter(([, v]) =>
-                    typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
-                );
-                console.log('[DECO DEBUG] Found staff name in job', job.order_id, '- matching fields:', matchingEntries);
-                // Check nested order_lines too
-                if (job.order_lines) {
-                    for (const line of job.order_lines) {
-                        const lineMatches = Object.entries(line).filter(([, v]) =>
-                            typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
-                        );
-                        if (lineMatches.length) console.log('[DECO DEBUG] Line-level matches:', lineMatches);
-                        if (line.workflow_items) {
-                            for (const wf of line.workflow_items) {
-                                const wfMatches = Object.entries(wf).filter(([, v]) =>
-                                    typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
-                                );
-                                if (wfMatches.length) console.log('[DECO DEBUG] WF-level matches:', wfMatches);
-                            }
-                        }
-                    }
-                }
-                break; // one match is enough
+        // Log ALL top-level key:value pairs (truncating long values)
+        const topLevel: Record<string, any> = {};
+        for (const [k, v] of Object.entries(sampleJob)) {
+            if (k === 'order_lines' || k === 'billing_details' || k === 'shipping_details' || k === 'payments' || k === 'notes') {
+                topLevel[k] = `[${Array.isArray(v) ? v.length + ' items' : typeof v}]`;
+            } else {
+                topLevel[k] = v;
             }
         }
-        if (!allDeco.slice(0, 50).some(j => staffNames.some(n => JSON.stringify(j).toLowerCase().includes(n)))) {
-            console.log('[DECO DEBUG] No staff names found in first 50 jobs. Dumping first job (truncated):', JSON.stringify(sampleJob).substring(0, 3000));
+        console.log('[DECO DEBUG] ALL job fields (non-nested):', JSON.stringify(topLevel, null, 2));
+        
+        // Also check if there's a nested sales/assignment object
+        const staffNames = ['lucian','matthew','jode','baragoi','irvine','johnston'];
+        let foundAny = false;
+        // Search deeply through ALL 50 jobs for staff names anywhere in JSON
+        for (const job of allDeco.slice(0, 50)) {
+            const jobStr = JSON.stringify(job).toLowerCase();
+            if (staffNames.some(n => jobStr.includes(n))) {
+                console.log('[DECO DEBUG] Staff name found in job', job.order_id);
+                // Walk all keys recursively
+                const findDeep = (obj: any, path: string) => {
+                    if (!obj || typeof obj !== 'object') return;
+                    for (const [k, v] of Object.entries(obj)) {
+                        const p = `${path}.${k}`;
+                        if (typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))) {
+                            console.log(`[DECO DEBUG] MATCH at ${p} = "${v}"`);
+                        }
+                        if (typeof v === 'number' && v > 0 && v < 1000) {
+                            // Could be a user ID - log it for reference
+                        }
+                        if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
+                        else if (typeof v === 'object' && v !== null) findDeep(v, p);
+                    }
+                };
+                findDeep(job, 'job');
+                foundAny = true;
+                break;
+            }
+        }
+        if (!foundAny) {
+            console.log('[DECO DEBUG] No staff names found in first 50 jobs.');
+            console.log('[DECO DEBUG] First job FULL dump:', JSON.stringify(sampleJob).substring(0, 5000));
         }
     }
     return allDeco.map((job: any) => {
