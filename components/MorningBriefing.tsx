@@ -18,6 +18,22 @@ const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getTime()) 
 const s = (n: number) => n !== 1 ? 's' : '';
 const pct = (a: number, b: number) => b === 0 ? 0 : Math.round((a / b) * 100);
 
+// Extract staff name from salesPerson which may be string, object {firstname,lastname,login,id}, or undefined
+const extractSP = (sp: any): string | undefined => {
+  if (!sp) return undefined;
+  if (typeof sp === 'string') return sp;
+  if (typeof sp === 'object') {
+    if (sp.firstname || sp.lastname) return `${sp.firstname || ''} ${sp.lastname || ''}`.trim();
+    if (sp.name) return sp.name;
+    if (sp.full_name) return sp.full_name;
+    if (sp.login) return sp.login;
+    const strVal = Object.values(sp).find((v: any) => typeof v === 'string' && v.length > 1);
+    if (strVal) return strVal as string;
+    return sp.id ? String(sp.id) : undefined;
+  }
+  return String(sp);
+};
+
 const BLOCKED = new Set(['Not Ordered', 'Awaiting Processing', 'Awaiting Artwork', 'Awaiting Review', 'On Hold', 'Awaiting Stock']);
 const PRODUCING = new Set(['In Production', 'Ready for Shipping', 'Completed']);
 const FLOW = ['Not Ordered', 'Awaiting Processing', 'Awaiting Artwork', 'Awaiting Review', 'On Hold', 'Awaiting Stock', 'In Production', 'Ready for Shipping', 'Completed'];
@@ -72,30 +88,6 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     return financeJobs.map(j => propMap.get(j.jobNumber) || j)
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
-
-  // Debug: check what salesPerson and item assignedTo values exist in prop data
-  useEffect(() => {
-    if (decoJobs.length > 0) {
-      const withSP = decoJobs.filter(j => j.salesPerson);
-      const withItemAssign = decoJobs.filter(j => j.items?.some(i => i.assignedTo));
-      console.log(`[STAFF DEBUG] Prop decoJobs: ${decoJobs.length} total, ${withSP.length} have salesPerson, ${withItemAssign.length} have item-level assignedTo`);
-      if (withSP.length > 0) {
-        const sample = withSP[0];
-        console.log('[STAFF DEBUG] salesPerson raw value:', sample.salesPerson);
-        console.log('[STAFF DEBUG] salesPerson typeof:', typeof sample.salesPerson);
-        console.log('[STAFF DEBUG] salesPerson JSON:', JSON.stringify(sample.salesPerson));
-        if (sample.salesPerson && typeof sample.salesPerson === 'object') {
-          console.log('[STAFF DEBUG] salesPerson keys:', Object.keys(sample.salesPerson as any));
-        }
-      }
-      if (withItemAssign.length > 0) {
-        const sample = withItemAssign[0];
-        console.log('[STAFF DEBUG] Sample item assignedTo (JSON):', sample.jobNumber, sample.items?.filter(i => i.assignedTo).slice(0, 2).map(i => JSON.stringify(i.assignedTo)));
-      }
-      const withItems = decoJobs.filter(j => j.items && j.items.length > 0);
-      console.log(`[STAFF DEBUG] ${withItems.length} of ${decoJobs.length} jobs have items array populated`);
-    }
-  }, [decoJobs]);
 
   const now = useMemo(() => new Date(), []);
   const t0 = useMemo(() => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }, [now]);
@@ -546,7 +538,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       shippedRecent: number; totalTurnaround: number; turnaroundCount: number;
     }>();
     active.forEach(j => {
-      const sp = j.salesPerson ? String(j.salesPerson) : 'Unassigned';
+      const sp = extractSP(j.salesPerson) || 'Unassigned';
       const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
       e.active++;
       e.pipelineVal += j.orderTotal || j.billableAmount || 0;
@@ -561,7 +553,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     // Add turnaround data from recent shipped
     const ninetyAgo = new Date(t0); ninetyAgo.setDate(t0.getDate() - 90);
     shipped.filter(j => { const d = pd(j.dateShipped); return d && d >= ninetyAgo; }).forEach(j => {
-      const sp = j.salesPerson ? String(j.salesPerson) : 'Unassigned';
+      const sp = extractSP(j.salesPerson) || 'Unassigned';
       const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
       e.shippedRecent++;
       const ord = pd(j.dateOrdered); const shp = pd(j.dateShipped);
@@ -572,14 +564,10 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .filter(s => s.name !== 'Unassigned')
       .sort((a, b) => b.active - a.active);
     const staffUnassigned = staffMap.get('Unassigned') || null;
-    // Debug: log staff analytics
-    console.log('[STAFF DEBUG] staffMap entries:', Array.from(staffMap.keys()));
-    console.log('[STAFF DEBUG] staffSummary count:', staffSummary.length, 'unassigned active:', staffUnassigned?.active);
-    console.log('[STAFF DEBUG] sample salesPerson values from active jobs:', active.slice(0, 10).map(j => ({ job: j.jobNumber, sp: j.salesPerson })));
     // Do First grouped by staff
     const doFirstByStaff = new Map<string, typeof doFirst>();
     doFirst.forEach(item => {
-      const sp = item.job.salesPerson ? String(item.job.salesPerson) : 'Unassigned';
+      const sp = extractSP(item.job.salesPerson) || 'Unassigned';
       const arr = doFirstByStaff.get(sp) || [];
       arr.push(item);
       doFirstByStaff.set(sp, arr);
