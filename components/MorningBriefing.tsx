@@ -81,21 +81,14 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
   }, []);
 
   // Use whichever data source is more complete
+  // Fresh prop data overrides cache — prop data has salesPerson from include_user_assignments
   const allDecoJobs = useMemo(() => {
     if (!financeJobs || financeJobs.length <= decoJobs.length) return decoJobs;
-    // Merge: finance cache as base, override with fresher prop data
+    // Merge: prop data (with salesPerson) takes priority over cache (without)
     const propMap = new Map(decoJobs.map(j => [j.jobNumber, j]));
     return financeJobs.map(j => propMap.get(j.jobNumber) || j)
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
-
-  // Temp: log salesPerson distribution after sync
-  useEffect(() => {
-    if (decoJobs.length === 0) return;
-    const withSP = decoJobs.filter(j => j.salesPerson);
-    const names = [...new Set(withSP.map(j => j.salesPerson))];
-    console.log(`[STAFF] Prop data: ${decoJobs.length} jobs, ${withSP.length} have salesPerson:`, names);
-  }, [decoJobs]);
 
 
 

@@ -380,27 +380,10 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Log field coverage for staff data
-    const counts = { assigned_to: 0, created_by: 0, sales_staff: 0, processed_by: 0 };
-    const names: Record<string, Set<string>> = { assigned_to: new Set(), created_by: new Set(), processed_by: new Set() };
-    for (const j of allDeco) {
-        if (j.assigned_to?.firstname) { counts.assigned_to++; names.assigned_to.add(`${j.assigned_to.firstname} ${j.assigned_to.lastname || ''}`.trim()); }
-        if (j.created_by?.firstname) { counts.created_by++; names.created_by.add(`${j.created_by.firstname} ${j.created_by.lastname || ''}`.trim()); }
-        if (j.sales_staff_account || j.sales_staff || j.staff_account) counts.sales_staff++;
-        const pb = j.order_lines?.[0]?.processed_by || j.order_lines?.[0]?.workflow_items?.[0]?.processed_by;
-        if (pb?.firstname) { counts.processed_by++; names.processed_by.add(`${pb.firstname} ${pb.lastname || ''}`.trim()); }
-    }
-    console.log('[STAFF] Field coverage:', counts);
-    console.log('[STAFF] assigned_to names:', [...names.assigned_to]);
-    console.log('[STAFF] created_by names:', [...names.created_by]);
-    console.log('[STAFF] processed_by names:', [...names.processed_by]);
-    const result = allDeco.map((job: any) => {
+    return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
     });
-    const withSP = result.filter(j => j.salesPerson);
-    console.log(`[STAFF] After buildDecoJob: ${result.length} jobs, ${withSP.length} have salesPerson:`, [...new Set(withSP.map(j => j.salesPerson))]);
-    return result;
 };
 
 // Lightweight financial-only fetch — loads ALL Deco orders from a given year onward
