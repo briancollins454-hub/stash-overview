@@ -89,38 +89,13 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: verify API works + search for order 224778
+  // Temp: log salesPerson distribution after sync
   useEffect(() => {
-    // 1. Check what domain the API is hitting
-    fetch('/api/deco', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '4', date1: '2026-04-01', limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
-    }).then(r => r.json()).then(data => {
-      const orders = data.orders || [];
-      console.log(`[STAFF] Recent orders since Apr 1: ${data.total} total, first 5 IDs:`, orders.map((j: any) => j.order_id));
-      // Check if 224778 is in the full set
-      console.log(`[STAFF] Has 224778?`, orders.some((j: any) => j.order_id === 224778 || j.order_id === '224778'));
-      // Show first order's customer to confirm we're hitting the right store
-      if (orders[0]) {
-        console.log(`[STAFF] First order: id=${orders[0].order_id}, customer=${orders[0].billing_details?.company || ''} ${orders[0].billing_details?.firstname || ''} ${orders[0].billing_details?.lastname || ''}, store=${orders[0].store || orders[0].store_name || orders[0].source || 'unknown'}`);
-        console.log(`[STAFF] First order assigned_to:`, JSON.stringify(orders[0].assigned_to));
-      }
-    }).catch(e => console.log('[STAFF] error:', e.message));
-
-    // 2. Try direct order_id search with condition 1 for several known IDs from our range
-    ['224778', '224793', '221215'].forEach(id => {
-      fetch('/api/deco', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: id, criteria: id, limit: '1', include_user_assignments: '1' } })
-      }).then(r => r.json()).then(data => {
-        const job = data.orders?.[0];
-        console.log(`[STAFF] Direct search ${id}: ${job ? 'FOUND order_id=' + job.order_id : 'NOT FOUND'}`);
-        if (job) console.log(`[STAFF] ${id} assigned_to:`, JSON.stringify(job.assigned_to), 'customer:', job.billing_details?.company || job.billing_details?.firstname);
-      }).catch(() => {});
-    });
-  }, []);
+    if (decoJobs.length === 0) return;
+    const withSP = decoJobs.filter(j => j.salesPerson);
+    const names = [...new Set(withSP.map(j => j.salesPerson))];
+    console.log(`[STAFF] Prop data: ${decoJobs.length} jobs, ${withSP.length} have salesPerson:`, names);
+  }, [decoJobs]);
 
 
 
