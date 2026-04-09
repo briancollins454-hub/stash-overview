@@ -89,35 +89,36 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: search for the Portadown RFC order by customer name
+  // Debug: verify API works + search for order 224778
   useEffect(() => {
-    // Search by billing name "Shirley" and "Portadown"
-    ['Shirley', 'Portadown'].forEach(term => {
+    // 1. Check what domain the API is hitting
+    fetch('/api/deco', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '4', date1: '2026-04-01', limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
+    }).then(r => r.json()).then(data => {
+      const orders = data.orders || [];
+      console.log(`[STAFF] Recent orders since Apr 1: ${data.total} total, first 5 IDs:`, orders.map((j: any) => j.order_id));
+      // Check if 224778 is in the full set
+      console.log(`[STAFF] Has 224778?`, orders.some((j: any) => j.order_id === 224778 || j.order_id === '224778'));
+      // Show first order's customer to confirm we're hitting the right store
+      if (orders[0]) {
+        console.log(`[STAFF] First order: id=${orders[0].order_id}, customer=${orders[0].billing_details?.company || ''} ${orders[0].billing_details?.firstname || ''} ${orders[0].billing_details?.lastname || ''}, store=${orders[0].store || orders[0].store_name || orders[0].source || 'unknown'}`);
+        console.log(`[STAFF] First order assigned_to:`, JSON.stringify(orders[0].assigned_to));
+      }
+    }).catch(e => console.log('[STAFF] error:', e.message));
+
+    // 2. Try direct order_id search with condition 1 for several known IDs from our range
+    ['224778', '224793', '221215'].forEach(id => {
       fetch('/api/deco', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '5', condition: '2', string: term, criteria: term, limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
+        body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: id, criteria: id, limit: '1', include_user_assignments: '1' } })
       }).then(r => r.json()).then(data => {
-        const orders = data.orders || [];
-        console.log(`[STAFF] Search '${term}': ${orders.length} results`);
-        orders.forEach((j: any) => {
-          console.log(`[STAFF] ${term} => order_id=${j.order_id}, customer=${j.billing_details?.company || ''} ${j.billing_details?.firstname || ''} ${j.billing_details?.lastname || ''}`);
-          console.log(`[STAFF] ${term} => assigned_to=${JSON.stringify(j.assigned_to)}, created_by=${JSON.stringify(j.created_by)}`);
-          // Deep search for matthew/irvine
-          const findDeep = (obj: any, path: string) => {
-            if (!obj || typeof obj !== 'object') return;
-            for (const [k, v] of Object.entries(obj)) {
-              const p = `${path}.${k}`;
-              if (typeof v === 'string' && (v.toLowerCase().includes('matthew') || v.toLowerCase().includes('irvine')))
-                console.log(`[STAFF] MATTHEW FOUND at ${p} = "${v}"`);
-              if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
-              else if (typeof v === 'object' && v !== null) findDeep(v, p);
-            }
-          };
-          findDeep(j, 'job');
-          console.log(`[STAFF] ${term} FULL:`, JSON.stringify(j).slice(0, 5000));
-        });
-      }).catch(e => console.log(`[STAFF] ${term} error:`, e.message));
+        const job = data.orders?.[0];
+        console.log(`[STAFF] Direct search ${id}: ${job ? 'FOUND order_id=' + job.order_id : 'NOT FOUND'}`);
+        if (job) console.log(`[STAFF] ${id} assigned_to:`, JSON.stringify(job.assigned_to), 'customer:', job.billing_details?.company || job.billing_details?.firstname);
+      }).catch(() => {});
     });
   }, []);
 
