@@ -89,34 +89,42 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: compare prop vs cache
+  // Debug: try multiple API endpoints and params to find Sales Assign
   useEffect(() => {
-    const propSP = decoJobs.filter(j => j.salesPerson);
-    const propNames = new Set(propSP.map(j => j.salesPerson));
-    console.log(`[STAFF] PROP decoJobs: ${decoJobs.length} total, ${propSP.length} have salesPerson`, [...propNames]);
-    // Try manage_orders/get endpoint for a known order to find Sales Assign field
     const testJobId = decoJobs[0]?.jobNumber;
-    if (testJobId) {
+    if (!testJobId) return;
+    
+    // Try different endpoints
+    const endpoints = [
+      { ep: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: testJobId, criteria: testJobId, limit: '1', include_workflow_data: '1', include_user_assignments: '1', include_custom_fields: '1', include_sales_data: '1', include_assigned_to: '1', include_all: '1' } },
+      { ep: 'api/json/manage_orders/list', params: { order_id: testJobId } },
+      { ep: 'api/json/manage_orders/detail', params: { order_id: testJobId } },
+      { ep: 'api/json/manage_orders/view', params: { order_id: testJobId } },
+    ];
+    
+    endpoints.forEach(({ ep, params }) => {
       fetch('/api/deco', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: 'api/json/manage_orders/get', params: { order_id: testJobId, include_user_assignments: '1' } })
+        body: JSON.stringify({ endpoint: ep, params })
       }).then(r => r.json()).then(data => {
-        console.log('[STAFF] manage_orders/get response keys:', Object.keys(data).sort());
-        // Look for any user/assign/sales fields
-        const interesting = Object.keys(data).filter(k => /assign|sales|rep|staff|team|user|agent|owner|member/i.test(k));
-        console.log('[STAFF] GET interesting keys:', interesting);
-        interesting.forEach(k => console.log(`[STAFF] GET data.${k} =`, JSON.stringify(data[k])));
-        // If there's an order_lines, check first line
-        if (data.order_lines?.[0]) {
-          const line = data.order_lines[0];
-          const lineInteresting = Object.keys(line).filter(k => /assign|sales|rep|staff|team|user|agent|owner|member/i.test(k));
-          console.log('[STAFF] GET line keys:', lineInteresting);
-          lineInteresting.forEach(k => console.log(`[STAFF] GET line.${k} =`, JSON.stringify(line[k])));
+        const status = data.status?.code ? `code ${data.status.code}` : 'ok';
+        const keys = Object.keys(data).sort();
+        console.log(`[STAFF] ${ep}: status=${status}, keys=${keys.join(',')}`);
+        // For find endpoint with extra params, check orders
+        if (data.orders?.[0]) {
+          const j = data.orders[0];
+          const allKeys = Object.keys(j).sort();
+          console.log(`[STAFF] ${ep} order keys:`, allKeys);
+          const interesting = allKeys.filter(k => /assign|sales|rep|staff|user|agent|owner|custom/i.test(k));
+          interesting.forEach(k => console.log(`[STAFF] ${ep} job.${k} =`, JSON.stringify(j[k])));
         }
-        console.log('[STAFF] GET full data:', JSON.stringify(data).slice(0, 3000));
-      }).catch(e => console.log('[STAFF] GET error:', e.message));
-    }
+        // For non-find endpoints, dump response
+        if (!data.orders) {
+          console.log(`[STAFF] ${ep} full response:`, JSON.stringify(data).slice(0, 2000));
+        }
+      }).catch(e => console.log(`[STAFF] ${ep} error:`, e.message));
+    });
   }, [decoJobs]);
 
 
