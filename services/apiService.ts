@@ -370,49 +370,61 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
-        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'skip_login_token': '1' };
+        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_custom_fields': '1', 'include_user_assignments': '1', 'include_sales_data': '1', 'skip_login_token': '1' };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: find real Sales Assign field — search for "Matthew" or "Wendy" in raw JSON
+    // Debug: dump ALL keys from first job to find Sales Assign after adding include params
     if (allDeco.length > 0) {
+        const j = allDeco[0];
+        console.log('[DECO SALES] ALL top-level keys:', Object.keys(j).sort());
+        // Check for any key containing 'assign', 'sales', 'rep', 'staff', 'team', 'custom', 'user'
+        const interesting = Object.keys(j).filter(k => /assign|sales|rep|staff|team|custom|user|agent|owner|member/i.test(k));
+        console.log('[DECO SALES] Interesting keys:', interesting);
+        for (const k of interesting) {
+            console.log(`[DECO SALES] job.${k} =`, JSON.stringify(j[k]));
+        }
+        // Check if custom_fields exists
+        console.log('[DECO SALES] job.custom_fields =', JSON.stringify(j.custom_fields));
+        console.log('[DECO SALES] job.custom_data =', JSON.stringify(j.custom_data));
+        console.log('[DECO SALES] job.extra_fields =', JSON.stringify(j.extra_fields));
+        console.log('[DECO SALES] job.assigned_to =', JSON.stringify(j.assigned_to));
+        console.log('[DECO SALES] job.assigned_user =', JSON.stringify(j.assigned_user));
+        console.log('[DECO SALES] job.sales_assign =', JSON.stringify(j.sales_assign));
+        console.log('[DECO SALES] job.sales_rep =', JSON.stringify(j.sales_rep));
+        console.log('[DECO SALES] job.sales_person =', JSON.stringify(j.sales_person));
+        console.log('[DECO SALES] job.order_assigned_to =', JSON.stringify(j.order_assigned_to));
+        // Deep search for Matthew/Wendy etc
         const staffNames = ['matthew','wendy','irvine','jenny','amy','gibson'];
+        let found = false;
         for (const job of allDeco.slice(0, 100)) {
             const jobStr = JSON.stringify(job).toLowerCase();
             if (staffNames.some(n => jobStr.includes(n))) {
-                console.log(`[DECO SALES] Found name in job ${job.order_id}`);
-                // Walk ALL keys recursively to find exactly where
+                console.log(`[DECO SALES] Staff name found in job ${job.order_id}!`);
                 const findDeep = (obj: any, path: string) => {
                     if (!obj || typeof obj !== 'object') return;
                     for (const [k, v] of Object.entries(obj)) {
                         const p = `${path}.${k}`;
-                        if (typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))) {
-                            console.log(`[DECO SALES] FOUND at ${p} = "${v}"`);
-                        }
+                        if (typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n)))
+                            console.log(`[DECO SALES] STRING at ${p} = "${v}"`);
                         if (v && typeof v === 'object' && !Array.isArray(v)) {
-                            const vs = JSON.stringify(v);
-                            if (staffNames.some(n => vs.toLowerCase().includes(n))) {
-                                console.log(`[DECO SALES] OBJECT at ${p} = ${vs}`);
-                            }
+                            const vs = JSON.stringify(v).toLowerCase();
+                            if (staffNames.some(n => vs.includes(n)))
+                                console.log(`[DECO SALES] OBJ at ${p} = ${JSON.stringify(v)}`);
                         }
                         if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
                         else if (typeof v === 'object' && v !== null) findDeep(v, p);
                     }
                 };
                 findDeep(job, 'job');
+                found = true;
                 break;
             }
         }
-        // Also dump all job-level keys that we haven't checked yet
-        const j = allDeco[0];
-        const unchecked = Object.keys(j).filter(k => !['order_id','order_lines','billing_details','shipping_details','payments','notes','created_by','date_ordered','date_due','date_shipped','date_completed','date_produced','date_scheduled','date_invoiced','total','tax','subtotal','outstanding_balance','billable_amount','credit_used','order_status','order_status_name','payment_status','payment_details','job_name','customer_po_number','is_quote','order_type','source_type','tax_name','discount_amount','coupon_code','refunds','store','customer_id','customer_po_number','date_started','shipping_method','is_priority','item_amount','total_weight','gift_certificate_amount','coupon_discount_amount','on_hold_reason','payment_status_name','rush_order_fee','rush_order_fee_amount','account_terms','date_modified','date_invoiced','quote_pdf_url','production_pdf_url','order_proof_pdf_url','taxes','source_type','order_type','payment_method'].includes(k));
-        console.log('[DECO SALES] Unchecked job-level keys:', unchecked);
-        for (const k of unchecked) {
-            console.log(`[DECO SALES] job.${k} =`, JSON.stringify(j[k]));
-        }
+        if (!found) console.log('[DECO SALES] No Matthew/Wendy/Jenny found in 100 jobs - field not in API response');
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
