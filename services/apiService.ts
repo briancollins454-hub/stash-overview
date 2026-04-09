@@ -84,7 +84,11 @@ const parseDecoItems = (job: any): DecoItem[] => {
                     unitPrice: parseFloat(line.unit_price) || undefined,
                     totalPrice: parseFloat(line.total_price) || undefined,
                     decorationDetails: line.decoration_details || line.decorations || undefined,
-                    assignedTo: wf.assigned_to || wf.assigned_user || line.assigned_to || undefined,
+                    assignedTo: (() => {
+                        const raw = wf.assigned_to || wf.assigned_user || line.assigned_to;
+                        if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+                        return raw || undefined;
+                    })(),
                     estimatedCompletion: wf.estimated_completion || wf.date_estimated || undefined,
                     supplierId: line.vendor_id?.toString() || line.supplier_id?.toString() || undefined,
                     supplierName: line.vendor_name || line.supplier_name || line.supplier || undefined,
@@ -107,7 +111,11 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 unitPrice: parseFloat(line.unit_price) || undefined,
                 totalPrice: parseFloat(line.total_price) || undefined,
                 decorationDetails: line.decoration_details || line.decorations || undefined,
-                assignedTo: line.assigned_to || undefined,
+                assignedTo: (() => {
+                    const raw = line.assigned_to;
+                    if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+                    return raw || undefined;
+                })(),
                 supplierId: line.vendor_id?.toString() || line.supplier_id?.toString() || undefined,
                 supplierName: line.vendor_name || line.supplier_name || line.supplier || undefined,
             });
@@ -152,8 +160,14 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
             amount: parseFloat(r.amount || r.refund_amount) || 0,
             date: r.date || r.date_refunded || '',
         })) : [],
-        salesPerson: job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep
-            || items.find(i => i.assignedTo)?.assignedTo || undefined,
+        salesPerson: (() => {
+            const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
+            if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+            if (raw && typeof raw === 'string') return raw;
+            const itemAssign = items.find(i => i.assignedTo)?.assignedTo;
+            if (itemAssign && typeof itemAssign === 'object') return (itemAssign as any).name || (itemAssign as any).full_name || String((itemAssign as any).id || '');
+            return itemAssign || undefined;
+        })(),
     };
 };
 
@@ -473,7 +487,12 @@ export const fetchDecoFinancials = async (
                     amount: parseFloat(r.amount || r.refund_amount) || 0,
                     date: r.date || r.date_refunded || '',
                 })) : [],
-                salesPerson: job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep || undefined,
+                salesPerson: (() => {
+                    const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
+                    if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+                    if (raw && typeof raw === 'string') return raw;
+                    return undefined;
+                })(),
             });
         }
 

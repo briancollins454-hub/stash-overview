@@ -79,12 +79,11 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       const withSP = decoJobs.filter(j => j.salesPerson);
       const withItemAssign = decoJobs.filter(j => j.items?.some(i => i.assignedTo));
       console.log(`[STAFF DEBUG] Prop decoJobs: ${decoJobs.length} total, ${withSP.length} have salesPerson, ${withItemAssign.length} have item-level assignedTo`);
-      if (withSP.length > 0) console.log('[STAFF DEBUG] Sample salesPerson:', withSP.slice(0, 5).map(j => ({ job: j.jobNumber, sp: j.salesPerson })));
+      if (withSP.length > 0) console.log('[STAFF DEBUG] Sample salesPerson (JSON):', withSP.slice(0, 3).map(j => ({ job: j.jobNumber, sp: JSON.stringify(j.salesPerson) })));
       if (withItemAssign.length > 0) {
         const sample = withItemAssign[0];
-        console.log('[STAFF DEBUG] Sample item assignedTo:', sample.jobNumber, sample.items?.filter(i => i.assignedTo).map(i => i.assignedTo));
+        console.log('[STAFF DEBUG] Sample item assignedTo (JSON):', sample.jobNumber, sample.items?.filter(i => i.assignedTo).slice(0, 2).map(i => JSON.stringify(i.assignedTo)));
       }
-      // Check if items even exist (finance cache doesn't have items)
       const withItems = decoJobs.filter(j => j.items && j.items.length > 0);
       console.log(`[STAFF DEBUG] ${withItems.length} of ${decoJobs.length} jobs have items array populated`);
     }
