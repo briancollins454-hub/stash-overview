@@ -89,6 +89,17 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
+  // Debug: staff distribution
+  useEffect(() => {
+    const active = allDecoJobs.filter(j => !isCancelled(j));
+    const withSP = active.filter(j => j.salesPerson);
+    const names = new Set(withSP.map(j => extractSP(j.salesPerson)).filter(Boolean));
+    console.log(`[STAFF] ${active.length} active jobs: ${withSP.length} have salesPerson, ${active.length - withSP.length} unassigned`);
+    console.log('[STAFF] Unique names:', [...names]);
+    // Show raw salesPerson values from first 10
+    active.slice(0, 10).forEach(j => console.log(`[STAFF] Job ${j.jobNumber}: salesPerson=${JSON.stringify(j.salesPerson)}`));
+  }, [allDecoJobs]);
+
   const now = useMemo(() => new Date(), []);
   const t0 = useMemo(() => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }, [now]);
 
