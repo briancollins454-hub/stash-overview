@@ -539,7 +539,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       shippedRecent: number; totalTurnaround: number; turnaroundCount: number;
     }>();
     active.forEach(j => {
-      const sp = j.salesPerson || 'Unassigned';
+      const sp = j.salesPerson ? String(j.salesPerson) : 'Unassigned';
       const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
       e.active++;
       e.pipelineVal += j.orderTotal || j.billableAmount || 0;
@@ -554,7 +554,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     // Add turnaround data from recent shipped
     const ninetyAgo = new Date(t0); ninetyAgo.setDate(t0.getDate() - 90);
     shipped.filter(j => { const d = pd(j.dateShipped); return d && d >= ninetyAgo; }).forEach(j => {
-      const sp = j.salesPerson || 'Unassigned';
+      const sp = j.salesPerson ? String(j.salesPerson) : 'Unassigned';
       const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
       e.shippedRecent++;
       const ord = pd(j.dateOrdered); const shp = pd(j.dateShipped);
@@ -572,7 +572,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     // Do First grouped by staff
     const doFirstByStaff = new Map<string, typeof doFirst>();
     doFirst.forEach(item => {
-      const sp = item.job.salesPerson || 'Unassigned';
+      const sp = item.job.salesPerson ? String(item.job.salesPerson) : 'Unassigned';
       const arr = doFirstByStaff.get(sp) || [];
       arr.push(item);
       doFirstByStaff.set(sp, arr);
@@ -1097,7 +1097,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
                   <div key={st.name} className={`px-3 py-1.5 rounded-lg text-xs border ${
                     st.overdue > 0 ? 'border-red-500/20 bg-red-500/5' : st.blocked > st.producing ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]'
                   }`}>
-                    <span className="font-semibold text-white/80">{st.name.split(' ')[0]}</span>
+                    <span className="font-semibold text-white/80">{String(st.name).split(' ')[0]}</span>
                     <span className="text-white/40 ml-1.5">{st.active} job{s(st.active)}</span>
                     {st.overdue > 0 && <span className="text-red-400 ml-1.5">({st.overdue} overdue)</span>}
                     {st.overdue === 0 && st.stale > 0 && <span className="text-amber-400 ml-1.5">({st.stale} stale)</span>}
