@@ -162,10 +162,28 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
         })) : [],
         salesPerson: (() => {
             const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
-            if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+            if (raw && typeof raw === 'object') {
+                if (raw.name) return raw.name;
+                if (raw.full_name) return raw.full_name;
+                if (raw.display_name) return raw.display_name;
+                if (raw.username) return raw.username;
+                if (raw.firstname || raw.lastname) return `${raw.firstname || ''} ${raw.lastname || ''}`.trim();
+                if (raw.first_name || raw.last_name) return `${raw.first_name || ''} ${raw.last_name || ''}`.trim();
+                if (raw.user_name) return raw.user_name;
+                if (raw.label) return raw.label;
+                if (raw.text) return raw.text;
+                if (raw.value && typeof raw.value === 'string') return raw.value;
+                // Last resort: find first string value
+                const strVal = Object.values(raw).find(v => typeof v === 'string' && v.length > 1);
+                if (strVal) return strVal as string;
+                return String(raw.id || JSON.stringify(raw));
+            }
             if (raw && typeof raw === 'string') return raw;
             const itemAssign = items.find(i => i.assignedTo)?.assignedTo;
-            if (itemAssign && typeof itemAssign === 'object') return (itemAssign as any).name || (itemAssign as any).full_name || String((itemAssign as any).id || '');
+            if (itemAssign && typeof itemAssign === 'object') {
+                const ia = itemAssign as any;
+                return ia.name || ia.full_name || ia.display_name || ia.firstname && `${ia.firstname} ${ia.lastname || ''}`.trim() || ia.first_name && `${ia.first_name} ${ia.last_name || ''}`.trim() || String(ia.id || '');
+            }
             return itemAssign || undefined;
         })(),
     };

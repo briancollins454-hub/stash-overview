@@ -79,7 +79,15 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       const withSP = decoJobs.filter(j => j.salesPerson);
       const withItemAssign = decoJobs.filter(j => j.items?.some(i => i.assignedTo));
       console.log(`[STAFF DEBUG] Prop decoJobs: ${decoJobs.length} total, ${withSP.length} have salesPerson, ${withItemAssign.length} have item-level assignedTo`);
-      if (withSP.length > 0) console.log('[STAFF DEBUG] Sample salesPerson (JSON):', withSP.slice(0, 3).map(j => ({ job: j.jobNumber, sp: JSON.stringify(j.salesPerson) })));
+      if (withSP.length > 0) {
+        const sample = withSP[0];
+        console.log('[STAFF DEBUG] salesPerson raw value:', sample.salesPerson);
+        console.log('[STAFF DEBUG] salesPerson typeof:', typeof sample.salesPerson);
+        console.log('[STAFF DEBUG] salesPerson JSON:', JSON.stringify(sample.salesPerson));
+        if (sample.salesPerson && typeof sample.salesPerson === 'object') {
+          console.log('[STAFF DEBUG] salesPerson keys:', Object.keys(sample.salesPerson as any));
+        }
+      }
       if (withItemAssign.length > 0) {
         const sample = withItemAssign[0];
         console.log('[STAFF DEBUG] Sample item assignedTo (JSON):', sample.jobNumber, sample.items?.filter(i => i.assignedTo).slice(0, 2).map(i => JSON.stringify(i.assignedTo)));
