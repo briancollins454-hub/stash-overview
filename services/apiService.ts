@@ -353,26 +353,44 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: log first job's raw keys and any assigned_to fields
+    // Debug: dump ALL job-level keys + search for known staff names in values
     if (allDeco.length > 0) {
         const sampleJob = allDeco[0];
-        const assignKeys = Object.keys(sampleJob).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
-        console.log('[DECO DEBUG] Job-level assign-related keys:', assignKeys);
-        if (sampleJob.order_lines?.[0]) {
-            const lineKeys = Object.keys(sampleJob.order_lines[0]).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
-            console.log('[DECO DEBUG] Line-level assign-related keys:', lineKeys);
-            if (sampleJob.order_lines[0].workflow_items?.[0]) {
-                const wfKeys = Object.keys(sampleJob.order_lines[0].workflow_items[0]).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
-                console.log('[DECO DEBUG] Workflow-item assign-related keys:', wfKeys);
-                console.log('[DECO DEBUG] Sample WF item assigned fields:', JSON.stringify(
-                    Object.fromEntries(Object.entries(sampleJob.order_lines[0].workflow_items[0]).filter(([k]) => /assign|sales|staff|person|user|rep/i.test(k)))
-                ));
+        console.log('[DECO DEBUG] ALL job-level keys:', Object.keys(sampleJob));
+        // Search all jobs for any value containing known staff names
+        const staffNames = ['lucian','matthew','jode','baragoi','irvine','johnston'];
+        for (const job of allDeco.slice(0, 50)) {
+            const jobStr = JSON.stringify(job);
+            const found = staffNames.find(n => jobStr.toLowerCase().includes(n));
+            if (found) {
+                // Find which key contains this name
+                const matchingEntries = Object.entries(job).filter(([, v]) =>
+                    typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
+                );
+                console.log('[DECO DEBUG] Found staff name in job', job.order_id, '- matching fields:', matchingEntries);
+                // Check nested order_lines too
+                if (job.order_lines) {
+                    for (const line of job.order_lines) {
+                        const lineMatches = Object.entries(line).filter(([, v]) =>
+                            typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
+                        );
+                        if (lineMatches.length) console.log('[DECO DEBUG] Line-level matches:', lineMatches);
+                        if (line.workflow_items) {
+                            for (const wf of line.workflow_items) {
+                                const wfMatches = Object.entries(wf).filter(([, v]) =>
+                                    typeof v === 'string' && staffNames.some(n => v.toLowerCase().includes(n))
+                                );
+                                if (wfMatches.length) console.log('[DECO DEBUG] WF-level matches:', wfMatches);
+                            }
+                        }
+                    }
+                }
+                break; // one match is enough
             }
         }
-        // Also check job-level for any assignment
-        console.log('[DECO DEBUG] Sample job assign fields:', JSON.stringify(
-            Object.fromEntries(Object.entries(sampleJob).filter(([k]) => /assign|sales|staff|person|user|rep/i.test(k)))
-        ));
+        if (!allDeco.slice(0, 50).some(j => staffNames.some(n => JSON.stringify(j).toLowerCase().includes(n)))) {
+            console.log('[DECO DEBUG] No staff names found in first 50 jobs. Dumping first job (truncated):', JSON.stringify(sampleJob).substring(0, 3000));
+        }
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
