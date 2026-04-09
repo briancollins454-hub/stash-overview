@@ -73,6 +73,23 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
+  // Debug: check what salesPerson and item assignedTo values exist in prop data
+  useEffect(() => {
+    if (decoJobs.length > 0) {
+      const withSP = decoJobs.filter(j => j.salesPerson);
+      const withItemAssign = decoJobs.filter(j => j.items?.some(i => i.assignedTo));
+      console.log(`[STAFF DEBUG] Prop decoJobs: ${decoJobs.length} total, ${withSP.length} have salesPerson, ${withItemAssign.length} have item-level assignedTo`);
+      if (withSP.length > 0) console.log('[STAFF DEBUG] Sample salesPerson:', withSP.slice(0, 5).map(j => ({ job: j.jobNumber, sp: j.salesPerson })));
+      if (withItemAssign.length > 0) {
+        const sample = withItemAssign[0];
+        console.log('[STAFF DEBUG] Sample item assignedTo:', sample.jobNumber, sample.items?.filter(i => i.assignedTo).map(i => i.assignedTo));
+      }
+      // Check if items even exist (finance cache doesn't have items)
+      const withItems = decoJobs.filter(j => j.items && j.items.length > 0);
+      console.log(`[STAFF DEBUG] ${withItems.length} of ${decoJobs.length} jobs have items array populated`);
+    }
+  }, [decoJobs]);
+
   const now = useMemo(() => new Date(), []);
   const t0 = useMemo(() => { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }, [now]);
 
