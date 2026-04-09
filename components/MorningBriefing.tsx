@@ -89,43 +89,45 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: try multiple API endpoints and params to find Sales Assign
+  // Debug: fetch specific order 224745 with all possible params and dump everything
   useEffect(() => {
-    const testJobId = decoJobs[0]?.jobNumber;
-    if (!testJobId) return;
-    
-    // Try different endpoints
-    const endpoints = [
-      { ep: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: testJobId, criteria: testJobId, limit: '1', include_workflow_data: '1', include_user_assignments: '1', include_custom_fields: '1', include_sales_data: '1', include_assigned_to: '1', include_all: '1' } },
-      { ep: 'api/json/manage_orders/list', params: { order_id: testJobId } },
-      { ep: 'api/json/manage_orders/detail', params: { order_id: testJobId } },
-      { ep: 'api/json/manage_orders/view', params: { order_id: testJobId } },
-    ];
-    
-    endpoints.forEach(({ ep, params }) => {
-      fetch('/api/deco', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint: ep, params })
-      }).then(r => r.json()).then(data => {
-        const status = data.status?.code ? `code ${data.status.code}` : 'ok';
-        const keys = Object.keys(data).sort();
-        console.log(`[STAFF] ${ep}: status=${status}, keys=${keys.join(',')}`);
-        // For find endpoint with extra params, check orders
-        if (data.orders?.[0]) {
-          const j = data.orders[0];
-          const allKeys = Object.keys(j).sort();
-          console.log(`[STAFF] ${ep} order keys:`, allKeys);
-          const interesting = allKeys.filter(k => /assign|sales|rep|staff|user|agent|owner|custom/i.test(k));
-          interesting.forEach(k => console.log(`[STAFF] ${ep} job.${k} =`, JSON.stringify(j[k])));
+    const testJobId = '224745';
+    fetch('/api/deco', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: testJobId, criteria: testJobId, limit: '1', include_workflow_data: '1', include_user_assignments: '1', include_custom_fields: '1', include_sales_data: '1', include_assigned_to: '1', include_all: '1' } })
+    }).then(r => r.json()).then(data => {
+      const job = data.orders?.[0];
+      if (!job) { console.log('[STAFF] Order 224745 not found'); return; }
+      console.log('[STAFF] Order 224745 ALL keys:', Object.keys(job).sort());
+      console.log('[STAFF] Order 224745 assigned_to:', JSON.stringify(job.assigned_to));
+      console.log('[STAFF] Order 224745 created_by:', JSON.stringify(job.created_by));
+      // Dump EVERY key-value where value is an object with firstname/lastname or contains staff names
+      const staffNames = ['matthew','wendy','jenny','amy','gibson','irvine','lucian','jodie','johnston','baragoi'];
+      for (const [k, v] of Object.entries(job)) {
+        const vs = JSON.stringify(v || '').toLowerCase();
+        if (staffNames.some(n => vs.includes(n))) {
+          console.log(`[STAFF] 224745 MATCH job.${k} =`, JSON.stringify(v));
         }
-        // For non-find endpoints, dump response
-        if (!data.orders) {
-          console.log(`[STAFF] ${ep} full response:`, JSON.stringify(data).slice(0, 2000));
+      }
+      // Check order_lines
+      if (job.order_lines) {
+        for (let i = 0; i < Math.min(job.order_lines.length, 3); i++) {
+          const line = job.order_lines[i];
+          const lineStr = JSON.stringify(line).toLowerCase();
+          if (staffNames.some(n => lineStr.includes(n))) {
+            for (const [k, v] of Object.entries(line)) {
+              const vs = JSON.stringify(v || '').toLowerCase();
+              if (staffNames.some(n => vs.includes(n)))
+                console.log(`[STAFF] 224745 line[${i}].${k} =`, JSON.stringify(v));
+            }
+          }
         }
-      }).catch(e => console.log(`[STAFF] ${ep} error:`, e.message));
-    });
-  }, [decoJobs]);
+      }
+      // Full JSON dump (first 5000 chars)
+      console.log('[STAFF] 224745 FULL:', JSON.stringify(job).slice(0, 5000));
+    }).catch(e => console.log('[STAFF] 224745 error:', e.message));
+  }, []);
 
 
 
