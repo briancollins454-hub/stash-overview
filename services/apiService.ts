@@ -385,26 +385,16 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: find sales assign - dump created_by + workflow items for first 3 jobs
+    // Debug: dump teammates, citation_assigned_to, created_by for first 3 jobs
     if (allDeco.length > 0) {
         for (const j of allDeco.slice(0, 3)) {
             console.log(`[DECO RAW] Job ${j.order_id}: created_by=`, JSON.stringify(j.created_by));
             if (j.order_lines?.length > 0) {
                 const line = j.order_lines[0];
-                // All line keys except large arrays
-                const lineKeys = Object.keys(line);
-                console.log(`[DECO RAW] Job ${j.order_id} line[0] keys:`, lineKeys);
-                // Show assigned_to specifically
-                console.log(`[DECO RAW] Job ${j.order_id} line[0].assigned_to=`, JSON.stringify(line.assigned_to));
-                if (line.workflow_items?.length > 0) {
-                    const wf = line.workflow_items[0];
-                    console.log(`[DECO RAW] Job ${j.order_id} WF[0] ALL keys:`, Object.keys(wf));
-                    // Look for any assign/sales/user fields
-                    const interesting = Object.entries(wf).filter(([k]) => /assign|sales|user|person|staff|created|owner/i.test(k));
-                    console.log(`[DECO RAW] Job ${j.order_id} WF[0] assign-related:`, JSON.stringify(interesting));
-                    console.log(`[DECO RAW] Job ${j.order_id} WF[0] assigned_to=`, JSON.stringify(wf.assigned_to));
-                    console.log(`[DECO RAW] Job ${j.order_id} WF[0] assigned_user=`, JSON.stringify(wf.assigned_user));
-                }
+                console.log(`[DECO RAW] Job ${j.order_id} line[0].teammates=`, JSON.stringify(line.teammates));
+                console.log(`[DECO RAW] Job ${j.order_id} line[0].citation_assigned_to=`, JSON.stringify(line.citation_assigned_to));
+                console.log(`[DECO RAW] Job ${j.order_id} line[0].processed_by=`, JSON.stringify(line.processed_by));
+                console.log(`[DECO RAW] Job ${j.order_id} line[0].shipped_by=`, JSON.stringify(line.shipped_by));
             }
         }
     }
