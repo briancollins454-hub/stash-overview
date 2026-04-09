@@ -161,29 +161,21 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
             date: r.date || r.date_refunded || '',
         })) : [],
         salesPerson: (() => {
+            // Primary: created_by is the "Sales Assign" field in DecoNetwork
+            const cb = job.created_by;
+            if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
+                return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
+            // Fallback: other potential fields
             const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
             if (raw && typeof raw === 'object') {
-                if (raw.name) return raw.name;
-                if (raw.full_name) return raw.full_name;
-                if (raw.display_name) return raw.display_name;
-                if (raw.username) return raw.username;
                 if (raw.firstname || raw.lastname) return `${raw.firstname || ''} ${raw.lastname || ''}`.trim();
-                if (raw.first_name || raw.last_name) return `${raw.first_name || ''} ${raw.last_name || ''}`.trim();
-                if (raw.user_name) return raw.user_name;
-                if (raw.label) return raw.label;
-                if (raw.text) return raw.text;
-                if (raw.value && typeof raw.value === 'string') return raw.value;
-                // Last resort: find first string value
+                if (raw.name) return raw.name;
                 const strVal = Object.values(raw).find(v => typeof v === 'string' && v.length > 1);
                 if (strVal) return strVal as string;
-                return String(raw.id || JSON.stringify(raw));
             }
             if (raw && typeof raw === 'string') return raw;
+            // Last fallback: item-level assignedTo
             const itemAssign = items.find(i => i.assignedTo)?.assignedTo;
-            if (itemAssign && typeof itemAssign === 'object') {
-                const ia = itemAssign as any;
-                return ia.name || ia.full_name || ia.display_name || ia.firstname && `${ia.firstname} ${ia.lastname || ''}`.trim() || ia.first_name && `${ia.first_name} ${ia.last_name || ''}`.trim() || String(ia.id || '');
-            }
             return itemAssign || undefined;
         })(),
     };
@@ -385,19 +377,6 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: dump teammates, citation_assigned_to, created_by for first 3 jobs
-    if (allDeco.length > 0) {
-        for (const j of allDeco.slice(0, 3)) {
-            console.log(`[DECO RAW] Job ${j.order_id}: created_by=`, JSON.stringify(j.created_by));
-            if (j.order_lines?.length > 0) {
-                const line = j.order_lines[0];
-                console.log(`[DECO RAW] Job ${j.order_id} line[0].teammates=`, JSON.stringify(line.teammates));
-                console.log(`[DECO RAW] Job ${j.order_id} line[0].citation_assigned_to=`, JSON.stringify(line.citation_assigned_to));
-                console.log(`[DECO RAW] Job ${j.order_id} line[0].processed_by=`, JSON.stringify(line.processed_by));
-                console.log(`[DECO RAW] Job ${j.order_id} line[0].shipped_by=`, JSON.stringify(line.shipped_by));
-            }
-        }
-    }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
@@ -472,8 +451,12 @@ export const fetchDecoFinancials = async (
                     date: r.date || r.date_refunded || '',
                 })) : [],
                 salesPerson: (() => {
+                    const cb = job.created_by;
+                    if (cb && typeof cb === 'object' && (cb.firstname || cb.lastname))
+                        return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
                     const raw = job.sales_person || job.sales_assign || job.assigned_to || job.sales_rep;
-                    if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
+                    if (raw && typeof raw === 'object' && (raw.firstname || raw.lastname))
+                        return `${raw.firstname || ''} ${raw.lastname || ''}`.trim();
                     if (raw && typeof raw === 'string') return raw;
                     return undefined;
                 })(),
