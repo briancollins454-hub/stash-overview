@@ -385,6 +385,17 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
+    // Debug: dump raw job keys and all values
+    if (allDeco.length > 0) {
+        const j = allDeco[0];
+        const flat: Record<string, any> = {};
+        for (const [k, v] of Object.entries(j)) {
+            if (Array.isArray(v)) flat[k] = `[Array: ${v.length}]`;
+            else if (v && typeof v === 'object') flat[k] = JSON.stringify(v);
+            else flat[k] = v;
+        }
+        console.log('[DECO RAW] Job keys+values:', JSON.stringify(flat, null, 2));
+    }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
