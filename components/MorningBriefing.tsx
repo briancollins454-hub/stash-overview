@@ -89,23 +89,35 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
-  // Debug: show actual job numbers we have + try to find 224745
+  // Debug: fetch order 224778 (assigned to Matthew Irvine in Deco admin)
   useEffect(() => {
-    // Show range of job numbers we have
-    const nums = decoJobs.map(j => parseInt(j.jobNumber)).filter(n => !isNaN(n)).sort((a,b) => a-b);
-    console.log(`[STAFF] Job number range: ${nums[0]} to ${nums[nums.length-1]}, sample:`, nums.slice(0, 10));
-    console.log(`[STAFF] Looking for 224745, closest matches:`, nums.filter(n => Math.abs(n - 224745) < 1000).slice(0, 5));
-    // Also search by customer name for Matthew Irvine's order
     fetch('/api/deco', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '5', condition: '2', string: 'irvine', criteria: 'irvine', limit: '5', include_workflow_data: '1', include_user_assignments: '1' } })
+      body: JSON.stringify({ endpoint: 'api/json/manage_orders/find', params: { field: '1', condition: '1', string: '224778', criteria: '224778', limit: '1', include_workflow_data: '1', include_user_assignments: '1' } })
     }).then(r => r.json()).then(data => {
-      const orders = data.orders || [];
-      console.log(`[STAFF] Search 'irvine' by billing name: ${orders.length} results`);
-      orders.forEach((j: any) => console.log(`[STAFF] irvine result: order_id=${j.order_id}, customer=${j.billing_details?.firstname} ${j.billing_details?.lastname}, assigned_to=${JSON.stringify(j.assigned_to)}`));
-    }).catch(() => {});
-  }, [decoJobs]);
+      const job = data.orders?.[0];
+      if (!job) { console.log('[STAFF] Order 224778 NOT FOUND'); return; }
+      console.log('[STAFF] 224778 ALL keys:', Object.keys(job).sort());
+      console.log('[STAFF] 224778 assigned_to:', JSON.stringify(job.assigned_to));
+      console.log('[STAFF] 224778 created_by:', JSON.stringify(job.created_by));
+      // Deep search for matthew/irvine in every field
+      const targets = ['matthew','irvine'];
+      const findDeep = (obj: any, path: string) => {
+        if (!obj || typeof obj !== 'object') return;
+        for (const [k, v] of Object.entries(obj)) {
+          const p = `${path}.${k}`;
+          if (typeof v === 'string' && targets.some(n => v.toLowerCase().includes(n)))
+            console.log(`[STAFF] FOUND at ${p} = "${v}"`);
+          if (typeof v === 'number' || typeof v === 'boolean') { /* skip */ }
+          else if (Array.isArray(v)) v.forEach((item, i) => findDeep(item, `${p}[${i}]`));
+          else if (typeof v === 'object' && v !== null) findDeep(v, p);
+        }
+      };
+      findDeep(job, 'job');
+      console.log('[STAFF] 224778 FULL JSON:', JSON.stringify(job).slice(0, 8000));
+    }).catch(e => console.log('[STAFF] 224778 error:', e.message));
+  }, []);
 
 
 
