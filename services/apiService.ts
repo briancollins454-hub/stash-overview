@@ -369,6 +369,23 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
+    // Debug: distribution of assigned_to vs created_by
+    const stats = { withAT: 0, withCB: 0, neither: 0, atValues: new Set<string>(), cbValues: new Set<string>() };
+    for (const j of allDeco) {
+        const at = j.assigned_to, cb = j.created_by;
+        const atName = at && typeof at === 'object' && (at.firstname || at.lastname) ? `${at.firstname||''} ${at.lastname||''}`.trim() : (typeof at === 'string' ? at : null);
+        const cbName = cb && typeof cb === 'object' && (cb.firstname || cb.lastname) ? `${cb.firstname||''} ${cb.lastname||''}`.trim() : (typeof cb === 'string' ? cb : null);
+        if (atName) { stats.withAT++; stats.atValues.add(atName); }
+        if (cbName) { stats.withCB++; stats.cbValues.add(cbName); }
+        if (!atName && !cbName) stats.neither++;
+    }
+    console.log(`[STAFF] ${allDeco.length} orders: ${stats.withAT} have assigned_to, ${stats.withCB} have created_by, ${stats.neither} have neither`);
+    console.log('[STAFF] assigned_to names:', [...stats.atValues]);
+    console.log('[STAFF] created_by names:', [...stats.cbValues]);
+    // Check first 5 orders raw assigned_to and created_by
+    for (const j of allDeco.slice(0, 5)) {
+        console.log(`[STAFF] Job ${j.order_id}: assigned_to=${JSON.stringify(j.assigned_to)}, created_by=${JSON.stringify(j.created_by)}`);
+    }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
