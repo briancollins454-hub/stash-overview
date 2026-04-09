@@ -181,6 +181,8 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
                 return `${cb.firstname || ''} ${cb.lastname || ''}`.trim();
             return undefined;
         })(),
+    };
+};
 
 const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
     try {
