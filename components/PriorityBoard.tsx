@@ -38,6 +38,7 @@ const TIME_FRAMES = [
   { id: '30d',   label: '30 Days',   days: 30 },
   { id: '14d',   label: '14 Days',   days: 14 },
   { id: '7d',    label: '7 Days',    days: 7 },
+  { id: '3d',    label: '3 Days',    days: 3 },
   { id: 'today', label: 'Today',     days: 0 },
 ] as const;
 
