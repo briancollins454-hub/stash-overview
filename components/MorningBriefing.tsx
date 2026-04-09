@@ -548,6 +548,10 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .filter(s => s.name !== 'Unassigned')
       .sort((a, b) => b.active - a.active);
     const staffUnassigned = staffMap.get('Unassigned') || null;
+    // Debug: log staff analytics
+    console.log('[STAFF DEBUG] staffMap entries:', Array.from(staffMap.keys()));
+    console.log('[STAFF DEBUG] staffSummary count:', staffSummary.length, 'unassigned active:', staffUnassigned?.active);
+    console.log('[STAFF DEBUG] sample salesPerson values from active jobs:', active.slice(0, 10).map(j => ({ job: j.jobNumber, sp: j.salesPerson })));
     // Do First grouped by staff
     const doFirstByStaff = new Map<string, typeof doFirst>();
     doFirst.forEach(item => {

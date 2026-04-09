@@ -353,6 +353,27 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
+    // Debug: log first job's raw keys and any assigned_to fields
+    if (allDeco.length > 0) {
+        const sampleJob = allDeco[0];
+        const assignKeys = Object.keys(sampleJob).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
+        console.log('[DECO DEBUG] Job-level assign-related keys:', assignKeys);
+        if (sampleJob.order_lines?.[0]) {
+            const lineKeys = Object.keys(sampleJob.order_lines[0]).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
+            console.log('[DECO DEBUG] Line-level assign-related keys:', lineKeys);
+            if (sampleJob.order_lines[0].workflow_items?.[0]) {
+                const wfKeys = Object.keys(sampleJob.order_lines[0].workflow_items[0]).filter(k => /assign|sales|staff|person|user|rep/i.test(k));
+                console.log('[DECO DEBUG] Workflow-item assign-related keys:', wfKeys);
+                console.log('[DECO DEBUG] Sample WF item assigned fields:', JSON.stringify(
+                    Object.fromEntries(Object.entries(sampleJob.order_lines[0].workflow_items[0]).filter(([k]) => /assign|sales|staff|person|user|rep/i.test(k)))
+                ));
+            }
+        }
+        // Also check job-level for any assignment
+        console.log('[DECO DEBUG] Sample job assign fields:', JSON.stringify(
+            Object.fromEntries(Object.entries(sampleJob).filter(([k]) => /assign|sales|staff|person|user|rep/i.test(k)))
+        ));
+    }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
