@@ -270,8 +270,8 @@ function SectionCard({ section, items, totalValue, criticalCount, highCount, exp
           ) : (
             <>
               {/* Column header */}
-              <div className="grid grid-cols-[40px_70px_1fr_60px_100px_110px_80px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
-                <span>#</span><span>Order</span><span>Customer</span><span>Score</span><span>Reason</span><span>Staff</span><span>Status</span><span className="text-right">Value</span>
+              <div className="grid grid-cols-[40px_70px_1fr_1fr_60px_100px_100px_80px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
+                <span>#</span><span>Order</span><span>Customer</span><span>Job Name</span><span>Score</span><span>Reason</span><span>Staff</span><span>Status</span><span className="text-right">Value</span>
               </div>
               {/* Rows */}
               <div className="divide-y divide-white/[0.03]">
@@ -283,7 +283,7 @@ function SectionCard({ section, items, totalValue, criticalCount, highCount, exp
                   return (
                     <div
                       key={item.job.id}
-                      className="grid grid-cols-[40px_70px_1fr_60px_100px_110px_80px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
+                      className="grid grid-cols-[40px_70px_1fr_1fr_60px_100px_100px_80px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => onNavigate(item.job.jobNumber)}
                     >
                       <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${us.dot}${us.pulse}`}>{i + 1}</span>
@@ -292,6 +292,7 @@ function SectionCard({ section, items, totalValue, criticalCount, highCount, exp
                         <span className="text-xs text-white/70 truncate block">{item.job.customerName}</span>
                         <span className="text-[9px] text-white/25 block">Due: {dueStr}</span>
                       </div>
+                      <span className="text-[10px] text-white/50 truncate" title={item.job.jobName}>{item.job.jobName || '—'}</span>
                       <span className={`text-[11px] font-bold ${us.text}`}>{item.score}</span>
                       <div className="flex flex-wrap gap-0.5">
                         {item.matchedRules.slice(0, 2).map((r, ri) => (

@@ -6,7 +6,7 @@ export const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getT
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export interface PriorityThreshold { days: number; score: number; label: string }
-export interface PriorityRule { status: string; metric: 'days_since_ordered' | 'days_overdue'; thresholds: PriorityThreshold[] }
+export interface PriorityRule { status: string; metric: 'days_since_ordered' | 'days_overdue' | 'days_until_due'; thresholds: PriorityThreshold[] }
 export type Urgency = 'critical' | 'high' | 'medium' | 'low';
 export interface PriorityResult { job: DecoJob; score: number; matchedRules: string[]; reason: string; urgency: Urgency }
 
@@ -19,15 +19,17 @@ export const PRIORITY_RULES: PriorityRule[] = [
     { days: 5,  score: 50,  label: 'PO 5d+ wait' },
     { days: 3,  score: 30,  label: 'PO 3d+ wait' },
   ]},
-  { status: 'Awaiting Stock', metric: 'days_overdue', thresholds: [
-    { days: 7, score: 90, label: 'Stock 7d+ overdue' },
-    { days: 5, score: 60, label: 'Stock 5d+ overdue' },
-    { days: 3, score: 35, label: 'Stock 3d+ overdue' },
+  { status: 'Awaiting Stock', metric: 'days_until_due', thresholds: [
+    { days: -7, score: 90, label: 'Stock 7d+ overdue' },
+    { days: -5, score: 60, label: 'Stock 5d+ overdue' },
+    { days: -3, score: 35, label: 'Stock 3d+ overdue' },
+    { days: 3,  score: 20, label: 'Stock ships in 3d' },
   ]},
-  { status: 'Awaiting Processing', metric: 'days_overdue', thresholds: [
-    { days: 7, score: 90, label: 'Process 7d+ overdue' },
-    { days: 5, score: 60, label: 'Process 5d+ overdue' },
-    { days: 3, score: 35, label: 'Process 3d+ overdue' },
+  { status: 'Awaiting Processing', metric: 'days_until_due', thresholds: [
+    { days: -7, score: 90, label: 'Process 7d+ overdue' },
+    { days: -5, score: 60, label: 'Process 5d+ overdue' },
+    { days: -3, score: 35, label: 'Process 3d+ overdue' },
+    { days: 3,  score: 20, label: 'Process ships in 3d' },
   ]},
   { status: 'Ready for Shipping', metric: 'days_overdue', thresholds: [
     { days: 10, score: 80, label: 'Ship 10d+ delay' },
@@ -69,10 +71,18 @@ export function calculatePriority(job: DecoJob, now: Date): PriorityResult {
     } else if (rule.metric === 'days_overdue' && due) {
       const d = daysBetween(due, now);
       if (d > 0) metricDays = d;
+    } else if (rule.metric === 'days_until_due' && due) {
+      // Negative = overdue, positive = days remaining
+      metricDays = daysBetween(now, due);
     }
     if (metricDays !== null) {
       for (const t of rule.thresholds) {
-        if (metricDays >= t.days) { score += t.score; matchedRules.push(t.label); break; }
+        // For days_until_due: threshold is negative for overdue (metricDays <= threshold), positive for approaching (metricDays <= threshold)
+        if (rule.metric === 'days_until_due') {
+          if (metricDays <= t.days) { score += t.score; matchedRules.push(t.label); break; }
+        } else {
+          if (metricDays >= t.days) { score += t.score; matchedRules.push(t.label); break; }
+        }
       }
     }
   }
