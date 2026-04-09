@@ -89,6 +89,18 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
       .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
   }, [decoJobs, financeJobs]);
 
+  // Debug: compare prop vs cache
+  useEffect(() => {
+    const propSP = decoJobs.filter(j => j.salesPerson);
+    const propNames = new Set(propSP.map(j => j.salesPerson));
+    console.log(`[STAFF] PROP decoJobs: ${decoJobs.length} total, ${propSP.length} have salesPerson`, [...propNames]);
+    if (financeJobs) {
+      const cacheSP = financeJobs.filter(j => j.salesPerson);
+      const cacheNames = new Set(cacheSP.map(j => j.salesPerson));
+      console.log(`[STAFF] CACHE financeJobs: ${financeJobs.length} total, ${cacheSP.length} have salesPerson`, [...cacheNames]);
+    }
+  }, [decoJobs, financeJobs]);
+
 
 
   const now = useMemo(() => new Date(), []);
