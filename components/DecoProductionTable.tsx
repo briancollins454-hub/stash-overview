@@ -101,21 +101,21 @@ const getDecoBadge = (type: string | undefined) => {
     return DECO_BADGE[type] || { bg: 'bg-white/10 border-white/20', text: 'text-white/60' };
 };
 
-const STATUS_BADGE: Record<string, string> = {
-    'Order': 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    'Production': 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-    'In Production': 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-    'Awaiting Processing': 'bg-gray-500/20 text-gray-300 border-gray-500/30',
-    'Awaiting Stock': 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-    'Awaiting Artwork': 'bg-orange-500/20 text-orange-300 border-orange-500/30',
-    'Awaiting Review': 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
-    'Awaiting PO': 'bg-red-500/20 text-red-300 border-red-500/30',
-    'Not Ordered': 'bg-red-500/20 text-red-300 border-red-500/30',
-    'Ready for Shipping': 'bg-green-500/20 text-green-300 border-green-500/30',
-    'Completed': 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-    'Shipped': 'bg-sky-500/20 text-sky-300 border-sky-500/30',
-    'On Hold': 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-    'Cancelled': 'bg-red-500/10 text-red-400/60 border-red-500/20',
+const STATUS_BADGE: Record<string, { cls: string; short: string }> = {
+    'Order': { cls: 'bg-blue-500/20 text-blue-300 border-blue-500/30', short: 'ORDER' },
+    'Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'PROD' },
+    'In Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'IN PROD' },
+    'Awaiting Processing': { cls: 'bg-slate-500/20 text-slate-300 border-slate-500/30', short: 'PROCESSING' },
+    'Awaiting Stock': { cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30', short: 'STOCK' },
+    'Awaiting Artwork': { cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30', short: 'ARTWORK' },
+    'Awaiting Review': { cls: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', short: 'REVIEW' },
+    'Awaiting PO': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'PO' },
+    'Not Ordered': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'NOT ORD' },
+    'Ready for Shipping': { cls: 'bg-green-500/20 text-green-300 border-green-500/30', short: 'READY' },
+    'Completed': { cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', short: 'DONE' },
+    'Shipped': { cls: 'bg-sky-500/20 text-sky-300 border-sky-500/30', short: 'SHIPPED' },
+    'On Hold': { cls: 'bg-gray-500/20 text-gray-400 border-gray-500/30', short: 'HOLD' },
+    'Cancelled': { cls: 'bg-red-500/10 text-red-400/60 border-red-500/20', short: 'CANCEL' },
 };
 
 type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer';
@@ -494,7 +494,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         )}
                         {filtered.map(job => {
                             const isExpanded = expandedJob === job.id;
-                            const statusClass = STATUS_BADGE[job.status] || 'bg-white/10 text-white/50 border-white/20';
+                            const statusInfo = STATUS_BADGE[job.status] || { cls: 'bg-white/10 text-white/50 border-white/20', short: job.status.toUpperCase() };
                             const dueColor = job.daysUntilDue !== null
                                 ? job.daysUntilDue < 0 ? 'text-red-400 font-bold' : job.daysUntilDue <= 3 ? 'text-amber-400 font-bold' : 'text-white/50'
                                 : 'text-white/20';
@@ -517,7 +517,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                             <div className="text-[9px] text-white/30 truncate max-w-[200px]">{job.jobName}</div>
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <span className={`px-2 py-0.5 rounded-full text-[8px] font-bold uppercase border ${statusClass}`}>{job.status}</span>
+                                            <span className={`inline-block px-2 py-0.5 rounded text-[8px] font-black uppercase whitespace-nowrap border ${statusInfo.cls}`} title={job.status}>{statusInfo.short}</span>
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
                                             <div className="flex flex-wrap gap-0.5 justify-center">
