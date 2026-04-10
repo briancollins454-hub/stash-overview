@@ -43,10 +43,10 @@ const mapDecoStatus = (status: string | number): string => {
 
 /* ---------- Decoration / stitch extraction ---------- */
 const DECO_TYPE_MAP: Record<string, string> = {
-    embroidery: 'EMB', embroider: 'EMB', emb: 'EMB', stitched: 'EMB',
+    embroidery: 'EMB', embroider: 'EMB', emb: 'EMB', stitched: 'EMB', wemb: 'EMB',
     dtf: 'DTF', 'direct to film': 'DTF',
     flex: 'FLEX',
-    transfer: 'TRANSFER', 'heat transfer': 'TRANSFER', 'heat press': 'TRANSFER', 'heat applied': 'TRANSFER',
+    transfer: 'TRANSFER', 'heat transfer': 'TRANSFER', 'heat press': 'TRANSFER', 'heat applied': 'TRANSFER', trf: 'TRANSFER',
     uv: 'UV', 'uv print': 'UV',
     screen: 'SCREEN', 'screen print': 'SCREEN', screenprint: 'SCREEN',
     freeform: 'FREEFORM', 'free form': 'FREEFORM',
@@ -504,8 +504,8 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     const minDate = new Date(); minDate.setDate(minDate.getDate() - lookback);
     const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
     let allDeco: any[] = []; let offset = 0; let hasMore = true;
-    const BATCH_SIZE = 250;
-    const MAX_JOBS = isDeepSync ? 1500 : 600;
+    const BATCH_SIZE = 100; // Deco API caps responses at 100 when using include flags
+    const MAX_JOBS = isDeepSync ? 1500 : 800;
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
@@ -627,20 +627,16 @@ export const fetchDecoFinancials = async (
 export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): Promise<DecoJob | null> => {
     if (!settings.useLiveData) return MOCK_DECO_JOBS.find(j => j.jobNumber === jobId) || null;
     
-    // Aggressive Search: Try Field 1 (Order ID), Field 2 (PO), Field 7 (External Reference), Field 3 (Line ID)
-    const fields = ['1', '2', '7', '3'];
-    for (let i = 0; i < fields.length; i++) {
-        const f = fields[i];
-        try {
-            const params = { 'field': f, 'condition': '1', 'string': jobId.trim(), 'criteria': jobId.trim(), 'limit': '1', 'include_workflow_data': '1', 'skip_login_token': '1' };
-            const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
-            const job = data.orders?.[0];
-            if (job) {
-                const items = parseDecoItems(job);
-                return buildDecoJob(job, items);
-            }
-        } catch (e) { }
-    }
+    // Use bulk action which handles the broken per-ID lookup via date-range pagination
+    try {
+        const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds: [jobId.trim()] });
+        const json = await res.json();
+        const result = (json.results || []).find((r: any) => r.order);
+        if (result) {
+            const items = parseDecoItems(result.order);
+            return buildDecoJob(result.order, items);
+        }
+    } catch (e) { }
     return null;
 };
 

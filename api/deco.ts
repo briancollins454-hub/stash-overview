@@ -20,82 +20,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { action, endpoint, params, jobIds } = req.body || {};
 
-  // Stitch enrichment: fetch individual jobs with full artwork/decoration data
+  // Helper: fetch all orders via date-range pagination and filter by requested IDs
+  async function fetchOrdersByIds(requestedIds: string[], includeDecoration: boolean): Promise<{jobId: string, order: any}[]> {
+    const idSet = new Set(requestedIds.map(id => String(id).trim()));
+    const found = new Map<string, any>();
+    const lookbackDays = 200;
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() - lookbackDays);
+    const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
+
+    let offset = 0;
+    const BATCH = 100;
+    const MAX = 800;
+
+    while (offset < MAX) {
+      try {
+        const qp = new URLSearchParams();
+        qp.append('username', username);
+        qp.append('password', password);
+        qp.append('field', '1');
+        qp.append('condition', '4');
+        qp.append('date1', dateStr);
+        qp.append('limit', BATCH.toString());
+        qp.append('offset', offset.toString());
+        qp.append('include_workflow_data', '1');
+        qp.append('skip_login_token', '1');
+        if (includeDecoration) {
+          qp.append('include_product_data', '1');
+          qp.append('include_decoration_data', '1');
+          qp.append('include_artwork_data', '1');
+        }
+        const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+        const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(30000) });
+        const data = await resp.json();
+        const orders = data.orders || [];
+
+        for (const order of orders) {
+          const oid = String(order.order_id);
+          if (idSet.has(oid) && !found.has(oid)) {
+            found.set(oid, order);
+          }
+        }
+
+        // Stop if we found all requested IDs or no more results
+        if (found.size >= idSet.size) break;
+        if (orders.length < BATCH || offset + orders.length >= (data.total || 0)) break;
+        offset += orders.length;
+      } catch {
+        break;
+      }
+    }
+
+    return requestedIds.map(id => ({
+      jobId: id,
+      order: found.get(String(id).trim()) || null
+    }));
+  }
+
+  // Stitch enrichment: fetch jobs with full artwork/decoration data
   if (action === 'enrich_stitch' && Array.isArray(jobIds)) {
     try {
-      const PARALLEL = 5;
-      const allResults: any[] = [];
-      
-      for (let i = 0; i < jobIds.length; i += PARALLEL) {
-        const batch = jobIds.slice(i, i + PARALLEL);
-        const promises = batch.map(async (jobId: string) => {
-          try {
-            const qp = new URLSearchParams();
-            qp.append('username', username);
-            qp.append('password', password);
-            qp.append('field', '1');
-            qp.append('condition', '1');
-            qp.append('string', String(jobId).trim());
-            qp.append('limit', '1');
-            qp.append('include_workflow_data', '1');
-            qp.append('include_product_data', '1');
-            qp.append('include_decoration_data', '1');
-            qp.append('include_artwork_data', '1');
-            qp.append('skip_login_token', '1');
-            const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-            const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-            const data = await resp.json();
-            const order = data.orders?.[0];
-            if (order) return { jobId, order };
-          } catch { }
-          return { jobId, order: null };
-        });
-        const results = await Promise.all(promises);
-        allResults.push(...results);
-      }
-      
-      return res.status(200).json({ results: allResults });
+      const results = await fetchOrdersByIds(jobIds, true);
+      return res.status(200).json({ results });
     } catch (error: any) {
       return res.status(500).json({ error: 'Stitch enrichment failed', details: error.message });
     }
   }
 
-  // Bulk fetch: fetch multiple jobs by ID in parallel on the server
+  // Bulk fetch: fetch multiple jobs by ID
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
-      const PARALLEL = 10;
-      const allResults: any[] = [];
-      
-      for (let i = 0; i < jobIds.length; i += PARALLEL) {
-        const batch = jobIds.slice(i, i + PARALLEL);
-        const promises = batch.map(async (jobId: string) => {
-          const fields = ['1', '2', '7'];
-          for (const field of fields) {
-            try {
-              const qp = new URLSearchParams();
-              qp.append('username', username);
-              qp.append('password', password);
-              qp.append('field', field);
-              qp.append('condition', '1');
-              qp.append('string', String(jobId).trim());
-              qp.append('criteria', String(jobId).trim());
-              qp.append('limit', '1');
-              qp.append('include_workflow_data', '1');
-              qp.append('skip_login_token', '1');
-              const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-              const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-              const data = await resp.json();
-              const order = data.orders?.[0];
-              if (order) return { jobId, order };
-            } catch { }
-          }
-          return { jobId, order: null };
-        });
-        const results = await Promise.all(promises);
-        allResults.push(...results);
-      }
-      
-      return res.status(200).json({ results: allResults });
+      const results = await fetchOrdersByIds(jobIds, false);
+      return res.status(200).json({ results });
     } catch (error: any) {
       return res.status(500).json({ error: 'Bulk fetch failed', details: error.message });
     }
