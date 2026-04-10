@@ -64,56 +64,92 @@ function normaliseDecoType(raw: string | undefined | null): string | undefined {
     return raw.toUpperCase();
 }
 
-function extractDecorationInfo(line: any): { decorationType?: string; stitchCount?: number } {
-    let decorationType: string | undefined;
-    let stitchCount = 0;
+function extractProcessData(proc: any, result: { decorationType?: string; stitchCount: number }) {
+    // Decoration method / type from process
+    const method = proc.decoration_method || proc.process_type || proc.type || proc.method || proc.name || '';
+    if (method && !result.decorationType) result.decorationType = normaliseDecoType(method);
 
-    // Try processes array (Deco Network structure: line.processes[].text_items[].stitch_count)
-    const processes = line.processes || line.decorations_data || line.decoration_processes || [];
-    if (Array.isArray(processes)) {
-        for (const proc of processes) {
-            // Decoration method from process
-            const method = proc.decoration_method || proc.process_type || proc.type || proc.method || proc.name || '';
-            if (method && !decorationType) decorationType = normaliseDecoType(method);
+    // Stitch count from text_items
+    const textItems = proc.text_items || proc.texts || [];
+    if (Array.isArray(textItems)) {
+        for (const ti of textItems) {
+            const sc = parseInt(ti.stitch_count || ti.stitchCount || ti.stitch_total || 0);
+            if (sc > 0) result.stitchCount += sc;
+        }
+    }
+    // Stitch count directly on process
+    const procSc = parseInt(proc.stitch_count || proc.stitchCount || proc.total_stitches || 0);
+    if (procSc > 0) result.stitchCount += procSc;
 
-            // Stitch count from text_items
-            const textItems = proc.text_items || proc.texts || [];
-            if (Array.isArray(textItems)) {
-                for (const ti of textItems) {
-                    const sc = parseInt(ti.stitch_count || ti.stitchCount || ti.stitch_total || 0);
-                    if (sc > 0) stitchCount += sc;
-                }
-            }
-            // Stitch count directly on process
-            const procSc = parseInt(proc.stitch_count || proc.stitchCount || proc.total_stitches || 0);
-            if (procSc > 0) stitchCount += procSc;
+    // Digitization stitch count (from artwork jobs on this process)
+    const digSc = parseInt(proc.get_digitization_stitch_count || proc.digitization_stitch_count || 0);
+    if (digSc > 0 && result.stitchCount === 0) result.stitchCount = digSc;
 
-            // Design items / artwork (may contain stitch count)
-            const designs = proc.design_items || proc.designs || proc.artworks || [];
-            if (Array.isArray(designs)) {
-                for (const d of designs) {
-                    const dsc = parseInt(d.stitch_count || d.stitchCount || 0);
-                    if (dsc > 0) stitchCount += dsc;
+    // Design items / artwork (may contain stitch count)
+    const designs = proc.design_items || proc.designs || proc.artworks || [];
+    if (Array.isArray(designs)) {
+        for (const d of designs) {
+            const dsc = parseInt(d.stitch_count || d.stitchCount || d.get_digitization_stitch_count || 0);
+            if (dsc > 0) result.stitchCount += dsc;
+        }
+    }
+}
+
+function extractDecorationInfo(line: any, job?: any): { decorationType?: string; stitchCount?: number } {
+    const result = { decorationType: undefined as string | undefined, stitchCount: 0 };
+
+    // === Path 1: Flat processes on line (line.processes[]) ===
+    const flatProcesses = line.processes || line.decorations_data || line.decoration_processes || [];
+    if (Array.isArray(flatProcesses)) {
+        for (const proc of flatProcesses) extractProcessData(proc, result);
+    }
+
+    // === Path 2: Nested views → areas → processes (Deco template structure) ===
+    const views = line.views || line.artwork_views || [];
+    if (Array.isArray(views)) {
+        for (const view of views) {
+            const areas = view.areas || view.decoration_areas || [];
+            if (Array.isArray(areas)) {
+                for (const area of areas) {
+                    const procs = area.processes || area.decoration_processes || [];
+                    if (Array.isArray(procs)) {
+                        for (const proc of procs) extractProcessData(proc, result);
+                    }
                 }
             }
         }
     }
 
-    // Fallback: decoration_details string or decoration_method field
-    if (!decorationType) {
+    // === Path 3: Artwork jobs at order level (job.artwork_jobs[] / job.jobs[]) ===
+    if (job) {
+        const artJobs = job.artwork_jobs || job.jobs || job.artwork?.jobs || [];
+        if (Array.isArray(artJobs)) {
+            for (const aj of artJobs) {
+                // process_name = decoration type
+                const pn = aj.process_name || aj.decoration_method || '';
+                if (pn && !result.decorationType) result.decorationType = normaliseDecoType(pn);
+                // Digitization stitch count
+                const dsc = parseInt(aj.get_digitization_stitch_count || aj.digitization_stitch_count || aj.stitch_count || 0);
+                if (dsc > 0 && result.stitchCount === 0) result.stitchCount = dsc;
+            }
+        }
+    }
+
+    // === Path 4: product_type / decoration_method fields on the line ===
+    if (!result.decorationType) {
         const dd = typeof line.decoration_details === 'string' ? line.decoration_details
             : typeof line.decorations === 'string' ? line.decorations
-            : line.decoration_method || line.process_type || '';
-        decorationType = normaliseDecoType(dd);
+            : line.decoration_method || line.process_type || line.product_type || '';
+        result.decorationType = normaliseDecoType(dd);
     }
 
-    // Fallback: line-level stitch count
-    if (stitchCount === 0) {
-        const lineSc = parseInt(line.stitch_count || line.stitchCount || line.total_stitches || 0);
-        if (lineSc > 0) stitchCount = lineSc;
+    // === Path 5: line-level stitch count ===
+    if (result.stitchCount === 0) {
+        const lineSc = parseInt(line.stitch_count || line.stitchCount || line.total_stitches || line.digitization_stitch_count || 0);
+        if (lineSc > 0) result.stitchCount = lineSc;
     }
 
-    return { decorationType, stitchCount: stitchCount > 0 ? stitchCount : undefined };
+    return { decorationType: result.decorationType, stitchCount: result.stitchCount > 0 ? result.stitchCount : undefined };
 }
 
 const parseDecoItems = (job: any): DecoItem[] => {
@@ -139,7 +175,7 @@ const parseDecoItems = (job: any): DecoItem[] => {
         if (!line || (line.item_type !== 0 && line.item_type !== 25)) return;
         let colorName = line.product_color?.name || '';
         const potentialEan = line.barcode || line.ean || line.gtin || line.upc || line.product?.barcode || '';
-        const decoInfo = extractDecorationInfo(line);
+        const decoInfo = extractDecorationInfo(line, job);
         if (line.workflow_items?.length > 0) {
             line.workflow_items.forEach((wf: any) => {
                 let variantName = wf.option_id && optionNameMap[wf.option_id] ? standardizeSize(optionNameMap[wf.option_id]) : '';
@@ -459,6 +495,38 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
+    }
+    // Debug: log raw structure of first job so we can see where decoration/stitch data lives
+    if (allDeco.length > 0) {
+        const sample = allDeco[0];
+        const linesSample = (sample.order_lines || []).slice(0, 1).map((l: any) => ({
+            product_name: l.product_name, item_type: l.item_type,
+            decoration_details: l.decoration_details, decorations: l.decorations,
+            decoration_method: l.decoration_method, process_type: l.process_type,
+            product_type: l.product_type,
+            stitch_count: l.stitch_count, total_stitches: l.total_stitches,
+            digitization_stitch_count: l.digitization_stitch_count,
+            has_processes: !!l.processes, processes_length: (l.processes || []).length,
+            has_views: !!l.views, views_length: (l.views || []).length,
+            has_artwork_views: !!l.artwork_views,
+            processes_sample: (l.processes || []).slice(0, 1),
+            views_sample: (l.views || []).slice(0, 1).map((v: any) => ({
+                name: v.name, has_areas: !!v.areas, areas_length: (v.areas || []).length,
+                areas_sample: (v.areas || []).slice(0, 1).map((a: any) => ({
+                    name: a.name, has_processes: !!a.processes, processes_length: (a.processes || []).length,
+                    processes_sample: (a.processes || []).slice(0, 1),
+                })),
+            })),
+            top_level_keys: Object.keys(l).sort(),
+        }));
+        console.log('[DECO DEBUG] Raw job sample:', JSON.stringify({
+            order_id: sample.order_id, job_name: sample.job_name,
+            has_artwork_jobs: !!sample.artwork_jobs, artwork_jobs_length: (sample.artwork_jobs || []).length,
+            has_jobs: !!sample.jobs, has_artwork: !!sample.artwork,
+            artwork_jobs_sample: (sample.artwork_jobs || sample.jobs || sample.artwork?.jobs || []).slice(0, 1),
+            top_level_keys: Object.keys(sample).sort(),
+            order_lines_sample: linesSample,
+        }, null, 2));
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
