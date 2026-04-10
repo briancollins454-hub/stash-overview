@@ -573,11 +573,7 @@ const App: React.FC = () => {
                 try {
                     setSyncStatusMsg('Loading stitch cache...');
                     const stitchCache = await fetchStitchCache();
-                    // Find jobs that need enrichment (not in cache)
-                    const needsEnrichment = mergedDecoJobs
-                        .filter(j => !stitchCache.has(j.jobNumber))
-                        .map(j => j.jobNumber);
-
+                    
                     // Apply cached data to existing jobs first
                     if (stitchCache.size > 0) {
                         setRawDecoJobs(prev => {
@@ -588,7 +584,7 @@ const App: React.FC = () => {
                                 const updatedItems = job.items.map((item, idx) => {
                                     const match = cached.decoration_data.items.find(c => c.lineIndex === idx);
                                     if (!match) return item;
-                                    if (item.decorationType && item.stitchCount) return item; // already has data
+                                    if (item.decorationType && item.stitchCount) return item;
                                     changed = true;
                                     return {
                                         ...item,
@@ -603,6 +599,19 @@ const App: React.FC = () => {
                             return updated;
                         });
                     }
+
+                    // Find jobs needing enrichment: not in cache OR in cache but with empty items AND job still lacks decoration types
+                    const needsEnrichment = mergedDecoJobs
+                        .filter(j => {
+                            const cached = stitchCache.get(j.jobNumber);
+                            // Not in cache at all → needs enrichment
+                            if (!cached) return true;
+                            // In cache with data → skip
+                            if (cached.decoration_data?.items?.length > 0) return false;
+                            // In cache but empty, AND job still has no decoration types → re-enrich
+                            return !j.items.some(i => i.decorationType);
+                        })
+                        .map(j => j.jobNumber);
 
                     if (needsEnrichment.length > 0) {
                         setSyncStatusMsg(`Enriching stitch data: 0/${needsEnrichment.length}...`);

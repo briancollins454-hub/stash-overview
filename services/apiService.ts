@@ -43,16 +43,21 @@ const mapDecoStatus = (status: string | number): string => {
 
 /* ---------- Decoration / stitch extraction ---------- */
 const DECO_TYPE_MAP: Record<string, string> = {
-    embroidery: 'EMB', embroider: 'EMB', emb: 'EMB',
+    embroidery: 'EMB', embroider: 'EMB', emb: 'EMB', stitched: 'EMB',
     dtf: 'DTF', 'direct to film': 'DTF',
     flex: 'FLEX',
-    transfer: 'TRANSFER', 'heat transfer': 'TRANSFER', 'heat press': 'TRANSFER',
+    transfer: 'TRANSFER', 'heat transfer': 'TRANSFER', 'heat press': 'TRANSFER', 'heat applied': 'TRANSFER',
     uv: 'UV', 'uv print': 'UV',
     screen: 'SCREEN', 'screen print': 'SCREEN', screenprint: 'SCREEN',
     freeform: 'FREEFORM', 'free form': 'FREEFORM',
     vinyl: 'VINYL',
-    sublimation: 'SUBLIMATION', sublim: 'SUBLIMATION',
+    sublimation: 'SUBLIMATION', sublim: 'SUBLIMATION', 'dye sub': 'SUBLIMATION',
     dtg: 'DTG', 'direct to garment': 'DTG',
+    print: 'PRINT', printed: 'PRINT',
+    laser: 'LASER', engraving: 'LASER', engrave: 'LASER',
+    rhinestone: 'RHS', 'rhine stone': 'RHS', rhs: 'RHS',
+    patch: 'PATCH', patches: 'PATCH',
+    applique: 'APPLIQUE', appliqué: 'APPLIQUE',
     none: 'NONE', 'no decoration': 'NONE',
 };
 function normaliseDecoType(raw: string | undefined | null): string | undefined {
@@ -61,7 +66,9 @@ function normaliseDecoType(raw: string | undefined | null): string | undefined {
     for (const [key, val] of Object.entries(DECO_TYPE_MAP)) {
         if (lower.includes(key)) return val;
     }
-    return raw.toUpperCase();
+    // Only use raw as-is if it looks like a short process name (not a concatenated string)
+    if (raw.length <= 20 && !raw.includes(' ')) return raw.toUpperCase();
+    return undefined;
 }
 
 function extractProcessData(proc: any, result: { decorationType?: string; stitchCount: number }) {
@@ -147,6 +154,17 @@ export function extractDecorationInfo(line: any, job?: any): { decorationType?: 
     if (result.stitchCount === 0) {
         const lineSc = parseInt(line.stitch_count || line.stitchCount || line.total_stitches || line.digitization_stitch_count || 0);
         if (lineSc > 0) result.stitchCount = lineSc;
+    }
+
+    // === Path 6: Infer from product name / supplier ===
+    if (!result.decorationType) {
+        const nameStr = [line.product_name, line.product_supplier_name, line.supplier_name, job?.job_name].filter(Boolean).join(' ');
+        result.decorationType = normaliseDecoType(nameStr);
+    }
+
+    // === Path 7: If decoration_unit_price > 0, there IS decoration — mark as unknown ===
+    if (!result.decorationType && parseFloat(line.decoration_unit_price) > 0) {
+        result.decorationType = 'DECO';
     }
 
     return { decorationType: result.decorationType, stitchCount: result.stitchCount > 0 ? result.stitchCount : undefined };
