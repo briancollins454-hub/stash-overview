@@ -127,11 +127,15 @@ export interface PrioritySection {
   statuses: string[];
   icon: string;
   color: string;
+  /** What metric the time-frame filter uses for this section */
+  filterMetric: 'days_since_ordered' | 'days_until_due' | 'days_past_due';
+  /** Column header for the "Days" column in the table */
+  daysLabel: string;
 }
 
 export const PRIORITY_SECTIONS: PrioritySection[] = [
-  { key: 'po',         title: 'Awaiting PO',         subtitle: 'Purchase orders not yet raised — blocks everything',         statuses: ['Not Ordered'],                         icon: '📋', color: 'rose' },
-  { key: 'stock',      title: 'Awaiting Stock',       subtitle: 'Garments or materials not yet available',                    statuses: ['Awaiting Stock'],                      icon: '📦', color: 'amber' },
-  { key: 'processing', title: 'Awaiting Processing',  subtitle: 'Orders pending production pickup',                          statuses: ['Awaiting Processing'],                 icon: '⚙️', color: 'blue' },
-  { key: 'shipping',   title: 'Awaiting Shipping',    subtitle: 'Production complete — ready to dispatch or collect',        statuses: ['Ready for Shipping', 'Completed'],     icon: '🚚', color: 'green' },
+  { key: 'po',         title: 'Awaiting PO',         subtitle: 'Purchase orders not yet raised — blocks everything',   statuses: ['Not Ordered'],                     icon: '📋', color: 'rose',   filterMetric: 'days_since_ordered', daysLabel: 'Waiting' },
+  { key: 'stock',      title: 'Awaiting Stock',       subtitle: 'Garments or materials not yet available',              statuses: ['Awaiting Stock'],                  icon: '📦', color: 'amber',  filterMetric: 'days_until_due',     daysLabel: 'Ship By' },
+  { key: 'processing', title: 'Awaiting Processing',  subtitle: 'Orders pending production pickup',                    statuses: ['Awaiting Processing'],             icon: '⚙️', color: 'blue',   filterMetric: 'days_until_due',     daysLabel: 'Ship By' },
+  { key: 'shipping',   title: 'Awaiting Shipping',    subtitle: 'Production complete — ready to dispatch or collect',  statuses: ['Ready for Shipping', 'Completed'], icon: '🚚', color: 'green',  filterMetric: 'days_past_due',      daysLabel: 'Waiting' },
 ];

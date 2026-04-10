@@ -15,9 +15,16 @@ interface Props {
 const isCancelled = (j: DecoJob) =>
   (j.status || '').toLowerCase() === 'cancelled' || j.paymentStatus === '7';
 
-const fmt = (n: number) => '\u00a3' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtK = (n: number) => n >= 1000 ? '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : fmt(n);
-const s = (n: number) => n !== 1 ? 's' : '';
+const fmtK = (n: number) => {
+  if (n >= 1000) return '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return '\u00a3' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const s = (n: number) => (n !== 1 ? 's' : '');
+const fmtDate = (d: string | undefined) => {
+  if (!d) return '\u2014';
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? '\u2014' : dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+};
 
 const extractSP = (sp: any): string | undefined => {
   if (!sp) return undefined;
@@ -31,25 +38,90 @@ const extractSP = (sp: any): string | undefined => {
   return String(sp);
 };
 
-// Time frame options
 const TIME_FRAMES = [
-  { id: 'all',   label: 'All Time',  days: null },
-  { id: '90d',   label: '90 Days',   days: 90 },
-  { id: '30d',   label: '30 Days',   days: 30 },
-  { id: '14d',   label: '14 Days',   days: 14 },
-  { id: '7d',    label: '7 Days',    days: 7 },
-  { id: '3d',    label: '3 Days',    days: 3 },
-  { id: 'today', label: 'Today',     days: 0 },
+  { id: 'all', label: 'All', days: null },
+  { id: '90d', label: '90d', days: 90 },
+  { id: '30d', label: '30d', days: 30 },
+  { id: '14d', label: '14d', days: 14 },
+  { id: '7d',  label: '7d',  days: 7 },
+  { id: '5d',  label: '5d',  days: 5 },
+  { id: '3d',  label: '3d',  days: 3 },
 ] as const;
 
 type TimeFrameId = typeof TIME_FRAMES[number]['id'];
+
+/* ---------- Per-section metric helpers ---------- */
+
+function getMetricDays(job: DecoJob, section: PrioritySection, now: Date): number | null {
+  const due = pd(job.dateDue) || pd(job.productionDueDate);
+  const ordered = pd(job.dateOrdered);
+  switch (section.filterMetric) {
+    case 'days_since_ordered':
+      return ordered ? daysBetween(ordered, now) : null;
+    case 'days_until_due':
+      return due ? daysBetween(now, due) : null;
+    case 'days_past_due':
+      return due ? daysBetween(due, now) : null;
+    default:
+      return null;
+  }
+}
+
+function formatMetric(days: number | null, section: PrioritySection): string {
+  if (days === null) return '\u2014';
+  switch (section.filterMetric) {
+    case 'days_since_ordered':
+      return `${days}d`;
+    case 'days_until_due':
+      if (days < 0) return `${Math.abs(days)}d over`;
+      if (days === 0) return 'Today';
+      return `${days}d left`;
+    case 'days_past_due':
+      if (days <= 0) return 'Due today';
+      return `${days}d`;
+    default:
+      return `${days}d`;
+  }
+}
+
+function metricColor(days: number | null, section: PrioritySection): string {
+  if (days === null) return 'text-white/20';
+  switch (section.filterMetric) {
+    case 'days_since_ordered':
+      return days >= 10 ? 'text-red-400 font-bold' : days >= 5 ? 'text-orange-400 font-bold' : days >= 3 ? 'text-amber-400' : 'text-white/50';
+    case 'days_until_due':
+      if (days < 0) return Math.abs(days) >= 5 ? 'text-red-400 font-bold' : 'text-orange-400 font-bold';
+      return days <= 3 ? 'text-amber-400 font-bold' : 'text-white/50';
+    case 'days_past_due':
+      return days >= 10 ? 'text-red-400 font-bold' : days >= 5 ? 'text-orange-400 font-bold' : days >= 3 ? 'text-amber-400' : 'text-white/50';
+    default:
+      return 'text-white/50';
+  }
+}
+
+function passesFilter(job: DecoJob, section: PrioritySection, filterDays: number | null, now: Date): boolean {
+  if (filterDays === null) return true;
+  const metric = getMetricDays(job, section, now);
+  if (metric === null) return true;
+  switch (section.filterMetric) {
+    case 'days_since_ordered':
+      return metric >= filterDays;
+    case 'days_until_due':
+      return metric <= filterDays;
+    case 'days_past_due':
+      return metric >= filterDays;
+    default:
+      return true;
+  }
+}
+
+/* ---------- Main component ---------- */
 
 export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
   const [timeFrame, setTimeFrame] = useState<TimeFrameId>('all');
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
 
-  // Load cached finance data
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
       if (cached) setFinanceJobs(cached);
@@ -58,7 +130,6 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
 
   const now = useMemo(() => new Date(), []);
 
-  // Merge prop data + cache (props override)
   const allJobs = useMemo(() => {
     const map = new Map<string, DecoJob>();
     financeJobs.forEach(j => map.set(j.id, j));
@@ -66,7 +137,6 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
     return Array.from(map.values());
   }, [decoJobs, financeJobs]);
 
-  // Active jobs (not cancelled, not shipped)
   const active = useMemo(() =>
     allJobs.filter(j => {
       if (isCancelled(j)) return false;
@@ -75,68 +145,65 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
     }),
   [allJobs]);
 
-  // Filter by time frame (based on dateOrdered)
-  const filtered = useMemo(() => {
-    const frame = TIME_FRAMES.find(t => t.id === timeFrame);
-    if (!frame || frame.days === null) return active;
-    if (frame.days === 0) {
-      const t0 = new Date(now); t0.setHours(0, 0, 0, 0);
-      return active.filter(j => {
-        const o = pd(j.dateOrdered);
-        return o && o >= t0;
-      });
-    }
-    const cutoff = new Date(now);
-    cutoff.setDate(cutoff.getDate() - frame.days);
-    return active.filter(j => {
-      const o = pd(j.dateOrdered);
-      return o && o >= cutoff;
-    });
-  }, [active, timeFrame, now]);
+  const allScored = useMemo(() =>
+    active.map(j => calculatePriority(j, now)),
+  [active, now]);
 
-  // Score all filtered jobs
-  const scored = useMemo(() =>
-    filtered.map(j => calculatePriority(j, now)).sort((a, b) => b.score - a.score),
-  [filtered, now]);
+  const filterDays = TIME_FRAMES.find(t => t.id === timeFrame)?.days ?? null;
 
-  // Build sections
   const sections = useMemo(() => {
     return PRIORITY_SECTIONS.map(sec => {
-      const items = scored.filter(r => sec.statuses.includes(r.job.status || ''));
+      const allInStatus = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
+      const items = allInStatus.filter(r => passesFilter(r.job, sec, filterDays, now));
+      items.sort((a, b) => {
+        if (a.score > 0 && b.score > 0) return b.score - a.score;
+        if (a.score > 0) return -1;
+        if (b.score > 0) return 1;
+        const da = pd(a.job.dateOrdered)?.getTime() || 0;
+        const db = pd(b.job.dateOrdered)?.getTime() || 0;
+        return db - da;
+      });
       const totalValue = items.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
       const criticalCount = items.filter(r => r.urgency === 'critical').length;
       const highCount = items.filter(r => r.urgency === 'high').length;
-      return { ...sec, items, totalValue, criticalCount, highCount };
+      return { ...sec, items, totalValue, criticalCount, highCount, totalInStatus: allInStatus.length };
     });
-  }, [scored]);
+  }, [allScored, filterDays, now]);
 
-  // Uncategorised jobs (statuses not covered by sections)
   const coveredStatuses = new Set(PRIORITY_SECTIONS.flatMap(s => s.statuses));
   const uncategorised = useMemo(() =>
-    scored.filter(r => !coveredStatuses.has(r.job.status || '') && r.score > 0),
-  [scored]);
+    allScored.filter(r => !coveredStatuses.has(r.job.status || '') && r.score > 0)
+      .sort((a, b) => b.score - a.score),
+  [allScored]);
 
-  // Summary stats
-  const totalScored = scored.filter(r => r.score > 0).length;
-  const totalCritical = scored.filter(r => r.urgency === 'critical').length;
-  const totalHigh = scored.filter(r => r.urgency === 'high').length;
-  const totalValue = scored.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  const totalOrders = sections.reduce((a, s) => a + s.items.length, 0);
+  const totalCritical = sections.reduce((a, s) => a + s.criticalCount, 0);
+  const totalHigh = sections.reduce((a, s) => a + s.highCount, 0);
+  const totalValue = sections.reduce((a, s) => a + s.totalValue, 0);
 
-  const toggleSection = (key: string) => setExpandedSection(prev => prev === key ? null : key);
+  const toggleSection = (key: string) => setExpandedSection(prev => (prev === key ? null : key));
+
+  const filterExplain = (sec: PrioritySection): string => {
+    if (filterDays === null) return '';
+    switch (sec.filterMetric) {
+      case 'days_since_ordered': return `Orders waiting ${filterDays}+ days`;
+      case 'days_until_due': return `Due within ${filterDays} days or overdue`;
+      case 'days_past_due': return `Waiting ${filterDays}+ days to ship`;
+      default: return '';
+    }
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 pb-12">
-      {/* ── Header ─────────────────────────────────────────────────────── */}
+      {/* Header */}
       <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 px-6 py-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-lg font-black text-white tracking-tight">Priority Board</h1>
             <p className="text-xs text-white/40 mt-0.5">
-              {totalScored} order{s(totalScored)} flagged &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
+              {totalOrders} order{s(totalOrders)} &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
             </p>
           </div>
-
-          {/* Time frame buttons */}
           <div className="flex flex-wrap gap-1.5">
             {TIME_FRAMES.map(tf => (
               <button
@@ -153,11 +220,9 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
             ))}
           </div>
         </div>
-
-        {/* Urgency breakdown bar */}
-        <div className="mt-4 flex gap-3">
+        <div className="mt-4 flex gap-3 flex-wrap">
           {(['critical', 'high', 'medium', 'low'] as Urgency[]).map(u => {
-            const count = scored.filter(r => r.urgency === u).length;
+            const count = allScored.filter(r => r.urgency === u && coveredStatuses.has(r.job.status || '')).length;
             if (count === 0) return null;
             const us = URGENCY_STYLE[u];
             return (
@@ -171,7 +236,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
         </div>
       </div>
 
-      {/* ── Status Sections ────────────────────────────────────────────── */}
+      {/* Status sections */}
       {sections.map(sec => (
         <SectionCard
           key={sec.key}
@@ -180,50 +245,75 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
           totalValue={sec.totalValue}
           criticalCount={sec.criticalCount}
           highCount={sec.highCount}
+          totalInStatus={sec.totalInStatus}
           expanded={expandedSection === sec.key}
           onToggle={() => toggleSection(sec.key)}
           onNavigate={onNavigateToOrder}
           now={now}
+          filterHint={filterExplain(sec)}
         />
       ))}
 
-      {/* ── Other Flagged Orders ───────────────────────────────────────── */}
+      {/* Uncategorised flagged */}
       {uncategorised.length > 0 && (
-        <SectionCard
-          section={{ key: 'other', title: 'Other Flagged', subtitle: 'Orders in other statuses with priority flags', icon: '🔍', color: 'indigo' }}
-          items={uncategorised}
-          totalValue={uncategorised.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0)}
-          criticalCount={uncategorised.filter(r => r.urgency === 'critical').length}
-          highCount={uncategorised.filter(r => r.urgency === 'high').length}
-          expanded={expandedSection === 'other'}
-          onToggle={() => toggleSection('other')}
-          onNavigate={onNavigateToOrder}
-          now={now}
-        />
+        <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 overflow-hidden">
+          <button className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors" onClick={() => toggleSection('other')}>
+            <div className="flex items-center gap-3">
+              <span className="text-xl">&#128269;</span>
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-indigo-300">Other Flagged</h2>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-500/10 text-indigo-400">{uncategorised.length}</span>
+                </div>
+                <p className="text-[11px] text-white/40 mt-0.5">Orders in other statuses with priority flags</p>
+              </div>
+            </div>
+            <svg className={`w-4 h-4 text-white/30 transition-transform ${expandedSection === 'other' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {expandedSection === 'other' && (
+            <div className="border-t border-white/5 divide-y divide-white/[0.03]">
+              {uncategorised.map((item, i) => {
+                const us = URGENCY_STYLE[item.urgency];
+                return (
+                  <div key={item.job.id} className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors" onClick={() => onNavigateToOrder(item.job.jobNumber)}>
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${us.dot}`}>{i + 1}</span>
+                    <span className="text-[10px] font-mono text-indigo-400/70 shrink-0">#{item.job.jobNumber}</span>
+                    <span className="text-xs text-white/70 truncate flex-1">{item.job.customerName}</span>
+                    <span className={`text-[9px] px-2 py-0.5 rounded-full ${us.pill}`}>{item.reason}</span>
+                    <span className="text-[10px] text-white/50">{item.job.status}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
-      {/* ── Empty state ────────────────────────────────────────────────── */}
-      {totalScored === 0 && (
+      {/* Empty */}
+      {totalOrders === 0 && uncategorised.length === 0 && (
         <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 px-6 py-12 text-center">
-          <p className="text-white/50 text-sm">No priority items found for this time frame.</p>
-          <p className="text-white/25 text-xs mt-1">Try selecting a wider time range.</p>
+          <p className="text-white/50 text-sm">No orders found for this filter.</p>
+          <p className="text-white/25 text-xs mt-1">Try selecting &quot;All&quot; to see everything.</p>
         </div>
       )}
     </div>
   );
 }
 
-// ── Section Card Component ─────────────────────────────────────────────────
+/* ---------- Section Card ---------- */
+
 interface SectionCardProps {
-  section: Pick<typeof PRIORITY_SECTIONS[number], 'key' | 'title' | 'subtitle' | 'icon' | 'color'>;
+  section: PrioritySection;
   items: PriorityResult[];
   totalValue: number;
   criticalCount: number;
   highCount: number;
+  totalInStatus: number;
   expanded: boolean;
   onToggle: () => void;
   onNavigate: (orderNum: string) => void;
   now: Date;
+  filterHint: string;
 }
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
@@ -234,22 +324,23 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
   indigo: { header: 'text-indigo-300', border: 'border-indigo-500/20', badge: 'bg-indigo-500/10 text-indigo-400' },
 };
 
-function SectionCard({ section, items, totalValue, criticalCount, highCount, expanded, onToggle, onNavigate, now }: SectionCardProps) {
+const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
+
+function SectionCard({ section, items, totalValue, criticalCount, highCount, totalInStatus, expanded, onToggle, onNavigate, now, filterHint }: SectionCardProps) {
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
   return (
     <div className={`bg-[#1e1e3a] rounded-2xl border ${cm.border} overflow-hidden`}>
-      {/* Header — always visible */}
-      <button
-        className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
-        onClick={onToggle}
-      >
+      {/* Header */}
+      <button className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors" onClick={onToggle}>
         <div className="flex items-center gap-3">
           <span className="text-xl">{section.icon}</span>
           <div className="text-left">
             <div className="flex items-center gap-2">
               <h2 className={`text-sm font-bold ${cm.header}`}>{section.title}</h2>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${cm.badge}`}>{items.length}</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${cm.badge}`}>
+                {items.length}{items.length !== totalInStatus ? ` / ${totalInStatus}` : ''}
+              </span>
               {criticalCount > 0 && (
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/10 text-red-400 animate-pulse">{criticalCount} critical</span>
               )}
@@ -257,61 +348,67 @@ function SectionCard({ section, items, totalValue, criticalCount, highCount, exp
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-orange-500/10 text-orange-400">{highCount} high</span>
               )}
             </div>
-            <p className="text-[11px] text-white/40 mt-0.5">{section.subtitle} &middot; {fmtK(totalValue)}</p>
+            <p className="text-[11px] text-white/40 mt-0.5">
+              {section.subtitle} &middot; {fmtK(totalValue)}
+              {filterHint && <span className="text-white/25"> &middot; {filterHint}</span>}
+            </p>
           </div>
         </div>
         <svg className={`w-4 h-4 text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
       </button>
 
-      {/* Items table */}
+      {/* Table */}
       {expanded && (
         <div className="border-t border-white/5">
           {items.length === 0 ? (
-            <div className="px-5 py-6 text-center text-white/30 text-xs">No orders in this category for the selected time frame.</div>
+            <div className="px-5 py-6 text-center text-white/30 text-xs">No orders in this category{filterHint ? ' for this filter' : ''}.</div>
           ) : (
             <>
-              {/* Column header */}
-              <div className="grid grid-cols-[40px_70px_1fr_1fr_60px_100px_100px_80px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
-                <span>#</span><span>Order</span><span>Customer</span><span>Job Name</span><span>Score</span><span>Reason</span><span>Staff</span><span>Status</span><span className="text-right">Value</span>
+              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
+                <span>#</span>
+                <span>Order / Date</span>
+                <span>Customer / Job</span>
+                <span>{section.daysLabel}</span>
+                <span>Urgency</span>
+                <span>Reason</span>
+                <span>Staff</span>
+                <span className="text-right">Value</span>
               </div>
-              {/* Rows */}
               <div className="divide-y divide-white/[0.03]">
                 {items.map((item, i) => {
                   const us = URGENCY_STYLE[item.urgency];
-                  const due = pd(item.job.dateDue) || pd(item.job.productionDueDate);
-                  const dueStr = due ? `${daysBetween(due, now) > 0 ? daysBetween(due, now) + 'd ago' : due.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '—';
-                  const staff = extractSP(item.job.salesPerson) || '—';
+                  const staff = extractSP(item.job.salesPerson) || '\u2014';
+                  const metric = getMetricDays(item.job, section, now);
+                  const metricStr = formatMetric(metric, section);
+                  const mStyle = metricColor(metric, section);
                   return (
                     <div
                       key={item.job.id}
-                      className="grid grid-cols-[40px_70px_1fr_1fr_60px_100px_100px_80px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
+                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => onNavigate(item.job.jobNumber)}
                     >
-                      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${us.dot}${us.pulse}`}>{i + 1}</span>
-                      <span className="text-[10px] font-mono text-indigo-400/70">#{item.job.jobNumber}</span>
+                      <span className="text-[10px] text-white/20 font-mono">{i + 1}</span>
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-mono text-indigo-400/70 block">#{item.job.jobNumber}</span>
+                        <span className="text-[9px] text-white/25 block">{fmtDate(item.job.dateOrdered)}</span>
+                      </div>
                       <div className="min-w-0">
                         <span className="text-xs text-white/70 truncate block">{item.job.customerName}</span>
-                        <span className="text-[9px] text-white/25 block">Due: {dueStr}</span>
+                        <span className="text-[9px] text-white/30 truncate block" title={item.job.jobName}>{item.job.jobName || ''}</span>
                       </div>
-                      <span className="text-[10px] text-white/50 truncate" title={item.job.jobName}>{item.job.jobName || '—'}</span>
-                      <span className={`text-[11px] font-bold ${us.text}`}>{item.score}</span>
+                      <span className={`text-[10px] ${mStyle}`}>{metricStr}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold w-fit ${us.pill}${us.pulse}`}>{URGENCY_LABEL[item.urgency]}</span>
                       <div className="flex flex-wrap gap-0.5">
-                        {item.matchedRules.slice(0, 2).map((r, ri) => (
+                        {item.matchedRules.length > 0 ? item.matchedRules.slice(0, 2).map((r, ri) => (
                           <span key={ri} className={`text-[8px] px-1.5 py-0.5 rounded-full ${us.pill}`}>{r}</span>
-                        ))}
-                        {item.matchedRules.length > 2 && (
-                          <span className="text-[8px] px-1 text-white/20">+{item.matchedRules.length - 2}</span>
-                        )}
+                        )) : <span className="text-[8px] text-white/15">{'\u2014'}</span>}
                       </div>
                       <span className="text-[10px] text-white/40 truncate">{staff}</span>
-                      <span className="text-[10px] text-white/50">{item.job.status}</span>
                       <span className="text-[10px] text-white/30 text-right">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Section footer summary */}
               <div className="px-4 py-3 border-t border-white/5 flex items-center justify-between">
                 <span className="text-[10px] text-white/25">{items.length} order{s(items.length)} &middot; {fmtK(totalValue)} total</span>
                 <div className="flex gap-2">
