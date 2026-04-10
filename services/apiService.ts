@@ -41,6 +41,81 @@ const mapDecoStatus = (status: string | number): string => {
     return statusMap[statusNum] || 'Unknown';
 };
 
+/* ---------- Decoration / stitch extraction ---------- */
+const DECO_TYPE_MAP: Record<string, string> = {
+    embroidery: 'EMB', embroider: 'EMB', emb: 'EMB',
+    dtf: 'DTF', 'direct to film': 'DTF',
+    flex: 'FLEX',
+    transfer: 'TRANSFER', 'heat transfer': 'TRANSFER', 'heat press': 'TRANSFER',
+    uv: 'UV', 'uv print': 'UV',
+    screen: 'SCREEN', 'screen print': 'SCREEN', screenprint: 'SCREEN',
+    freeform: 'FREEFORM', 'free form': 'FREEFORM',
+    vinyl: 'VINYL',
+    sublimation: 'SUBLIMATION', sublim: 'SUBLIMATION',
+    dtg: 'DTG', 'direct to garment': 'DTG',
+    none: 'NONE', 'no decoration': 'NONE',
+};
+function normaliseDecoType(raw: string | undefined | null): string | undefined {
+    if (!raw) return undefined;
+    const lower = raw.toLowerCase().trim();
+    for (const [key, val] of Object.entries(DECO_TYPE_MAP)) {
+        if (lower.includes(key)) return val;
+    }
+    return raw.toUpperCase();
+}
+
+function extractDecorationInfo(line: any): { decorationType?: string; stitchCount?: number } {
+    let decorationType: string | undefined;
+    let stitchCount = 0;
+
+    // Try processes array (Deco Network structure: line.processes[].text_items[].stitch_count)
+    const processes = line.processes || line.decorations_data || line.decoration_processes || [];
+    if (Array.isArray(processes)) {
+        for (const proc of processes) {
+            // Decoration method from process
+            const method = proc.decoration_method || proc.process_type || proc.type || proc.method || proc.name || '';
+            if (method && !decorationType) decorationType = normaliseDecoType(method);
+
+            // Stitch count from text_items
+            const textItems = proc.text_items || proc.texts || [];
+            if (Array.isArray(textItems)) {
+                for (const ti of textItems) {
+                    const sc = parseInt(ti.stitch_count || ti.stitchCount || ti.stitch_total || 0);
+                    if (sc > 0) stitchCount += sc;
+                }
+            }
+            // Stitch count directly on process
+            const procSc = parseInt(proc.stitch_count || proc.stitchCount || proc.total_stitches || 0);
+            if (procSc > 0) stitchCount += procSc;
+
+            // Design items / artwork (may contain stitch count)
+            const designs = proc.design_items || proc.designs || proc.artworks || [];
+            if (Array.isArray(designs)) {
+                for (const d of designs) {
+                    const dsc = parseInt(d.stitch_count || d.stitchCount || 0);
+                    if (dsc > 0) stitchCount += dsc;
+                }
+            }
+        }
+    }
+
+    // Fallback: decoration_details string or decoration_method field
+    if (!decorationType) {
+        const dd = typeof line.decoration_details === 'string' ? line.decoration_details
+            : typeof line.decorations === 'string' ? line.decorations
+            : line.decoration_method || line.process_type || '';
+        decorationType = normaliseDecoType(dd);
+    }
+
+    // Fallback: line-level stitch count
+    if (stitchCount === 0) {
+        const lineSc = parseInt(line.stitch_count || line.stitchCount || line.total_stitches || 0);
+        if (lineSc > 0) stitchCount = lineSc;
+    }
+
+    return { decorationType, stitchCount: stitchCount > 0 ? stitchCount : undefined };
+}
+
 const parseDecoItems = (job: any): DecoItem[] => {
     if (!job || !job.order_lines || !Array.isArray(job.order_lines)) return [];
     const optionNameMap: {[key: number]: string} = {};
@@ -64,6 +139,7 @@ const parseDecoItems = (job: any): DecoItem[] => {
         if (!line || (line.item_type !== 0 && line.item_type !== 25)) return;
         let colorName = line.product_color?.name || '';
         const potentialEan = line.barcode || line.ean || line.gtin || line.upc || line.product?.barcode || '';
+        const decoInfo = extractDecorationInfo(line);
         if (line.workflow_items?.length > 0) {
             line.workflow_items.forEach((wf: any) => {
                 let variantName = wf.option_id && optionNameMap[wf.option_id] ? standardizeSize(optionNameMap[wf.option_id]) : '';
@@ -84,6 +160,8 @@ const parseDecoItems = (job: any): DecoItem[] => {
                     unitPrice: parseFloat(line.unit_price) || undefined,
                     totalPrice: parseFloat(line.total_price) || undefined,
                     decorationDetails: line.decoration_details || line.decorations || undefined,
+                    decorationType: decoInfo.decorationType,
+                    stitchCount: decoInfo.stitchCount,
                     assignedTo: (() => {
                         const raw = wf.assigned_to || wf.assigned_user || line.assigned_to;
                         if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');
@@ -111,6 +189,8 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 unitPrice: parseFloat(line.unit_price) || undefined,
                 totalPrice: parseFloat(line.total_price) || undefined,
                 decorationDetails: line.decoration_details || line.decorations || undefined,
+                decorationType: decoInfo.decorationType,
+                stitchCount: decoInfo.stitchCount,
                 assignedTo: (() => {
                     const raw = line.assigned_to;
                     if (raw && typeof raw === 'object') return raw.name || raw.full_name || raw.display_name || raw.username || String(raw.id || '');

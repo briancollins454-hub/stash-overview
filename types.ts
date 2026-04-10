@@ -116,6 +116,8 @@ export interface DecoItem {
   unitPrice?: number;
   totalPrice?: number;
   decorationDetails?: string;
+  decorationType?: string;      // EMB, DTF, FLEX, TRANSFER, UV, FREEFORM, NONE, etc.
+  stitchCount?: number;         // per-item stitch count (embroidery)
   assignedTo?: string;
   estimatedCompletion?: string;
   supplierId?: string;

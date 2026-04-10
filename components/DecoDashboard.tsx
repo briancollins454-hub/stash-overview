@@ -9,7 +9,8 @@ import {
     Search, Loader2, AlertCircle, Shirt, 
     Truck, Check, X, Box, User, ClipboardList, LayoutList, ChevronLeft,
     ChevronDown, ChevronUp, Link as LinkIcon, ShoppingBag, ExternalLink, RefreshCw, Cog,
-    Calendar, Clock, Target, CheckCircle2, History, ClipboardCheck, PieChart as PieChartIcon
+    Calendar, Clock, Target, CheckCircle2, History, ClipboardCheck, PieChart as PieChartIcon,
+    Timer, Scissors, Hash, DollarSign
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
@@ -77,6 +78,106 @@ const StatusCell = ({ type, status }: { type: 'ordered' | 'received' | 'produced
     }
     if (status === 0) showTick = false;
     return <div className="flex items-center justify-center h-full">{showTick ? <Check className={`w-5 h-5 ${tickColor} stroke-[3]`} /> : <span className="w-5 h-5 block"></span>}</div>;
+};
+
+/* ---------- Production time estimation ---------- */
+// Machines: 2x single head, 1x 6-head. 600 stitches/min per head.
+// Big run = 6+ garments → use 6-head. Otherwise single head.
+const STITCHES_PER_MIN = 600;
+const HEADS_SINGLE = 1;
+const HEADS_MULTI = 6;
+const BIG_RUN_THRESHOLD = 6;
+const SETUP_BUFFER = 1.15; // 15% setup/hooping/thread change buffer
+// Default minutes per item for non-embroidery types
+const DEFAULT_TIMES: Record<string, number> = {
+    DTF: 2, FLEX: 2, TRANSFER: 2, SCREEN: 1, UV: 3, VINYL: 2,
+    SUBLIMATION: 2, DTG: 3, FREEFORM: 5, NONE: 0,
+};
+
+interface ProductionEstimate {
+    totalMinutes: number;
+    machineType: 'single' | '6-head';
+    stitchesPerItem: number;
+    totalStitches: number;
+    isEmbroidery: boolean;
+}
+
+function estimateProductionTime(items: import('../types').DecoItem[]): ProductionEstimate {
+    // Sum stitch counts across all items, detect decoration type
+    let totalStitches = 0;
+    let totalQty = 0;
+    let stitchesPerItem = 0;
+    let hasEmbroidery = false;
+    let nonEmbMinutes = 0;
+
+    items.forEach(item => {
+        totalQty += item.quantity;
+        if (item.stitchCount && item.stitchCount > 0) {
+            hasEmbroidery = true;
+            totalStitches += item.stitchCount * item.quantity;
+            stitchesPerItem = Math.max(stitchesPerItem, item.stitchCount);
+        } else {
+            const dt = item.decorationType || '';
+            const perItem = DEFAULT_TIMES[dt] ?? 3;
+            nonEmbMinutes += perItem * item.quantity;
+        }
+    });
+
+    if (hasEmbroidery) {
+        const heads = totalQty >= BIG_RUN_THRESHOLD ? HEADS_MULTI : HEADS_SINGLE;
+        const runs = Math.ceil(totalQty / heads);
+        const minsPerRun = stitchesPerItem / STITCHES_PER_MIN;
+        const rawMinutes = runs * minsPerRun;
+        const totalMinutes = Math.ceil((rawMinutes + nonEmbMinutes) * SETUP_BUFFER);
+        return {
+            totalMinutes,
+            machineType: heads === HEADS_MULTI ? '6-head' : 'single',
+            stitchesPerItem,
+            totalStitches,
+            isEmbroidery: true,
+        };
+    }
+
+    return {
+        totalMinutes: Math.ceil(nonEmbMinutes * SETUP_BUFFER),
+        machineType: 'single',
+        stitchesPerItem: 0,
+        totalStitches: 0,
+        isEmbroidery: false,
+    };
+}
+
+function fmtTime(minutes: number): string {
+    if (minutes <= 0) return '—';
+    if (minutes < 60) return `${minutes}m`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function fmtStitches(n: number): string {
+    if (n <= 0) return '—';
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return n.toLocaleString();
+}
+
+const DECO_BADGE: Record<string, { bg: string; text: string }> = {
+    EMB: { bg: 'bg-purple-100 border-purple-300', text: 'text-purple-800' },
+    DTF: { bg: 'bg-cyan-100 border-cyan-300', text: 'text-cyan-800' },
+    FLEX: { bg: 'bg-amber-100 border-amber-300', text: 'text-amber-800' },
+    TRANSFER: { bg: 'bg-orange-100 border-orange-300', text: 'text-orange-800' },
+    UV: { bg: 'bg-blue-100 border-blue-300', text: 'text-blue-800' },
+    SCREEN: { bg: 'bg-green-100 border-green-300', text: 'text-green-800' },
+    FREEFORM: { bg: 'bg-rose-100 border-rose-300', text: 'text-rose-800' },
+    VINYL: { bg: 'bg-teal-100 border-teal-300', text: 'text-teal-800' },
+    SUBLIMATION: { bg: 'bg-pink-100 border-pink-300', text: 'text-pink-800' },
+    DTG: { bg: 'bg-indigo-100 border-indigo-300', text: 'text-indigo-800' },
+    NONE: { bg: 'bg-gray-100 border-gray-300', text: 'text-gray-500' },
+};
+const getDecoBadge = (type: string | undefined) => {
+    if (!type) return { bg: 'bg-gray-50 border-gray-200', text: 'text-gray-400' };
+    return DECO_BADGE[type] || { bg: 'bg-gray-100 border-gray-300', text: 'text-gray-700' };
 };
 
 const DecoDashboard: React.FC<DecoDashboardProps> = ({ 
@@ -375,18 +476,67 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                             <div className="flex items-center gap-3"><Truck className="w-4 h-4 text-emerald-400" /><div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Shipping Date</p><p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{jobData.dateShipped ? new Date(jobData.dateShipped).toLocaleDateString('en-GB') : '-'}</p></div></div>
                             <div className="flex items-center gap-3"><CheckCircle2 className="w-4 h-4 text-blue-400" /><div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Completion</p><p className="text-xs font-bold text-slate-700 uppercase tracking-tight">{jobData.itemsProduced} / {jobData.totalItems} Items</p></div></div>
                         </div>
+                        {/* Production estimate banner */}
+                        {(() => {
+                            const est = estimateProductionTime(jobData.items);
+                            const jobValue = jobData.orderTotal || jobData.billableAmount || 0;
+                            const estHours = est.totalMinutes / 60;
+                            const poundPerHour = estHours > 0 && jobValue > 0 ? (jobValue / estHours) : 0;
+                            const totalQty = jobData.items.reduce((a, i) => a + i.quantity, 0);
+                            const decoTypes = Array.from(new Set(jobData.items.map(i => i.decorationType).filter(Boolean)));
+                            return est.totalMinutes > 0 ? (
+                                <div className="px-6 py-3 bg-indigo-50/50 border-b border-indigo-100 flex flex-wrap items-center gap-4 text-[10px]">
+                                    <div className="flex items-center gap-1.5">
+                                        <Scissors className="w-3.5 h-3.5 text-indigo-400" />
+                                        <span className="font-bold text-slate-400 uppercase tracking-widest">Type:</span>
+                                        <span className="flex gap-1">{decoTypes.length > 0 ? decoTypes.map(t => {
+                                            const b = getDecoBadge(t);
+                                            return <span key={t} className={`px-2 py-0.5 rounded border font-black uppercase tracking-widest ${b.bg} ${b.text}`}>{t}</span>;
+                                        }) : <span className="text-slate-400 italic">Unknown</span>}</span>
+                                    </div>
+                                    {est.isEmbroidery && (
+                                        <div className="flex items-center gap-1.5">
+                                            <Hash className="w-3.5 h-3.5 text-purple-400" />
+                                            <span className="font-bold text-slate-400 uppercase tracking-widest">Stitches:</span>
+                                            <span className="font-black text-purple-700">{fmtStitches(est.stitchesPerItem)}/item</span>
+                                            <span className="text-slate-300">•</span>
+                                            <span className="font-black text-purple-700">{fmtStitches(est.totalStitches)} total</span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-1.5">
+                                        <Timer className="w-3.5 h-3.5 text-blue-400" />
+                                        <span className="font-bold text-slate-400 uppercase tracking-widest">Est. Time:</span>
+                                        <span className="font-black text-blue-700">{fmtTime(est.totalMinutes)}</span>
+                                        {est.isEmbroidery && <span className="text-slate-400">({est.machineType} × {totalQty} pcs)</span>}
+                                    </div>
+                                    {poundPerHour > 0 && (
+                                        <div className="flex items-center gap-1.5">
+                                            <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                                            <span className="font-bold text-slate-400 uppercase tracking-widest">£/hr:</span>
+                                            <span className={`font-black ${poundPerHour >= 50 ? 'text-emerald-700' : poundPerHour >= 25 ? 'text-amber-700' : 'text-red-700'}`}>
+                                                £{poundPerHour.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : null;
+                        })()}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left text-[10px] border-collapse">
-                                <thead><tr className="bg-gray-100 border-b border-gray-300 text-slate-600 font-bold uppercase tracking-widest"><th className="p-3 w-28">SKU</th><th className="p-3 w-32">EAN</th><th className="p-3">Details</th><th className="p-3 w-28 text-center">Color</th><th className="p-3 w-24 text-center">Size x Qty</th><th className="p-3 w-20 text-center">Ord</th><th className="p-3 w-20 text-center">Rcvd</th><th className="p-3 w-20 text-center">Prod</th><th className="p-3 w-20 text-center">Ship</th><th className="p-3 w-32 text-center">Status</th></tr></thead>
+                                <thead><tr className="bg-gray-100 border-b border-gray-300 text-slate-600 font-bold uppercase tracking-widest"><th className="p-3 w-28">SKU</th><th className="p-3">Details</th><th className="p-3 w-24 text-center">Color</th><th className="p-3 w-20 text-center">Qty</th><th className="p-3 w-20 text-center">Type</th><th className="p-3 w-24 text-center">Stitches</th><th className="p-3 w-20 text-center">Est.</th><th className="p-3 w-16 text-center">Ord</th><th className="p-3 w-16 text-center">Rcvd</th><th className="p-3 w-16 text-center">Prod</th><th className="p-3 w-16 text-center">Ship</th><th className="p-3 w-28 text-center">Status</th></tr></thead>
                                 <tbody className="text-slate-900 bg-white">{jobData.items.map((item, idx) => {
                                     const { details, color, size } = parseItemName(item.name);
+                                    const itemEst = estimateProductionTime([item]);
+                                    const badge = getDecoBadge(item.decorationType);
                                     return (
                                         <tr key={idx} className="border-b border-gray-200 hover:bg-blue-50/50">
                                             <td className="p-3 font-mono text-slate-600 font-bold uppercase tracking-wider text-[10px]">{item.productCode || item.vendorSku}</td>
-                                            <td className="p-3 font-mono text-indigo-600 font-bold uppercase tracking-wider text-[10px]">{item.ean || '-'}</td>
                                             <td className="p-3 font-bold text-slate-900 uppercase tracking-wide">{details}</td>
                                             <td className="p-3 text-center"><div className={`inline-block px-3 py-1 rounded font-bold uppercase tracking-widest text-[9px] border shadow-sm ${color.toLowerCase().includes('black') ? 'bg-black text-white' : 'bg-gray-100'}`}>{color}</div></td>
-                                            <td className="p-3 text-center font-bold text-sm text-slate-900"><span>{size}</span><span className="text-slate-400 mx-1">x</span><span>{item.quantity}</span></td>
+                                            <td className="p-3 text-center font-bold text-sm text-slate-900">{size !== '-' && <><span className="text-slate-400 text-[9px]">{size}</span><span className="text-slate-400 mx-0.5">×</span></>}{item.quantity}</td>
+                                            <td className="p-3 text-center"><span className={`px-2 py-0.5 rounded border font-black uppercase tracking-widest text-[8px] ${badge.bg} ${badge.text}`}>{item.decorationType || '—'}</span></td>
+                                            <td className="p-3 text-center font-bold text-[10px] text-purple-700">{item.stitchCount ? fmtStitches(item.stitchCount) : '—'}</td>
+                                            <td className="p-3 text-center font-bold text-[10px] text-blue-700">{itemEst.totalMinutes > 0 ? fmtTime(itemEst.totalMinutes) : '—'}</td>
                                             <td className="p-3"><StatusCell type="ordered" status={item.procurementStatus} /></td>
                                             <td className="p-3"><StatusCell type="received" status={item.procurementStatus} /></td>
                                             <td className="p-3"><StatusCell type="produced" status={item.productionStatus} /></td>
