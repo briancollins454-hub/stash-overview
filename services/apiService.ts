@@ -512,25 +512,21 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         }
         if (bestLine) {
             console.log('[DECO DEBUG] Item type distribution (first 20 jobs):', itemTypeCounts);
-            console.log('[DECO DEBUG] Richest line (' + maxKeys + ' keys):', JSON.stringify({
-                job_id: bestJob.order_id, job_name: bestJob.job_name,
-                job_top_keys: Object.keys(bestJob).sort(),
-                line_product: bestLine.product_name, line_item_type: bestLine.item_type,
-                line_ALL_keys: Object.keys(bestLine).sort(),
-                line_decoration_details: bestLine.decoration_details,
-                line_decoration_method: bestLine.decoration_method,
-                line_process_type: bestLine.process_type,
-                line_product_type: bestLine.product_type,
-                has_processes: !!bestLine.processes, processes_count: (bestLine.processes || []).length,
-                has_views: !!bestLine.views, views_count: (bestLine.views || []).length,
-                has_workflow_items: !!bestLine.workflow_items, workflow_count: (bestLine.workflow_items || []).length,
-                // Dump first process if exists
-                first_process: (bestLine.processes || [])[0] || null,
-                // Dump first view if exists
-                first_view: (bestLine.views || [])[0] ? { name: (bestLine.views || [])[0].name, keys: Object.keys((bestLine.views || [])[0]).sort() } : null,
-                // Dump first workflow_item keys
-                first_wf_keys: bestLine.workflow_items?.[0] ? Object.keys(bestLine.workflow_items[0]).sort() : null,
-            }, null, 2));
+            // Deep-dive into views → areas → processes
+            const viewsDump = (bestLine.views || []).map((v: any) => ({
+                view_name: v.view_name || v.name, view_id: v.view_id,
+                areas: (v.areas || []).map((a: any) => ({
+                    area_keys: Object.keys(a).sort(),
+                    area_name: a.name || a.area_name,
+                    has_processes: !!a.processes, processes_count: (a.processes || []).length,
+                    // Dump full first process
+                    first_process_full: (a.processes || [])[0] || null,
+                    // Also check decoration_processes
+                    has_decoration_processes: !!a.decoration_processes,
+                })),
+            }));
+            console.log('[DECO DEBUG] Views deep-dive:', JSON.stringify(viewsDump, null, 2));
+            console.log('[DECO DEBUG] Line product:', bestLine.product_name, '| Job:', bestJob.job_name);
         }
     }
     return allDeco.map((job: any) => {
