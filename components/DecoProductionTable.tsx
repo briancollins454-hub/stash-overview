@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -125,9 +125,12 @@ type StatusFilter = 'active' | 'all' | 'production' | 'awaiting';
 interface Props {
     decoJobs: DecoJob[];
     onNavigateToOrder: (orderNum: string) => void;
+    onEnrichProduction?: () => Promise<void>;
+    isEnriching?: boolean;
+    enrichMsg?: string;
 }
 
-export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Props) {
+export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnrichProduction, isEnriching, enrichMsg }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>('due');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
@@ -330,6 +333,21 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
+                        {onEnrichProduction && (
+                            <button
+                                onClick={onEnrichProduction}
+                                disabled={isEnriching}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all ${
+                                    isEnriching
+                                        ? 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300 cursor-wait'
+                                        : 'bg-white/5 border-white/10 text-white/50 hover:text-indigo-300 hover:bg-indigo-500/10 hover:border-indigo-500/30'
+                                }`}
+                                title={isEnriching ? (enrichMsg || 'Enriching...') : 'Sync decoration types & stitch counts from Deco API'}
+                            >
+                                <RefreshCw className={`w-3.5 h-3.5 ${isEnriching ? 'animate-spin' : ''}`} />
+                                {isEnriching ? (enrichMsg || 'Syncing...') : 'Sync Types'}
+                            </button>
+                        )}
                         <button
                             onClick={handlePrint}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all"

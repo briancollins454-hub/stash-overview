@@ -343,6 +343,8 @@ const App: React.FC = () => {
   const [scanLogs, setScanLog] = useState<ScanLog[]>([]);
   const [scanCount, setScanCount] = useState({ current: 0, total: 0 });
   const [showScanConsole, setShowScanConsole] = useState(false);
+  const [isEnrichingProduction, setIsEnrichingProduction] = useState(false);
+  const [enrichMsg, setEnrichMsg] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navDropdown, setNavDropdown] = useState<string | null>(null);
   const navDropRef = useRef<HTMLDivElement>(null);
@@ -422,6 +424,69 @@ const App: React.FC = () => {
   }, [user, widgetOrderId]);
 
   const isConfigMissing = false; // Credentials are now server-side
+
+  // Dedicated production enrichment: fetches decoration types + stitch counts for ALL jobs
+  const handleEnrichProduction = useCallback(async () => {
+    if (isEnrichingProduction || !apiSettings.useLiveData) return;
+    setIsEnrichingProduction(true);
+    setEnrichMsg('Loading cache...');
+    try {
+      const stitchCache = await fetchStitchCache();
+
+      // Re-enrich every job that still lacks decoration types, regardless of cache
+      const jobs = rawDecoJobs;
+      const needsEnrichment = jobs
+        .filter(j => !j.items.some(i => i.decorationType && i.stitchCount))
+        .map(j => j.jobNumber);
+
+      if (needsEnrichment.length === 0) {
+        setEnrichMsg('All jobs already enriched');
+        setTimeout(() => { setIsEnrichingProduction(false); setEnrichMsg(''); }, 2000);
+        return;
+      }
+
+      setEnrichMsg(`Enriching 0/${needsEnrichment.length}...`);
+      const newEntries = await enrichDecoStitchBatch(
+        apiSettings,
+        needsEnrichment,
+        (done, total) => setEnrichMsg(`Enriching ${done}/${total}...`),
+      );
+
+      // Save to Supabase cache
+      await saveStitchCache(newEntries);
+
+      // Apply enriched data to state
+      const withData = newEntries.filter(e => e.items.length > 0);
+      if (withData.length > 0) {
+        setRawDecoJobs(prev => {
+          const updated = prev.map(job => {
+            const entry = newEntries.find(e => e.job_number === job.jobNumber);
+            if (!entry || entry.items.length === 0) return job;
+            const updatedItems = job.items.map((item, idx) => {
+              const match = entry.items.find(c => c.lineIndex === idx);
+              if (!match) return item;
+              return {
+                ...item,
+                decorationType: item.decorationType || match.decorationType,
+                stitchCount: item.stitchCount || match.stitchCount,
+              };
+            });
+            return { ...job, items: updatedItems };
+          });
+          setLocalItem('stash_raw_deco_jobs', updated).catch(console.error);
+          saveCloudDecoJobs(apiSettings, updated).catch(console.error);
+          return updated;
+        });
+      }
+
+      setEnrichMsg(`Done — ${withData.length} jobs enriched`);
+      setTimeout(() => { setIsEnrichingProduction(false); setEnrichMsg(''); }, 3000);
+    } catch (e: any) {
+      console.warn('Production enrichment failed:', e);
+      setEnrichMsg('Failed');
+      setTimeout(() => { setIsEnrichingProduction(false); setEnrichMsg(''); }, 3000);
+    }
+  }, [apiSettings, rawDecoJobs, isEnrichingProduction]);
 
   const loadData = async (isDeepSync: boolean = false, baseOrdersOverride?: ShopifyOrder[]) => {
     if (loadingRef.current) return;
@@ -2384,6 +2449,9 @@ const App: React.FC = () => {
                     <DecoProductionTable
                       decoJobs={rawDecoJobs}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
+                      onEnrichProduction={handleEnrichProduction}
+                      isEnriching={isEnrichingProduction}
+                      enrichMsg={enrichMsg}
                     />
                   </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Priority Queue Error">
