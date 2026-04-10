@@ -66,7 +66,7 @@ function normaliseDecoType(raw: string | undefined | null): string | undefined {
 
 function extractProcessData(proc: any, result: { decorationType?: string; stitchCount: number }) {
     // Decoration method / type from process
-    const method = proc.decoration_method || proc.process_type || proc.type || proc.method || proc.name || '';
+    const method = proc.process || proc.decoration_method || proc.process_type || proc.type || proc.method || proc.name || '';
     if (method && !result.decorationType) result.decorationType = normaliseDecoType(method);
 
     // Stitch count from text_items
@@ -519,8 +519,10 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
                     area_keys: Object.keys(a).sort(),
                     area_name: a.name || a.area_name,
                     has_processes: !!a.processes, processes_count: (a.processes || []).length,
-                    // Dump full first process
+                    // Dump full first process with ALL data
                     first_process_full: (a.processes || [])[0] || null,
+                    // Dump ALL processes to see stitch counts
+                    all_processes: (a.processes || []).map((p: any) => ({ ...p, _keys: Object.keys(p).sort() })),
                     // Also check decoration_processes
                     has_decoration_processes: !!a.decoration_processes,
                 })),
