@@ -218,9 +218,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const totalValue = filtered.reduce((a, j) => a + j.jobValue, 0);
     const totalMinutes = filtered.reduce((a, j) => a + j.est.totalMinutes, 0);
     const totalStitchesAll = filtered.reduce((a, j) => a + j.est.totalStitches, 0);
-    const embCount = filtered.filter(j => j.decoTypes.includes('EMB')).length;
-    const dtfCount = filtered.filter(j => j.decoTypes.includes('DTF')).length;
-    const flexCount = filtered.filter(j => j.decoTypes.includes('FLEX')).length;
+
+    const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
+    const embQty = filtered.reduce((a, j) => a + j.items.filter(i => i.decorationType === 'EMB').reduce((s, i) => s + i.quantity, 0), 0);
+    const printQty = filtered.reduce((a, j) => a + j.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType)).reduce((s, i) => s + i.quantity, 0), 0);
 
     // All unique decoration types across all jobs
     const allDecoTypes = useMemo(() => {
@@ -331,6 +332,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             {filtered.length} jobs &middot; {fmtK(totalValue)} pipeline &middot; {fmtTime(totalMinutes)} total est.
                             {totalStitchesAll > 0 && <> &middot; {fmtStitches(totalStitchesAll)} stitches</>}
                         </p>
+                        <div className="flex items-center gap-3 mt-1">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider bg-purple-500/10 border-purple-500/20 text-purple-300">
+                                Embroidery <span className="text-purple-200 font-mono">{embQty.toLocaleString()}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider bg-cyan-500/10 border-cyan-500/20 text-cyan-300">
+                                Print <span className="text-cyan-200 font-mono">{printQty.toLocaleString()}</span>
+                            </span>
+                        </div>
                     </div>
                     <div className="flex items-center gap-2">
                         {onEnrichProduction && (
