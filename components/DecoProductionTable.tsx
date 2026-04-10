@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -120,7 +120,9 @@ const STATUS_BADGE: Record<string, { cls: string; short: string }> = {
 
 type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer';
 type SortDir = 'asc' | 'desc';
-type StatusFilter = 'active' | 'all' | 'production' | 'awaiting';
+type StatusFilter = 'active' | 'production' | 'awaiting';
+
+const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
 
 interface Props {
     decoJobs: DecoJob[];
@@ -138,6 +140,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
     const [hideIncomplete, setHideIncomplete] = useState(true);
+    const [dueFrom, setDueFrom] = useState('');
+    const [dueTo, setDueTo] = useState('');
+    const [orderedFrom, setOrderedFrom] = useState('');
+    const [orderedTo, setOrderedTo] = useState('');
     const tableRef = useRef<HTMLDivElement>(null);
 
     const now = useMemo(() => new Date(), []);
@@ -147,7 +153,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const AWAITING_STATUSES = new Set(['Awaiting Stock', 'Awaiting Artwork', 'Awaiting Review', 'Awaiting Processing', 'Awaiting PO', 'Not Ordered', 'On Hold']);
 
     const enrichedJobs = useMemo(() => {
-        return decoJobs.map(job => {
+        return decoJobs
+            .filter(job => !EXCLUDED_STATUSES.has(job.status))
+            .map(job => {
             const est = estimateProductionTime(job.items);
             const totalQty = job.items.reduce((a, i) => a + i.quantity, 0);
             const jobValue = job.orderTotal || job.billableAmount || 0;
@@ -158,7 +166,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const daysUntilDue = dueDate ? daysBetween(now, dueDate) : null;
             const orderedDate = job.dateOrdered ? new Date(job.dateOrdered) : null;
             const daysInProd = orderedDate ? daysBetween(orderedDate, now) : null;
-            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd };
+            // Per-job EMB/Print completion
+            const embItems = job.items.filter(i => i.decorationType === 'EMB');
+            const embTotal = embItems.reduce((a, i) => a + i.quantity, 0);
+            const embDone = embItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
+            const printItems = job.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType));
+            const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
+            const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
+            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd, embTotal, embDone, printTotal, printDone };
         });
     }, [decoJobs, now]);
 
@@ -170,10 +185,15 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             list = list.filter(j => j.decoTypes.length > 0);
         }
 
-        // Status filter
-        if (statusFilter === 'active') list = list.filter(j => !EXCLUDED_STATUSES.has(j.status));
-        else if (statusFilter === 'production') list = list.filter(j => PRODUCTION_STATUSES.has(j.status));
+        // Status filter (shipped/completed already excluded)
+        if (statusFilter === 'production') list = list.filter(j => PRODUCTION_STATUSES.has(j.status));
         else if (statusFilter === 'awaiting') list = list.filter(j => AWAITING_STATUSES.has(j.status));
+
+        // Date range filters
+        if (dueFrom) { const d = new Date(dueFrom); list = list.filter(j => j.dateDue && new Date(j.dateDue) >= d); }
+        if (dueTo) { const d = new Date(dueTo); d.setHours(23,59,59); list = list.filter(j => j.dateDue && new Date(j.dateDue) <= d); }
+        if (orderedFrom) { const d = new Date(orderedFrom); list = list.filter(j => j.dateOrdered && new Date(j.dateOrdered) >= d); }
+        if (orderedTo) { const d = new Date(orderedTo); d.setHours(23,59,59); list = list.filter(j => j.dateOrdered && new Date(j.dateOrdered) <= d); }
 
         // Search
         if (searchTerm) {
@@ -208,7 +228,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
 
         return list;
-    }, [enrichedJobs, hideIncomplete, statusFilter, typeFilter, searchTerm, sortKey, sortDir]);
+    }, [enrichedJobs, hideIncomplete, statusFilter, typeFilter, searchTerm, sortKey, sortDir, dueFrom, dueTo, orderedFrom, orderedTo]);
 
     const incompleteCount = useMemo(() => {
         let base = enrichedJobs;
@@ -233,14 +253,16 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const totalMinutes = filtered.reduce((a, j) => a + j.est.totalMinutes, 0);
     const totalStitchesAll = filtered.reduce((a, j) => a + j.est.totalStitches, 0);
 
-    const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
     const embJobs = filtered.filter(j => j.decoTypes.includes('EMB'));
-    const embQty = embJobs.reduce((a, j) => a + j.items.filter(i => i.decorationType === 'EMB').reduce((s, i) => s + i.quantity, 0), 0);
+    const embQtyTotal = embJobs.reduce((a, j) => a + j.embTotal, 0);
+    const embQtyDone = embJobs.reduce((a, j) => a + j.embDone, 0);
     const embMins = embJobs.reduce((a, j) => a + j.est.totalMinutes, 0);
-    const printJobs = filtered.filter(j => j.decoTypes.some(t => PRINT_TYPES.has(t)));
-    const printQty = printJobs.reduce((a, j) => a + j.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType)).reduce((s, i) => s + i.quantity, 0), 0);
-    const printMins = printJobs.reduce((a, j) => a + j.est.totalMinutes, 0);
+    const printJobsList = filtered.filter(j => j.decoTypes.some(t => PRINT_TYPES.has(t)));
+    const printQtyTotal = printJobsList.reduce((a, j) => a + j.printTotal, 0);
+    const printQtyDone = printJobsList.reduce((a, j) => a + j.printDone, 0);
+    const printMins = printJobsList.reduce((a, j) => a + j.est.totalMinutes, 0);
     const untypedJobs = filtered.filter(j => !j.items.some(i => i.decorationType)).length;
+    const hasDateFilters = dueFrom || dueTo || orderedFrom || orderedTo;
 
     // All unique decoration types across all jobs
     const allDecoTypes = useMemo(() => {
@@ -306,9 +328,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         </style></head><body>`);
         printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
         printWindow.document.write(`<div class="subtitle">${filtered.length} jobs · ${fmtK(totalValue)} pipeline · ${fmtTime(totalMinutes)} est. · Printed ${new Date().toLocaleString('en-GB')}</div>`);
-        const filters = [statusFilter !== 'all' ? statusFilter.toUpperCase() : '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
+        const filters = [statusFilter !== 'active' ? statusFilter.toUpperCase() : '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
         if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${filters.join(' · ')}</div>`);
-        printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
+        printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>EMB</th><th>Print</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
         filtered.forEach(job => {
             const typeClass = (job.decoTypes[0] || 'none').toLowerCase();
             const statusClass = job.status.toLowerCase().includes('production') ? 'status-production' : job.status.toLowerCase().includes('await') ? 'status-awaiting' : job.status.toLowerCase().includes('ready') ? 'status-ready' : job.status.toLowerCase().includes('order') ? 'status-order' : 'status-hold';
@@ -322,6 +344,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             printWindow.document.write(`<td><span class="badge ${statusClass}">${job.status}</span></td>`);
             printWindow.document.write(`<td>${job.decoTypes.map(t => `<span class="badge ${t.toLowerCase()}">${t}</span>`).join(' ') || '—'}</td>`);
             printWindow.document.write(`<td>${job.totalQty}</td>`);
+            printWindow.document.write(`<td>${job.embTotal > 0 ? `${job.embDone}/${job.embTotal}` : '—'}</td>`);
+            printWindow.document.write(`<td>${job.printTotal > 0 ? `${job.printDone}/${job.printTotal}` : '—'}</td>`);
             printWindow.document.write(`<td>${job.est.totalStitches > 0 ? fmtStitches(job.est.totalStitches) : '—'}</td>`);
             printWindow.document.write(`<td>${job.est.totalMinutes > 0 ? fmtTime(job.est.totalMinutes) : '—'}</td>`);
             printWindow.document.write(`<td>${job.est.isEmbroidery ? job.est.machineType : '—'}</td>`);
@@ -356,15 +380,15 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 <span className="text-[9px] font-black uppercase tracking-wider text-purple-300">Embroidery</span>
                                 <span className="text-[10px] font-mono font-bold text-purple-200">{embJobs.length}<span className="text-purple-400 text-[8px]"> jobs</span></span>
                                 <span className="text-purple-500/40">·</span>
-                                <span className="text-[10px] font-mono font-bold text-purple-200">{embQty.toLocaleString()}<span className="text-purple-400 text-[8px]"> pcs</span></span>
+                                <span className="text-[10px] font-mono font-bold text-purple-200">{embQtyDone}/{embQtyTotal}<span className="text-purple-400 text-[8px]"> pcs</span></span>
                                 <span className="text-purple-500/40">·</span>
                                 <span className="text-[10px] font-mono font-bold text-purple-200">{fmtTime(embMins)}</span>
                             </div>
                             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border bg-cyan-500/10 border-cyan-500/20">
                                 <span className="text-[9px] font-black uppercase tracking-wider text-cyan-300">Print</span>
-                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printJobs.length}<span className="text-cyan-400 text-[8px]"> jobs</span></span>
+                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printJobsList.length}<span className="text-cyan-400 text-[8px]"> jobs</span></span>
                                 <span className="text-cyan-500/40">·</span>
-                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printQty.toLocaleString()}<span className="text-cyan-400 text-[8px]"> pcs</span></span>
+                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printQtyDone}/{printQtyTotal}<span className="text-cyan-400 text-[8px]"> pcs</span></span>
                                 <span className="text-cyan-500/40">·</span>
                                 <span className="text-[10px] font-mono font-bold text-cyan-200">{fmtTime(printMins)}</span>
                             </div>
@@ -414,10 +438,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 {/* Status filters */}
                 <div className="flex flex-wrap gap-2 mt-3">
                     {[
-                        { label: 'Active', key: 'active' as StatusFilter, count: enrichedJobs.filter(j => !EXCLUDED_STATUSES.has(j.status)).length },
+                        { label: 'Active', key: 'active' as StatusFilter, count: enrichedJobs.length },
                         { label: 'In Production', key: 'production' as StatusFilter, count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
                         { label: 'Awaiting', key: 'awaiting' as StatusFilter, count: enrichedJobs.filter(j => AWAITING_STATUSES.has(j.status)).length },
-                        { label: 'All', key: 'all' as StatusFilter, count: enrichedJobs.length },
                     ].map(f => (
                         <button
                             key={f.key}
@@ -476,6 +499,26 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         })}
                     </div>
                 )}
+                {/* Date range filters */}
+                <div className="flex flex-wrap items-center gap-3 mt-2">
+                    <CalendarDays className="w-3.5 h-3.5 text-white/20" />
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-white/25">Due from</span>
+                        <input type="date" value={dueFrom} onChange={e => setDueFrom(e.target.value)} className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/70 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 [color-scheme:dark]" />
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-white/25">to</span>
+                        <input type="date" value={dueTo} onChange={e => setDueTo(e.target.value)} className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/70 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 [color-scheme:dark]" />
+                    </div>
+                    <span className="text-white/10">|</span>
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-white/25">Ordered from</span>
+                        <input type="date" value={orderedFrom} onChange={e => setOrderedFrom(e.target.value)} className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/70 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 [color-scheme:dark]" />
+                        <span className="text-[8px] font-bold uppercase tracking-widest text-white/25">to</span>
+                        <input type="date" value={orderedTo} onChange={e => setOrderedTo(e.target.value)} className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/70 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 [color-scheme:dark]" />
+                    </div>
+                    {hasDateFilters && (
+                        <button onClick={() => { setDueFrom(''); setDueTo(''); setOrderedFrom(''); setOrderedTo(''); }} className="text-[8px] font-bold uppercase tracking-widest text-red-400/50 hover:text-red-400 transition-colors">Clear dates</button>
+                    )}
+                </div>
             </div>
 
             {/* Table */}
@@ -494,6 +537,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             </th>
                             <th className="px-3 py-2.5 w-16 text-center">Type</th>
                             <th className="px-3 py-2.5 w-14 text-center">Qty</th>
+                            <th className="px-3 py-2.5 w-20 text-center">EMB</th>
+                            <th className="px-3 py-2.5 w-20 text-center">Print</th>
                             <th className="px-3 py-2.5 w-20 text-center cursor-pointer hover:text-white/60" onClick={() => toggleSort('stitches')}>
                                 <span className="flex items-center gap-1 justify-center">Stitches <SortIcon col="stitches" /></span>
                             </th>
@@ -517,7 +562,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     </thead>
                     <tbody className="divide-y divide-white/[0.03]">
                         {filtered.length === 0 && (
-                            <tr><td colSpan={12} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
+                            <tr><td colSpan={14} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
                         )}
                         {filtered.map(job => {
                             const isExpanded = expandedJob === job.id;
@@ -555,6 +600,20 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                             </div>
                                         </td>
                                         <td className="px-3 py-2.5 text-center text-white/60 font-bold">{job.totalQty}</td>
+                                        <td className="px-3 py-2.5 text-center">
+                                            {job.embTotal > 0 ? (
+                                                <span className={`font-mono text-[10px] font-bold ${job.embDone >= job.embTotal ? 'text-emerald-400' : job.embDone > 0 ? 'text-amber-300' : 'text-purple-300/60'}`}>
+                                                    {job.embDone}/{job.embTotal}
+                                                </span>
+                                            ) : <span className="text-white/15">—</span>}
+                                        </td>
+                                        <td className="px-3 py-2.5 text-center">
+                                            {job.printTotal > 0 ? (
+                                                <span className={`font-mono text-[10px] font-bold ${job.printDone >= job.printTotal ? 'text-emerald-400' : job.printDone > 0 ? 'text-amber-300' : 'text-cyan-300/60'}`}>
+                                                    {job.printDone}/{job.printTotal}
+                                                </span>
+                                            ) : <span className="text-white/15">—</span>}
+                                        </td>
                                         <td className="px-3 py-2.5 text-center font-bold text-purple-300">{job.est.totalStitches > 0 ? fmtStitches(job.est.totalStitches) : '—'}</td>
                                         <td className="px-3 py-2.5 text-center font-bold text-blue-300">{job.est.totalMinutes > 0 ? fmtTime(job.est.totalMinutes) : '—'}</td>
                                         <td className="px-3 py-2.5 text-center text-[9px] text-white/40">{job.est.isEmbroidery ? job.est.machineType : '—'}</td>
@@ -573,7 +632,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                     {/* Expanded item detail */}
                                     {isExpanded && (
                                         <tr>
-                                            <td colSpan={12} className="bg-[#16162e] px-4 py-3">
+                                            <td colSpan={14} className="bg-[#16162e] px-4 py-3">
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-left text-[9px]">
                                                         <thead>
