@@ -118,7 +118,6 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterDays: number
 /* ---------- Main component ---------- */
 
 export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
-  const [timeFrame, setTimeFrame] = useState<TimeFrameId>('all');
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
 
@@ -149,12 +148,10 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
     active.map(j => calculatePriority(j, now)),
   [active, now]);
 
-  const filterDays = TIME_FRAMES.find(t => t.id === timeFrame)?.days ?? null;
-
+  // Group ALL scored items by section (no time filtering here — each SectionCard filters independently)
   const sections = useMemo(() => {
     return PRIORITY_SECTIONS.map(sec => {
-      const allInStatus = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
-      const items = allInStatus.filter(r => passesFilter(r.job, sec, filterDays, now));
+      const items = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
       items.sort((a, b) => {
         if (a.score > 0 && b.score > 0) return b.score - a.score;
         if (a.score > 0) return -1;
@@ -163,12 +160,9 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
         const db = pd(b.job.dateOrdered)?.getTime() || 0;
         return db - da;
       });
-      const totalValue = items.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
-      const criticalCount = items.filter(r => r.urgency === 'critical').length;
-      const highCount = items.filter(r => r.urgency === 'high').length;
-      return { ...sec, items, totalValue, criticalCount, highCount, totalInStatus: allInStatus.length };
+      return { ...sec, items };
     });
-  }, [allScored, filterDays, now]);
+  }, [allScored, now]);
 
   const coveredStatuses = new Set(PRIORITY_SECTIONS.flatMap(s => s.statuses));
   const uncategorised = useMemo(() =>
@@ -177,21 +171,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
   [allScored]);
 
   const totalOrders = sections.reduce((a, s) => a + s.items.length, 0);
-  const totalCritical = sections.reduce((a, s) => a + s.criticalCount, 0);
-  const totalHigh = sections.reduce((a, s) => a + s.highCount, 0);
-  const totalValue = sections.reduce((a, s) => a + s.totalValue, 0);
+  const totalCritical = sections.reduce((a, s) => a + s.items.filter(r => r.urgency === 'critical').length, 0);
+  const totalHigh = sections.reduce((a, s) => a + s.items.filter(r => r.urgency === 'high').length, 0);
+  const totalValue = sections.reduce((a, s) => a + s.items.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0), 0);
 
   const toggleSection = (key: string) => setExpandedSection(prev => (prev === key ? null : key));
-
-  const filterExplain = (sec: PrioritySection): string => {
-    if (filterDays === null) return '';
-    switch (sec.filterMetric) {
-      case 'days_since_ordered': return `Orders waiting ${filterDays}+ days`;
-      case 'days_until_due': return `Due within ${filterDays} days or overdue`;
-      case 'days_past_due': return `Waiting ${filterDays}+ days to ship`;
-      default: return '';
-    }
-  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 pb-12">
@@ -203,21 +187,6 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
             <p className="text-xs text-white/40 mt-0.5">
               {totalOrders} order{s(totalOrders)} &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
             </p>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {TIME_FRAMES.map(tf => (
-              <button
-                key={tf.id}
-                onClick={() => setTimeFrame(tf.id)}
-                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all ${
-                  timeFrame === tf.id
-                    ? 'bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40'
-                    : 'text-white/40 hover:text-white/70 hover:bg-white/5'
-                }`}
-              >
-                {tf.label}
-              </button>
-            ))}
           </div>
         </div>
         <div className="mt-4 flex gap-3 flex-wrap">
@@ -241,16 +210,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
         <SectionCard
           key={sec.key}
           section={sec}
-          items={sec.items}
-          totalValue={sec.totalValue}
-          criticalCount={sec.criticalCount}
-          highCount={sec.highCount}
-          totalInStatus={sec.totalInStatus}
+          allItems={sec.items}
           expanded={expandedSection === sec.key}
           onToggle={() => toggleSection(sec.key)}
           onNavigate={onNavigateToOrder}
           now={now}
-          filterHint={filterExplain(sec)}
         />
       ))}
 
@@ -304,16 +268,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
 
 interface SectionCardProps {
   section: PrioritySection;
-  items: PriorityResult[];
-  totalValue: number;
-  criticalCount: number;
-  highCount: number;
-  totalInStatus: number;
+  allItems: PriorityResult[];
   expanded: boolean;
   onToggle: () => void;
   onNavigate: (orderNum: string) => void;
   now: Date;
-  filterHint: string;
 }
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
@@ -326,36 +285,71 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, items, totalValue, criticalCount, highCount, totalInStatus, expanded, onToggle, onNavigate, now, filterHint }: SectionCardProps) {
+function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }: SectionCardProps) {
+  const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
+
+  const filterDays = TIME_FRAMES.find(t => t.id === localFilter)?.days ?? null;
+  const items = useMemo(() =>
+    allItems.filter(r => passesFilter(r.job, section, filterDays, now)),
+  [allItems, filterDays, section, now]);
+
+  const totalValue = items.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  const criticalCount = items.filter(r => r.urgency === 'critical').length;
+  const highCount = items.filter(r => r.urgency === 'high').length;
+  const totalInStatus = allItems.length;
+
+  const filterHint = filterDays === null ? '' : (
+    section.filterMetric === 'days_since_ordered' ? `Orders waiting ${filterDays}+ days` :
+    section.filterMetric === 'days_until_due' ? `Due within ${filterDays} days or overdue` :
+    section.filterMetric === 'days_past_due' ? `Waiting ${filterDays}+ days to ship` : ''
+  );
 
   return (
     <div className={`bg-[#1e1e3a] rounded-2xl border ${cm.border} overflow-hidden`}>
       {/* Header */}
-      <button className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors" onClick={onToggle}>
-        <div className="flex items-center gap-3">
-          <span className="text-xl">{section.icon}</span>
-          <div className="text-left">
-            <div className="flex items-center gap-2">
-              <h2 className={`text-sm font-bold ${cm.header}`}>{section.title}</h2>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${cm.badge}`}>
-                {items.length}{items.length !== totalInStatus ? ` / ${totalInStatus}` : ''}
-              </span>
-              {criticalCount > 0 && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/10 text-red-400 animate-pulse">{criticalCount} critical</span>
-              )}
-              {highCount > 0 && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-orange-500/10 text-orange-400">{highCount} high</span>
-              )}
+      <div className="px-5 py-4">
+        <button className="w-full flex items-center justify-between hover:bg-white/[0.02] transition-colors" onClick={onToggle}>
+          <div className="flex items-center gap-3">
+            <span className="text-xl">{section.icon}</span>
+            <div className="text-left">
+              <div className="flex items-center gap-2">
+                <h2 className={`text-sm font-bold ${cm.header}`}>{section.title}</h2>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${cm.badge}`}>
+                  {items.length}{items.length !== totalInStatus ? ` / ${totalInStatus}` : ''}
+                </span>
+                {criticalCount > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-red-500/10 text-red-400 animate-pulse">{criticalCount} critical</span>
+                )}
+                {highCount > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-orange-500/10 text-orange-400">{highCount} high</span>
+                )}
+              </div>
+              <p className="text-[11px] text-white/40 mt-0.5">
+                {section.subtitle} &middot; {fmtK(totalValue)}
+                {filterHint && <span className="text-white/25"> &middot; {filterHint}</span>}
+              </p>
             </div>
-            <p className="text-[11px] text-white/40 mt-0.5">
-              {section.subtitle} &middot; {fmtK(totalValue)}
-              {filterHint && <span className="text-white/25"> &middot; {filterHint}</span>}
-            </p>
           </div>
+          <svg className={`w-4 h-4 text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+        </button>
+        {/* Per-section time filter */}
+        <div className="flex flex-wrap gap-1 mt-2 ml-9">
+          {TIME_FRAMES.map(tf => (
+            <button
+              key={tf.id}
+              onClick={(e) => { e.stopPropagation(); setLocalFilter(tf.id); }}
+              className={`px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase transition-all ${
+                localFilter === tf.id
+                  ? `${cm.badge} ring-1 ring-${section.color}-500/40`
+                  : 'text-white/30 hover:text-white/60 hover:bg-white/5'
+              }`}
+            >
+              {tf.label}
+            </button>
+          ))}
         </div>
-        <svg className={`w-4 h-4 text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-      </button>
+      </div>
 
       {/* Table */}
       {expanded && (
