@@ -39,13 +39,12 @@ const extractSP = (sp: any): string | undefined => {
 };
 
 const TIME_FRAMES = [
-  { id: 'all', label: 'All', days: null },
-  { id: '90d', label: '90d', days: 90 },
-  { id: '30d', label: '30d', days: 30 },
-  { id: '14d', label: '14d', days: 14 },
-  { id: '7d',  label: '7d',  days: 7 },
-  { id: '5d',  label: '5d',  days: 5 },
-  { id: '3d',  label: '3d',  days: 3 },
+  { id: 'all',    label: 'All',    min: null, max: null },
+  { id: '3-5d',   label: '3-5D',   min: 3,    max: 5 },
+  { id: '5-7d',   label: '5-7D',   min: 5,    max: 7 },
+  { id: '7-14d',  label: '7-14D',  min: 7,    max: 14 },
+  { id: '14-30d', label: '14-30D', min: 14,   max: 30 },
+  { id: '30-90d', label: '30-90D', min: 30,   max: 90 },
 ] as const;
 
 type TimeFrameId = typeof TIME_FRAMES[number]['id'];
@@ -99,17 +98,18 @@ function metricColor(days: number | null, section: PrioritySection): string {
   }
 }
 
-function passesFilter(job: DecoJob, section: PrioritySection, filterDays: number | null, now: Date): boolean {
-  if (filterDays === null) return true;
+function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number | null, filterMax: number | null, now: Date): boolean {
+  if (filterMin === null && filterMax === null) return true;
   const metric = getMetricDays(job, section, now);
   if (metric === null) return true;
+  const lo = filterMin ?? 0;
+  const hi = filterMax ?? Infinity;
   switch (section.filterMetric) {
     case 'days_since_ordered':
-      return metric >= filterDays;
-    case 'days_until_due':
-      return metric <= filterDays;
     case 'days_past_due':
-      return metric >= filterDays;
+      return metric >= lo && metric <= hi;
+    case 'days_until_due':
+      return metric >= -hi && metric <= lo;
     default:
       return true;
   }
@@ -289,20 +289,22 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }:
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
-  const filterDays = TIME_FRAMES.find(t => t.id === localFilter)?.days ?? null;
+  const tf = TIME_FRAMES.find(t => t.id === localFilter);
+  const filterMin = tf?.min ?? null;
+  const filterMax = tf?.max ?? null;
   const items = useMemo(() =>
-    allItems.filter(r => passesFilter(r.job, section, filterDays, now)),
-  [allItems, filterDays, section, now]);
+    allItems.filter(r => passesFilter(r.job, section, filterMin, filterMax, now)),
+  [allItems, filterMin, filterMax, section, now]);
 
   const totalValue = items.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
   const criticalCount = items.filter(r => r.urgency === 'critical').length;
   const highCount = items.filter(r => r.urgency === 'high').length;
   const totalInStatus = allItems.length;
 
-  const filterHint = filterDays === null ? '' : (
-    section.filterMetric === 'days_since_ordered' ? `Orders waiting ${filterDays}+ days` :
-    section.filterMetric === 'days_until_due' ? `Due within ${filterDays} days or overdue` :
-    section.filterMetric === 'days_past_due' ? `Waiting ${filterDays}+ days to ship` : ''
+  const filterHint = (filterMin === null && filterMax === null) ? '' : (
+    section.filterMetric === 'days_since_ordered' ? `Orders waiting ${filterMin}–${filterMax} days` :
+    section.filterMetric === 'days_until_due' ? `Due within ${filterMin}–${filterMax} days` :
+    section.filterMetric === 'days_past_due' ? `Waiting ${filterMin}–${filterMax} days to ship` : ''
   );
 
   return (
