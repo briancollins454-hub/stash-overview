@@ -343,6 +343,8 @@ const App: React.FC = () => {
   const [scanCount, setScanCount] = useState({ current: 0, total: 0 });
   const [showScanConsole, setShowScanConsole] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navDropdown, setNavDropdown] = useState<string | null>(null);
+  const navDropRef = useRef<HTMLDivElement>(null);
   const stopScanRef = useRef(false);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const [lastSyncLabel, setLastSyncLabel] = useState<string>('');
@@ -369,6 +371,15 @@ const App: React.FC = () => {
       setActiveTab('widget');
     }
   }, [setActiveTab]);
+
+  // Close nav dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (navDropRef.current && !navDropRef.current.contains(e.target as Node)) setNavDropdown(null);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Customer tracking page detection
   const trackOrderNumber = searchParams.get('track');
@@ -1806,11 +1817,53 @@ const App: React.FC = () => {
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>
             
             {/* Desktop nav */}
-            <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1">
-                <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'priority', label: 'PRIORITY' }, { id: 'digest', label: 'DIGEST' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'sales', label: 'SALES' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
-                    <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
+            <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1" ref={navDropRef}>
+                <div className="flex items-center gap-1">
+                {/* Direct tabs — daily drivers */}
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
+                    <button key={tab.id} onClick={() => { setActiveTab(tab.id); setNavDropdown(null); }} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
+                {/* Grouped dropdowns */}
+                {[
+                  { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
+                  { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }] },
+                  { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
+                  { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'digest', label: 'Email Digest' }] },
+                  { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }] },
+                ].map(group => {
+                  const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
+                  if (allowedTabs.length === 0) return null;
+                  const isActive = allowedTabs.some(t => t.id === activeTab);
+                  const isOpen = navDropdown === group.group;
+                  return (
+                    <div key={group.group} className="relative">
+                      <button
+                        onClick={() => setNavDropdown(isOpen ? null : group.group)}
+                        className={`flex items-center gap-1 px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${
+                          isActive ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        {group.group}
+                        <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {isOpen && (
+                        <div className="absolute top-full left-0 mt-1 bg-[#2a2a55] border border-indigo-500/20 rounded-lg shadow-xl min-w-[180px] py-1 z-[70]">
+                          {allowedTabs.map(tab => (
+                            <button
+                              key={tab.id}
+                              onClick={() => { setActiveTab(tab.id); setNavDropdown(null); }}
+                              className={`w-full text-left px-4 py-2 text-[10px] font-bold tracking-wider uppercase transition-all ${
+                                activeTab === tab.id ? 'bg-indigo-500/20 text-white' : 'text-indigo-200 hover:text-white hover:bg-white/5'
+                              }`}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                 <div className="w-px h-6 bg-white/10 mx-1"></div>
@@ -1862,9 +1915,29 @@ const App: React.FC = () => {
         {mobileMenuOpen && (
             <div className="lg:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-1 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'priority', label: 'PRIORITY' }, { id: 'digest', label: 'DIGEST' }, { id: 'command', label: '⚡ LIVE' }, { id: 'kanban', label: 'KANBAN' }, { id: 'intelligence', label: 'INTEL' }, { id: 'production', label: 'PRODUCTION' }, { id: 'reports', label: 'REPORTS' }, { id: 'operations', label: 'OPS' }, { id: 'stock', label: 'STOCK' }, { id: 'efficiency', label: 'EFFICIENCY' }, { id: 'mto', label: 'MTO' }, { id: 'deco', label: 'DECO' }, { id: 'revenue', label: 'REVENUE' }, { id: 'sales', label: 'SALES' }, { id: 'autolink', label: 'LINKER' }, { id: 'fulfill', label: 'FULFILL' }, { id: 'analyst', label: 'ANALYST' }, { id: 'users', label: 'USERS' }].filter(tab => isTabAllowed(tab.id)).map(tab => (
-                        <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 sm:py-3 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
+                    {/* Direct tabs */}
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
+                        <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
+                    {/* Grouped sections */}
+                    {[
+                      { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
+                      { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }] },
+                      { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
+                      { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'digest', label: 'Email Digest' }] },
+                      { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }] },
+                    ].map(group => {
+                      const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
+                      if (allowedTabs.length === 0) return null;
+                      return (
+                        <div key={group.group}>
+                          <div className="px-4 pt-3 pb-1 text-[9px] font-black text-indigo-400/50 uppercase tracking-[0.2em]">{group.group}</div>
+                          {allowedTabs.map(tab => (
+                            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-6 py-2.5 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
+                          ))}
+                        </div>
+                      );
+                    })}
                     <div className="border-t border-indigo-500/20 pt-3 mt-3 flex items-center justify-between">
                         {isTabAllowed('manual') && <button onClick={() => { setActiveTab('manual'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><BookOpen className="w-4 h-4" /> Manual</button>}
                 {isTabAllowed('finance') && <button onClick={() => { setActiveTab('finance'); setMobileMenuOpen(false); }} className="text-indigo-200 text-xs font-bold uppercase tracking-widest flex items-center gap-2"><PoundSterling className="w-4 h-4" /> Finance</button>}
