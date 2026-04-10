@@ -103,19 +103,19 @@ const getDecoBadge = (type: string | undefined) => {
 
 const STATUS_BADGE: Record<string, { cls: string; short: string }> = {
     'Order': { cls: 'bg-blue-500/20 text-blue-300 border-blue-500/30', short: 'ORDER' },
-    'Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'PROD' },
-    'In Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'IN PROD' },
+    'Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'PRODUCING' },
+    'In Production': { cls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30', short: 'PRODUCING' },
     'Awaiting Processing': { cls: 'bg-slate-500/20 text-slate-300 border-slate-500/30', short: 'PROCESSING' },
-    'Awaiting Stock': { cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30', short: 'STOCK' },
-    'Awaiting Artwork': { cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30', short: 'ARTWORK' },
-    'Awaiting Review': { cls: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', short: 'REVIEW' },
-    'Awaiting PO': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'PO' },
-    'Not Ordered': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'NOT ORD' },
+    'Awaiting Stock': { cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30', short: 'NEED STOCK' },
+    'Awaiting Artwork': { cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30', short: 'NEED ART' },
+    'Awaiting Review': { cls: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30', short: 'IN REVIEW' },
+    'Awaiting PO': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'NEED PO' },
+    'Not Ordered': { cls: 'bg-red-500/20 text-red-300 border-red-500/30', short: 'NOT ORDERED' },
     'Ready for Shipping': { cls: 'bg-green-500/20 text-green-300 border-green-500/30', short: 'READY' },
     'Completed': { cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', short: 'DONE' },
     'Shipped': { cls: 'bg-sky-500/20 text-sky-300 border-sky-500/30', short: 'SHIPPED' },
-    'On Hold': { cls: 'bg-gray-500/20 text-gray-400 border-gray-500/30', short: 'HOLD' },
-    'Cancelled': { cls: 'bg-red-500/10 text-red-400/60 border-red-500/20', short: 'CANCEL' },
+    'On Hold': { cls: 'bg-gray-500/20 text-gray-400 border-gray-500/30', short: 'ON HOLD' },
+    'Cancelled': { cls: 'bg-red-500/10 text-red-400/60 border-red-500/20', short: 'CANCELLED' },
 };
 
 type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer';
