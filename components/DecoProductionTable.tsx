@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -131,8 +131,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
     const [sortKey, setSortKey] = useState<SortKey>('due');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+    const [typeFilter, setTypeFilter] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
+    const tableRef = useRef<HTMLDivElement>(null);
 
     const now = useMemo(() => new Date(), []);
 
@@ -175,6 +177,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
             );
         }
 
+        // Type filter
+        if (typeFilter) {
+            list = list.filter(j => j.decoTypes.includes(typeFilter));
+        }
+
         // Sort
         list = [...list].sort((a, b) => {
             let cmp = 0;
@@ -192,7 +199,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
         });
 
         return list;
-    }, [enrichedJobs, statusFilter, searchTerm, sortKey, sortDir]);
+    }, [enrichedJobs, statusFilter, typeFilter, searchTerm, sortKey, sortDir]);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -212,8 +219,103 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
     const dtfCount = filtered.filter(j => j.decoTypes.includes('DTF')).length;
     const flexCount = filtered.filter(j => j.decoTypes.includes('FLEX')).length;
 
+    // All unique decoration types across all jobs
+    const allDecoTypes = useMemo(() => {
+        const types = new Set<string>();
+        enrichedJobs.forEach(j => j.decoTypes.forEach(t => types.add(t)));
+        return Array.from(types).sort();
+    }, [enrichedJobs]);
+
+    // Count per type (from enriched, not filtered, so counts don't change when type filter active)
+    const typeCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        // Apply status + search filters but NOT type filter for the counts
+        let base = enrichedJobs;
+        if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
+        else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
+        else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
+        if (searchTerm) {
+            const s = searchTerm.toLowerCase();
+            base = base.filter(j => j.jobNumber.includes(s) || j.customerName.toLowerCase().includes(s) || j.jobName.toLowerCase().includes(s) || j.decoTypes.some(t => t.toLowerCase().includes(s)));
+        }
+        base.forEach(j => j.decoTypes.forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
+        return counts;
+    }, [enrichedJobs, statusFilter, searchTerm]);
+
+    const handlePrint = () => {
+        const el = tableRef.current;
+        if (!el) return;
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) return;
+        printWindow.document.write(`<!DOCTYPE html><html><head><title>Deco Production Jobs</title><style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 9px; color: #1e1e3a; padding: 12px; }
+            h1 { font-size: 14px; margin-bottom: 2px; }
+            .subtitle { font-size: 9px; color: #666; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th { background: #f0f0f8; font-size: 8px; text-transform: uppercase; letter-spacing: 0.5px; padding: 5px 6px; border: 1px solid #ddd; text-align: left; font-weight: 800; }
+            td { padding: 4px 6px; border: 1px solid #ddd; font-size: 9px; }
+            tr:nth-child(even) { background: #f8f8fc; }
+            .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 7px; font-weight: 900; text-transform: uppercase; border: 1px solid; }
+            .emb { background: #f3e8ff; color: #6b21a8; border-color: #c084fc; }
+            .dtf { background: #e0f7fa; color: #00838f; border-color: #4dd0e1; }
+            .flex { background: #fff8e1; color: #e65100; border-color: #ffb74d; }
+            .transfer { background: #fff3e0; color: #bf360c; border-color: #ff8a65; }
+            .uv { background: #e3f2fd; color: #0d47a1; border-color: #64b5f6; }
+            .screen { background: #e8f5e9; color: #1b5e20; border-color: #81c784; }
+            .freeform { background: #fce4ec; color: #880e4f; border-color: #f48fb1; }
+            .vinyl { background: #e0f2f1; color: #004d40; border-color: #4db6ac; }
+            .sublimation { background: #fce4ec; color: #ad1457; border-color: #f06292; }
+            .dtg { background: #e8eaf6; color: #283593; border-color: #7986cb; }
+            .none { background: #f5f5f5; color: #999; border-color: #ccc; }
+            .status-production { background: #e8eaf6; color: #3949ab; }
+            .status-awaiting { background: #fff8e1; color: #f57f17; }
+            .status-ready { background: #e8f5e9; color: #2e7d32; }
+            .status-order { background: #e3f2fd; color: #1565c0; }
+            .status-hold { background: #f5f5f5; color: #757575; }
+            .overdue { color: #d32f2f; font-weight: bold; }
+            .due-soon { color: #e65100; font-weight: bold; }
+            .pph-good { color: #2e7d32; font-weight: bold; }
+            .pph-ok { color: #e65100; font-weight: bold; }
+            .pph-low { color: #c62828; font-weight: bold; }
+            .filter-info { font-size: 8px; color: #888; margin-bottom: 8px; }
+            @media print { body { padding: 0; } }
+        </style></head><body>`);
+        printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
+        printWindow.document.write(`<div class="subtitle">${filtered.length} jobs · ${fmtK(totalValue)} pipeline · ${fmtTime(totalMinutes)} est. · Printed ${new Date().toLocaleString('en-GB')}</div>`);
+        const filters = [statusFilter !== 'all' ? statusFilter.toUpperCase() : '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
+        if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${filters.join(' · ')}</div>`);
+        printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
+        filtered.forEach(job => {
+            const typeClass = (job.decoTypes[0] || 'none').toLowerCase();
+            const statusClass = job.status.toLowerCase().includes('production') ? 'status-production' : job.status.toLowerCase().includes('await') ? 'status-awaiting' : job.status.toLowerCase().includes('ready') ? 'status-ready' : job.status.toLowerCase().includes('order') ? 'status-order' : 'status-hold';
+            const dueClass = job.daysUntilDue !== null ? (job.daysUntilDue < 0 ? 'overdue' : job.daysUntilDue <= 3 ? 'due-soon' : '') : '';
+            const pphClass = job.poundPerHour >= 50 ? 'pph-good' : job.poundPerHour >= 25 ? 'pph-ok' : job.poundPerHour > 0 ? 'pph-low' : '';
+            const dueText = job.daysUntilDue !== null ? (job.daysUntilDue < 0 ? `${Math.abs(job.daysUntilDue)}d over` : job.daysUntilDue === 0 ? 'Today' : `${job.daysUntilDue}d`) : '—';
+            printWindow.document.write(`<tr>`);
+            printWindow.document.write(`<td>#${job.jobNumber}</td>`);
+            printWindow.document.write(`<td>${job.customerName}</td>`);
+            printWindow.document.write(`<td>${job.jobName}</td>`);
+            printWindow.document.write(`<td><span class="badge ${statusClass}">${job.status}</span></td>`);
+            printWindow.document.write(`<td>${job.decoTypes.map(t => `<span class="badge ${t.toLowerCase()}">${t}</span>`).join(' ') || '—'}</td>`);
+            printWindow.document.write(`<td>${job.totalQty}</td>`);
+            printWindow.document.write(`<td>${job.est.totalStitches > 0 ? fmtStitches(job.est.totalStitches) : '—'}</td>`);
+            printWindow.document.write(`<td>${job.est.totalMinutes > 0 ? fmtTime(job.est.totalMinutes) : '—'}</td>`);
+            printWindow.document.write(`<td>${job.est.isEmbroidery ? job.est.machineType : '—'}</td>`);
+            printWindow.document.write(`<td>${job.daysInProd !== null ? `${job.daysInProd}d` : '—'}</td>`);
+            printWindow.document.write(`<td class="${dueClass}">${dueText}</td>`);
+            printWindow.document.write(`<td>${job.jobValue > 0 ? fmtK(job.jobValue) : '—'}</td>`);
+            printWindow.document.write(`<td class="${pphClass}">${job.poundPerHour > 0 ? '£' + job.poundPerHour.toFixed(0) : '—'}</td>`);
+            printWindow.document.write(`</tr>`);
+        });
+        printWindow.document.write(`</tbody></table></body></html>`);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.print();
+    };
+
     return (
-        <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 overflow-hidden">
+        <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 overflow-hidden" ref={tableRef}>
             {/* Header */}
             <div className="px-5 py-4 border-b border-white/5">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -228,6 +330,13 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={handlePrint}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all"
+                            title="Print spreadsheet"
+                        >
+                            <Printer className="w-3.5 h-3.5" /> Print
+                        </button>
                         <div className="relative">
                             <Search className="w-3.5 h-3.5 text-white/30 absolute left-2 top-1/2 -translate-y-1/2" />
                             <input
@@ -240,7 +349,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
                         </div>
                     </div>
                 </div>
-                {/* Type summary badges */}
+                {/* Status filters */}
                 <div className="flex flex-wrap gap-2 mt-3">
                     {[
                         { label: 'Active', key: 'active' as StatusFilter, count: enrichedJobs.filter(j => !EXCLUDED_STATUSES.has(j.status)).length },
@@ -260,11 +369,38 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder }: Pro
                             {f.label} ({f.count})
                         </button>
                     ))}
-                    <div className="w-px h-5 bg-white/10 mx-1 self-center" />
-                    {embCount > 0 && <span className="px-2 py-0.5 rounded border text-[8px] font-black uppercase bg-purple-500/20 border-purple-500/30 text-purple-300">{embCount} EMB</span>}
-                    {dtfCount > 0 && <span className="px-2 py-0.5 rounded border text-[8px] font-black uppercase bg-cyan-500/20 border-cyan-500/30 text-cyan-300">{dtfCount} DTF</span>}
-                    {flexCount > 0 && <span className="px-2 py-0.5 rounded border text-[8px] font-black uppercase bg-amber-500/20 border-amber-500/30 text-amber-300">{flexCount} FLEX</span>}
                 </div>
+                {/* Decoration type filters */}
+                {allDecoTypes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                        <button
+                            onClick={() => setTypeFilter(null)}
+                            className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-wider transition-all ${
+                                typeFilter === null
+                                    ? 'bg-white/10 border-white/30 text-white ring-1 ring-white/20'
+                                    : 'bg-white/5 border-white/10 text-white/30 hover:text-white/60'
+                            }`}
+                        >All Types</button>
+                        {allDecoTypes.map(t => {
+                            const b = getDecoBadge(t);
+                            const count = typeCounts[t] || 0;
+                            const isActive = typeFilter === t;
+                            return (
+                                <button
+                                    key={t}
+                                    onClick={() => setTypeFilter(isActive ? null : t)}
+                                    className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-wider transition-all ${
+                                        isActive
+                                            ? `${b.bg} ${b.text} ring-1 ring-current`
+                                            : `bg-white/5 border-white/10 text-white/30 hover:text-white/60`
+                                    }`}
+                                >
+                                    {t} ({count})
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
 
             {/* Table */}
