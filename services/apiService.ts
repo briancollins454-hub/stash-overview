@@ -498,39 +498,6 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: log structure of jobs to see where decoration/stitch data lives
-    if (allDeco.length > 0) {
-        // Find the richest line (most keys) to sample
-        let bestJob = allDeco[0]; let bestLine: any = null; let maxKeys = 0;
-        const itemTypeCounts: Record<number, number> = {};
-        for (const j of allDeco.slice(0, 20)) {
-            for (const l of (j.order_lines || [])) {
-                const kt = Object.keys(l).length;
-                itemTypeCounts[l.item_type] = (itemTypeCounts[l.item_type] || 0) + 1;
-                if (kt > maxKeys) { maxKeys = kt; bestJob = j; bestLine = l; }
-            }
-        }
-        if (bestLine) {
-            console.log('[DECO DEBUG] Item type distribution (first 20 jobs):', itemTypeCounts);
-            // Deep-dive into views → areas → processes
-            const viewsDump = (bestLine.views || []).map((v: any) => ({
-                view_name: v.view_name || v.name, view_id: v.view_id,
-                areas: (v.areas || []).map((a: any) => ({
-                    area_keys: Object.keys(a).sort(),
-                    area_name: a.name || a.area_name,
-                    has_processes: !!a.processes, processes_count: (a.processes || []).length,
-                    // Dump full first process with ALL data
-                    first_process_full: (a.processes || [])[0] || null,
-                    // Dump ALL processes to see stitch counts
-                    all_processes: (a.processes || []).map((p: any) => ({ ...p, _keys: Object.keys(p).sort() })),
-                    // Also check decoration_processes
-                    has_decoration_processes: !!a.decoration_processes,
-                })),
-            }));
-            console.log('[DECO DEBUG] Views deep-dive:', JSON.stringify(viewsDump, null, 2));
-            console.log('[DECO DEBUG] Line product:', bestLine.product_name, '| Job:', bestJob.job_name);
-        }
-    }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
