@@ -172,7 +172,9 @@ const parseDecoItems = (job: any): DecoItem[] => {
     });
     const items: DecoItem[] = [];
     job.order_lines.forEach((line: any) => {
-        if (!line || (line.item_type !== 0 && line.item_type !== 25)) return;
+        if (!line) return;
+        // item_type: 0=standard, 25=freeform, 26=general job — allow all product-like types
+        if (![0, 25, 26].includes(line.item_type)) return;
         let colorName = line.product_color?.name || '';
         const potentialEan = line.barcode || line.ean || line.gtin || line.upc || line.product?.barcode || '';
         const decoInfo = extractDecorationInfo(line, job);
@@ -489,44 +491,47 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
-        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_user_assignments': '1', 'include_custom_fields': '1', 'include_sales_data': '1', 'skip_login_token': '1' };
+        const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_user_assignments': '1', 'include_custom_fields': '1', 'include_sales_data': '1', 'include_product_data': '1', 'include_decoration_data': '1', 'include_artwork_data': '1', 'skip_login_token': '1' };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    // Debug: log raw structure of first job so we can see where decoration/stitch data lives
+    // Debug: log structure of jobs to see where decoration/stitch data lives
     if (allDeco.length > 0) {
-        const sample = allDeco[0];
-        const linesSample = (sample.order_lines || []).slice(0, 1).map((l: any) => ({
-            product_name: l.product_name, item_type: l.item_type,
-            decoration_details: l.decoration_details, decorations: l.decorations,
-            decoration_method: l.decoration_method, process_type: l.process_type,
-            product_type: l.product_type,
-            stitch_count: l.stitch_count, total_stitches: l.total_stitches,
-            digitization_stitch_count: l.digitization_stitch_count,
-            has_processes: !!l.processes, processes_length: (l.processes || []).length,
-            has_views: !!l.views, views_length: (l.views || []).length,
-            has_artwork_views: !!l.artwork_views,
-            processes_sample: (l.processes || []).slice(0, 1),
-            views_sample: (l.views || []).slice(0, 1).map((v: any) => ({
-                name: v.name, has_areas: !!v.areas, areas_length: (v.areas || []).length,
-                areas_sample: (v.areas || []).slice(0, 1).map((a: any) => ({
-                    name: a.name, has_processes: !!a.processes, processes_length: (a.processes || []).length,
-                    processes_sample: (a.processes || []).slice(0, 1),
-                })),
-            })),
-            top_level_keys: Object.keys(l).sort(),
-        }));
-        console.log('[DECO DEBUG] Raw job sample:', JSON.stringify({
-            order_id: sample.order_id, job_name: sample.job_name,
-            has_artwork_jobs: !!sample.artwork_jobs, artwork_jobs_length: (sample.artwork_jobs || []).length,
-            has_jobs: !!sample.jobs, has_artwork: !!sample.artwork,
-            artwork_jobs_sample: (sample.artwork_jobs || sample.jobs || sample.artwork?.jobs || []).slice(0, 1),
-            top_level_keys: Object.keys(sample).sort(),
-            order_lines_sample: linesSample,
-        }, null, 2));
+        // Find the richest line (most keys) to sample
+        let bestJob = allDeco[0]; let bestLine: any = null; let maxKeys = 0;
+        const itemTypeCounts: Record<number, number> = {};
+        for (const j of allDeco.slice(0, 20)) {
+            for (const l of (j.order_lines || [])) {
+                const kt = Object.keys(l).length;
+                itemTypeCounts[l.item_type] = (itemTypeCounts[l.item_type] || 0) + 1;
+                if (kt > maxKeys) { maxKeys = kt; bestJob = j; bestLine = l; }
+            }
+        }
+        if (bestLine) {
+            console.log('[DECO DEBUG] Item type distribution (first 20 jobs):', itemTypeCounts);
+            console.log('[DECO DEBUG] Richest line (' + maxKeys + ' keys):', JSON.stringify({
+                job_id: bestJob.order_id, job_name: bestJob.job_name,
+                job_top_keys: Object.keys(bestJob).sort(),
+                line_product: bestLine.product_name, line_item_type: bestLine.item_type,
+                line_ALL_keys: Object.keys(bestLine).sort(),
+                line_decoration_details: bestLine.decoration_details,
+                line_decoration_method: bestLine.decoration_method,
+                line_process_type: bestLine.process_type,
+                line_product_type: bestLine.product_type,
+                has_processes: !!bestLine.processes, processes_count: (bestLine.processes || []).length,
+                has_views: !!bestLine.views, views_count: (bestLine.views || []).length,
+                has_workflow_items: !!bestLine.workflow_items, workflow_count: (bestLine.workflow_items || []).length,
+                // Dump first process if exists
+                first_process: (bestLine.processes || [])[0] || null,
+                // Dump first view if exists
+                first_view: (bestLine.views || [])[0] ? { name: (bestLine.views || [])[0].name, keys: Object.keys((bestLine.views || [])[0]).sort() } : null,
+                // Dump first workflow_item keys
+                first_wf_keys: bestLine.workflow_items?.[0] ? Object.keys(bestLine.workflow_items[0]).sort() : null,
+            }, null, 2));
+        }
     }
     return allDeco.map((job: any) => {
         const items = parseDecoItems(job);
