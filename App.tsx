@@ -504,34 +504,20 @@ const App: React.FC = () => {
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
             
-            // Merge deco jobs: start with local cached, then API (fresh), then cloud (status authority)
-            // Cloud = status-refreshed jobs saved by any device. API = freshly-parsed with latest extraction code.
-            // When cloud overwrites API, preserve decoration data from API if cloud lacks it.
+            // Merge deco jobs: API data (freshly parsed) is authoritative for jobs it returns.
+            // Cloud data fills in gaps (jobs outside lookback window, status updates from other devices).
+            // For jobs present in BOTH API and cloud, API wins (has latest extraction code).
             const jobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
-            const apiJobMap = new Map(dRecentJobs.map(j => [j.jobNumber, j]));
-            dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
-            // Fetch cloud-saved deco jobs (includes status-refreshed data from any device)
+            const apiJobSet = new Set(dRecentJobs.map(j => j.jobNumber));
+            // Layer cloud first (lower priority)
             try {
               const cloudJobs = await fetchCloudData(apiSettings).then(d => d?.decoJobs || []).catch(() => []);
               if (cloudJobs.length > 0) {
-                cloudJobs.forEach((j: DecoJob) => {
-                  const apiJob = apiJobMap.get(j.jobNumber);
-                  // If API data has decoration info that cloud data lacks, merge it in
-                  if (apiJob && apiJob.items.some(i => i.decorationType)) {
-                    const mergedItems = j.items.map((item, idx) => {
-                      const apiItem = apiJob.items[idx];
-                      if (apiItem && !item.decorationType && apiItem.decorationType) {
-                        return { ...item, decorationType: apiItem.decorationType, stitchCount: item.stitchCount || apiItem.stitchCount };
-                      }
-                      return item;
-                    });
-                    jobMap.set(j.jobNumber, { ...j, items: mergedItems });
-                  } else {
-                    jobMap.set(j.jobNumber, j);
-                  }
-                });
+                cloudJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
               }
             } catch {}
+            // Then layer API on top (highest priority — freshly parsed with latest code)
+            dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
             const mergedDecoJobs = Array.from(jobMap.values());
             setRawDecoJobs(mergedDecoJobs);
             setLocalItem('stash_raw_deco_jobs', mergedDecoJobs).catch(console.error);
