@@ -498,10 +498,15 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
     }
-    return allDeco.map((job: any) => {
+    const parsed = allDeco.map((job: any) => {
         const items = parseDecoItems(job);
         return buildDecoJob(job, items);
     });
+    // Debug: count how many jobs got decoration types
+    const withTypes = parsed.filter(j => j.items.some(i => i.decorationType));
+    console.log(`[DECO] Parsed ${parsed.length} jobs. ${withTypes.length} have decoration types.`,
+        withTypes.length > 0 ? 'Sample types: ' + withTypes.slice(0, 5).map(j => `${j.jobNumber}=${j.items.map(i=>i.decorationType).filter(Boolean).join(',')}`).join(' | ') : '');
+    return parsed;
 };
 
 // Lightweight financial-only fetch — loads ALL Deco orders from a given year onward
