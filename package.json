@@ -24,6 +24,7 @@
     "react-router-dom": "^7.13.2",
     "react-window": "^2.2.7",
     "recharts": "^3.8.0",
+    "resend": "^6.10.0",
     "tsx": "^4.21.0"
   },
   "devDependencies": {
