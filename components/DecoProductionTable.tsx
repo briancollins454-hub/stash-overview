@@ -139,7 +139,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
-    const [hideIncomplete, setHideIncomplete] = useState(true);
+    const [hideIncomplete, setHideIncomplete] = useState(false);
     const [dueFrom, setDueFrom] = useState('');
     const [dueTo, setDueTo] = useState('');
     const [orderedFrom, setOrderedFrom] = useState('');
@@ -464,7 +464,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             }`}
                             title={hideIncomplete ? 'Show jobs with no decoration data' : 'Hide jobs with no decoration data'}
                         >
-                            {hideIncomplete ? `+ ${incompleteCount} incomplete` : `Showing ${incompleteCount} incomplete`}
+                            {hideIncomplete ? `+ ${incompleteCount} untyped` : `Hide ${incompleteCount} untyped`}
                         </button>
                     )}
                 </div>
@@ -596,7 +596,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                                 {job.decoTypes.length > 0 ? job.decoTypes.map(t => {
                                                     const b = getDecoBadge(t);
                                                     return <span key={t} className={`px-1.5 py-0.5 rounded border text-[7px] font-black uppercase ${b.bg} ${b.text}`}>{t}</span>;
-                                                }) : <span className="text-white/20">—</span>}
+                                                }) : <span className="px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/10 text-amber-300/50 text-[7px] font-black uppercase">?</span>}
                                             </div>
                                         </td>
                                         <td className="px-3 py-2.5 text-center text-white/60 font-bold">{job.totalQty}</td>
