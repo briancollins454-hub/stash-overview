@@ -95,7 +95,7 @@ function extractProcessData(proc: any, result: { decorationType?: string; stitch
     }
 }
 
-function extractDecorationInfo(line: any, job?: any): { decorationType?: string; stitchCount?: number } {
+export function extractDecorationInfo(line: any, job?: any): { decorationType?: string; stitchCount?: number } {
     const result = { decorationType: undefined as string | undefined, stitchCount: 0 };
 
     // === Path 1: Flat processes on line (line.processes[]) ===
@@ -769,4 +769,50 @@ export const updateShopifyVariantBarcode = async (settings: ApiSettings, variant
     } catch (e: any) {
         return { success: false, error: e.message };
     }
+};
+
+/* ---------- Stitch enrichment: fetch detail per job ---------- */
+export interface StitchCacheEntry {
+    job_number: string;
+    items: Array<{ lineIndex: number; decorationType?: string; stitchCount?: number }>;
+    enriched_at: string;
+}
+
+export const enrichDecoStitchBatch = async (
+    settings: ApiSettings,
+    jobIds: string[],
+    onProgress?: (done: number, total: number) => void,
+): Promise<StitchCacheEntry[]> => {
+    if (!settings.useLiveData || jobIds.length === 0) return [];
+    const results: StitchCacheEntry[] = [];
+    const BATCH = 5;
+
+    for (let i = 0; i < jobIds.length; i += BATCH) {
+        const batch = jobIds.slice(i, i + BATCH);
+        try {
+            const res = await fetchServerRoute('/api/deco', { action: 'enrich_stitch', jobIds: batch });
+            const json = await res.json();
+            for (const r of (json.results || [])) {
+                if (!r.order) {
+                    results.push({ job_number: r.jobId, items: [], enriched_at: new Date().toISOString() });
+                    continue;
+                }
+                const job = r.order;
+                const items: StitchCacheEntry['items'] = [];
+                (job.order_lines || []).forEach((line: any, idx: number) => {
+                    const info = extractDecorationInfo(line, job);
+                    if (info.decorationType || info.stitchCount) {
+                        items.push({ lineIndex: idx, decorationType: info.decorationType, stitchCount: info.stitchCount });
+                    }
+                });
+                results.push({ job_number: r.jobId, items, enriched_at: new Date().toISOString() });
+            }
+        } catch (e) {
+            // Mark failed jobs as enriched (empty) so we don't retry endlessly
+            batch.forEach(id => results.push({ job_number: id, items: [], enriched_at: new Date().toISOString() }));
+        }
+        if (onProgress) onProgress(Math.min(i + BATCH, jobIds.length), jobIds.length);
+        if (i + BATCH < jobIds.length) await delay(200);
+    }
+    return results;
 };

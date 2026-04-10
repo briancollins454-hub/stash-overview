@@ -408,3 +408,44 @@ export const saveCloudSettings = async (settings: ApiSettings): Promise<void> =>
         }
     }
 };
+
+/* ---------- Deco Stitch Cache (Supabase) ---------- */
+export interface CloudStitchCache {
+    job_number: string;
+    decoration_data: {
+        items: Array<{ lineIndex: number; decorationType?: string; stitchCount?: number }>;
+    };
+    enriched_at: string;
+}
+
+export const fetchStitchCache = async (): Promise<Map<string, CloudStitchCache>> => {
+    const map = new Map<string, CloudStitchCache>();
+    try {
+        const rows = await fetchAllFromCloud<CloudStitchCache>('stash_deco_stitch_cache');
+        if (rows) {
+            rows.forEach(r => map.set(r.job_number, r));
+        }
+    } catch (e) {
+        console.warn('Stitch cache fetch failed:', e);
+    }
+    return map;
+};
+
+export const saveStitchCache = async (entries: Array<{ job_number: string; items: Array<{ lineIndex: number; decorationType?: string; stitchCount?: number }>; enriched_at: string }>) => {
+    if (entries.length === 0) return;
+    const batchSize = 20;
+    for (let i = 0; i < entries.length; i += batchSize) {
+        const batch = entries.slice(i, i + batchSize);
+        const payload = batch.map(e => ({
+            job_number: e.job_number,
+            decoration_data: { items: e.items },
+            enriched_at: e.enriched_at,
+            updated_at: new Date().toISOString(),
+        }));
+        try {
+            await fetchWithProxy('stash_deco_stitch_cache', 'POST', payload, 'resolution=merge-duplicates');
+        } catch (e) {
+            console.warn('Stitch cache save failed for batch:', e);
+        }
+    }
+};

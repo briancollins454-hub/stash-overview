@@ -8,9 +8,9 @@ import { exportOrdersToCSV } from './services/exportService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize } from './services/apiService';
+import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping } from './services/syncService';
+import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
@@ -564,6 +564,82 @@ const App: React.FC = () => {
 
             // Save Deco jobs to cloud so all devices have the same job data
             saveCloudDecoJobs(apiSettings, mergedDecoJobs).catch(console.error);
+
+            // Background stitch enrichment: fetch detailed decoration/stitch data for jobs missing from cache
+            (async () => {
+                try {
+                    setSyncStatusMsg('Loading stitch cache...');
+                    const stitchCache = await fetchStitchCache();
+                    // Find jobs that need enrichment (not in cache)
+                    const needsEnrichment = mergedDecoJobs
+                        .filter(j => !stitchCache.has(j.jobNumber))
+                        .map(j => j.jobNumber);
+
+                    // Apply cached data to existing jobs first
+                    if (stitchCache.size > 0) {
+                        setRawDecoJobs(prev => {
+                            let changed = false;
+                            const updated = prev.map(job => {
+                                const cached = stitchCache.get(job.jobNumber);
+                                if (!cached || !cached.decoration_data?.items?.length) return job;
+                                const updatedItems = job.items.map((item, idx) => {
+                                    const match = cached.decoration_data.items.find(c => c.lineIndex === idx);
+                                    if (!match) return item;
+                                    if (item.decorationType && item.stitchCount) return item; // already has data
+                                    changed = true;
+                                    return {
+                                        ...item,
+                                        decorationType: item.decorationType || match.decorationType,
+                                        stitchCount: item.stitchCount || match.stitchCount,
+                                    };
+                                });
+                                return { ...job, items: updatedItems };
+                            });
+                            if (!changed) return prev;
+                            setLocalItem('stash_raw_deco_jobs', updated).catch(console.error);
+                            return updated;
+                        });
+                    }
+
+                    if (needsEnrichment.length > 0) {
+                        setSyncStatusMsg(`Enriching stitch data: 0/${needsEnrichment.length}...`);
+                        const newEntries = await enrichDecoStitchBatch(
+                            apiSettings,
+                            needsEnrichment,
+                            (done, total) => setSyncStatusMsg(`Enriching stitch data: ${done}/${total}...`),
+                        );
+
+                        // Save to Supabase cache
+                        await saveStitchCache(newEntries);
+
+                        // Apply to jobs in state
+                        if (newEntries.some(e => e.items.length > 0)) {
+                            setRawDecoJobs(prev => {
+                                const updated = prev.map(job => {
+                                    const entry = newEntries.find(e => e.job_number === job.jobNumber);
+                                    if (!entry || entry.items.length === 0) return job;
+                                    const updatedItems = job.items.map((item, idx) => {
+                                        const match = entry.items.find(c => c.lineIndex === idx);
+                                        if (!match) return item;
+                                        return {
+                                            ...item,
+                                            decorationType: item.decorationType || match.decorationType,
+                                            stitchCount: item.stitchCount || match.stitchCount,
+                                        };
+                                    });
+                                    return { ...job, items: updatedItems };
+                                });
+                                setLocalItem('stash_raw_deco_jobs', updated).catch(console.error);
+                                saveCloudDecoJobs(apiSettings, updated).catch(console.error);
+                                return updated;
+                            });
+                        }
+                        setSyncStatusMsg(`Stitch data enriched for ${newEntries.filter(e => e.items.length > 0).length} jobs`);
+                    }
+                } catch (e) {
+                    console.warn('Stitch enrichment failed (non-blocking):', e);
+                }
+            })();
 
             // Two-way cloud sync: push local → fetch cloud → replace local (cloud = single source of truth)
             setSyncStatusMsg('Pushing local mappings to cloud...');
