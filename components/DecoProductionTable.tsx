@@ -137,6 +137,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
+    const [hideIncomplete, setHideIncomplete] = useState(true);
     const tableRef = useRef<HTMLDivElement>(null);
 
     const now = useMemo(() => new Date(), []);
@@ -163,6 +164,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
 
     const filtered = useMemo(() => {
         let list = enrichedJobs;
+
+        // Hide jobs with no decoration data
+        if (hideIncomplete) {
+            list = list.filter(j => j.decoTypes.length > 0);
+        }
 
         // Status filter
         if (statusFilter === 'active') list = list.filter(j => !EXCLUDED_STATUSES.has(j.status));
@@ -202,7 +208,15 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
 
         return list;
-    }, [enrichedJobs, statusFilter, typeFilter, searchTerm, sortKey, sortDir]);
+    }, [enrichedJobs, hideIncomplete, statusFilter, typeFilter, searchTerm, sortKey, sortDir]);
+
+    const incompleteCount = useMemo(() => {
+        let base = enrichedJobs;
+        if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
+        else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
+        else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
+        return base.filter(j => j.decoTypes.length === 0).length;
+    }, [enrichedJobs, statusFilter]);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -417,6 +431,19 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             {f.label} ({f.count})
                         </button>
                     ))}
+                    {incompleteCount > 0 && (
+                        <button
+                            onClick={() => setHideIncomplete(h => !h)}
+                            className={`px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all ml-auto ${
+                                hideIncomplete
+                                    ? 'text-white/25 hover:text-white/50 hover:bg-white/5'
+                                    : 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
+                            }`}
+                            title={hideIncomplete ? 'Show jobs with no decoration data' : 'Hide jobs with no decoration data'}
+                        >
+                            {hideIncomplete ? `+ ${incompleteCount} incomplete` : `Showing ${incompleteCount} incomplete`}
+                        </button>
+                    )}
                 </div>
                 {/* Decoration type filters */}
                 {allDecoTypes.length > 0 && (
