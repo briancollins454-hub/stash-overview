@@ -220,8 +220,13 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const totalStitchesAll = filtered.reduce((a, j) => a + j.est.totalStitches, 0);
 
     const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
-    const embQty = filtered.reduce((a, j) => a + j.items.filter(i => i.decorationType === 'EMB').reduce((s, i) => s + i.quantity, 0), 0);
-    const printQty = filtered.reduce((a, j) => a + j.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType)).reduce((s, i) => s + i.quantity, 0), 0);
+    const embJobs = filtered.filter(j => j.decoTypes.includes('EMB'));
+    const embQty = embJobs.reduce((a, j) => a + j.items.filter(i => i.decorationType === 'EMB').reduce((s, i) => s + i.quantity, 0), 0);
+    const embMins = embJobs.reduce((a, j) => a + j.est.totalMinutes, 0);
+    const printJobs = filtered.filter(j => j.decoTypes.some(t => PRINT_TYPES.has(t)));
+    const printQty = printJobs.reduce((a, j) => a + j.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType)).reduce((s, i) => s + i.quantity, 0), 0);
+    const printMins = printJobs.reduce((a, j) => a + j.est.totalMinutes, 0);
+    const untypedJobs = filtered.filter(j => !j.items.some(i => i.decorationType)).length;
 
     // All unique decoration types across all jobs
     const allDecoTypes = useMemo(() => {
@@ -332,13 +337,29 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             {filtered.length} jobs &middot; {fmtK(totalValue)} pipeline &middot; {fmtTime(totalMinutes)} total est.
                             {totalStitchesAll > 0 && <> &middot; {fmtStitches(totalStitchesAll)} stitches</>}
                         </p>
-                        <div className="flex items-center gap-3 mt-1">
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider bg-purple-500/10 border-purple-500/20 text-purple-300">
-                                Embroidery <span className="text-purple-200 font-mono">{embQty.toLocaleString()}</span>
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider bg-cyan-500/10 border-cyan-500/20 text-cyan-300">
-                                Print <span className="text-cyan-200 font-mono">{printQty.toLocaleString()}</span>
-                            </span>
+                        <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border bg-purple-500/10 border-purple-500/20">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-purple-300">Embroidery</span>
+                                <span className="text-[10px] font-mono font-bold text-purple-200">{embJobs.length}<span className="text-purple-400 text-[8px]"> jobs</span></span>
+                                <span className="text-purple-500/40">·</span>
+                                <span className="text-[10px] font-mono font-bold text-purple-200">{embQty.toLocaleString()}<span className="text-purple-400 text-[8px]"> pcs</span></span>
+                                <span className="text-purple-500/40">·</span>
+                                <span className="text-[10px] font-mono font-bold text-purple-200">{fmtTime(embMins)}</span>
+                            </div>
+                            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border bg-cyan-500/10 border-cyan-500/20">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-cyan-300">Print</span>
+                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printJobs.length}<span className="text-cyan-400 text-[8px]"> jobs</span></span>
+                                <span className="text-cyan-500/40">·</span>
+                                <span className="text-[10px] font-mono font-bold text-cyan-200">{printQty.toLocaleString()}<span className="text-cyan-400 text-[8px]"> pcs</span></span>
+                                <span className="text-cyan-500/40">·</span>
+                                <span className="text-[10px] font-mono font-bold text-cyan-200">{fmtTime(printMins)}</span>
+                            </div>
+                            {untypedJobs > 0 && (
+                                <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border bg-white/5 border-white/10">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/30">Untyped</span>
+                                    <span className="text-[10px] font-mono font-bold text-white/40">{untypedJobs}<span className="text-white/20 text-[8px]"> jobs</span></span>
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
