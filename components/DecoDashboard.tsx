@@ -288,8 +288,20 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
         if (overrideId) setSearchId(idToSearch);
         try {
             const job = await fetchSingleDecoJob(apiSettings, idToSearch);
-            if (job) setJobData(job);
-            else setError(`Job #${idToSearch} not found.`);
+            if (job) { setJobData(job); }
+            else {
+                // Run diagnostic to find the real issue
+                try {
+                    const diagRes = await fetch('/api/deco', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'diagnose', jobIds: [idToSearch.trim()] })
+                    });
+                    const diag = await diagRes.json();
+                    console.error('[DECO DIAGNOSTIC]', JSON.stringify(diag, null, 2));
+                    setError(`Job #${idToSearch} not found. Check console for diagnostic data.`);
+                } catch { setError(`Job #${idToSearch} not found.`); }
+            }
         } catch (e: any) { setError(e.message || "Failed to fetch job."); }
         finally { setLoading(false); }
     };

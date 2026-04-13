@@ -189,6 +189,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // Diagnostic: show exactly what the Deco API returns for a given ID
+  if (action === 'diagnose' && jobIds?.length === 1) {
+    const targetId = String(jobIds[0]).trim();
+    const diag: any = { targetId, steps: [], timestamp: new Date().toISOString() };
+    
+    // Step 1: Single-page date-scan — what order_ids come back?
+    try {
+      const minDate = new Date();
+      minDate.setDate(minDate.getDate() - 200);
+      const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
+      const qp = new URLSearchParams({ username, password, field: '1', condition: '4', date1: dateStr, limit: '20', offset: '0', include_workflow_data: '1', skip_login_token: '1' });
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      const sampleIds = orders.slice(0, 20).map((o: any) => ({
+        order_id: o.order_id,
+        order_number: o.order_number,
+        id: o.id,
+        name: (o.billing_name || o.company_name || '').slice(0, 30),
+        date: o.order_date || o.created_date,
+      }));
+      diag.steps.push({ step: 'date-scan-page1', total: data.total, count: orders.length, sampleOrders: sampleIds });
+      // Check if target is in this batch
+      const targetInBatch = orders.find((o: any) => 
+        String(o.order_id) === targetId || String(o.order_number) === targetId || String(o.id) === targetId
+      );
+      if (targetInBatch) {
+        diag.steps.push({ step: 'FOUND_IN_BATCH', matchedField: String(targetInBatch.order_id) === targetId ? 'order_id' : String(targetInBatch.order_number) === targetId ? 'order_number' : 'id' });
+      }
+    } catch (e: any) {
+      diag.steps.push({ step: 'date-scan-page1', error: e.message });
+    }
+
+    // Step 2: Direct get
+    try {
+      const qp = new URLSearchParams({ username, password, id: targetId, include_workflow_data: '1', skip_login_token: '1' });
+      const url = `https://${domain}/api/json/manage_orders/get?${qp.toString()}`;
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
+      const data = await resp.json();
+      diag.steps.push({ step: 'direct-get', hasOrderId: !!data?.order_id, hasNestedOrder: !!data?.order?.order_id, keys: Object.keys(data || {}).slice(0, 15), snippet: JSON.stringify(data).slice(0, 500) });
+    } catch (e: any) {
+      diag.steps.push({ step: 'direct-get', error: e.message });
+    }
+
+    // Step 3: Find by order_number field=0
+    try {
+      const qp = new URLSearchParams({ username, password, field: '0', condition: '0', string: targetId, criteria: targetId, limit: '5', include_workflow_data: '1', skip_login_token: '1' });
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      diag.steps.push({ step: 'find-field0', total: data.total, count: orders.length, orderIds: orders.map((o: any) => ({ order_id: o.order_id, order_number: o.order_number, id: o.id })) });
+    } catch (e: any) {
+      diag.steps.push({ step: 'find-field0', error: e.message });
+    }
+
+    return res.status(200).json(diag);
+  }
+
   // Bulk fetch: fetch multiple jobs by ID
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
