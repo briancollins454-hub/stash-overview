@@ -32,71 +32,67 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // List all warehouse locations
     if (action === 'locations') {
-      // Strategy: get a few product variants via REST, then query their inventory levels
-      // to discover which location_ids exist — works with read_products + read_inventory scopes
+      // Strategy: sample products from across catalog, get their inventory levels to discover all location_ids
       try {
-        // Step 1: get a few variants to find inventory_item_ids
-        const varResp = await fetch(`${restBase}/variants.json?limit=10&fields=id,inventory_item_id,title`, {
-          headers: restHeaders, signal: AbortSignal.timeout(10000),
+        // Step 1: get products (not just variants) to ensure broad catalog coverage
+        const prodResp = await fetch(`${restBase}/products.json?limit=250&fields=id,variants`, {
+          headers: restHeaders, signal: AbortSignal.timeout(15000),
         });
-        if (!varResp.ok) throw new Error(`variants: ${varResp.status}`);
-        const varData = await varResp.json();
-        const itemIds = (varData.variants || [])
-          .map((v: any) => v.inventory_item_id)
-          .filter(Boolean)
-          .slice(0, 5);
-        if (!itemIds.length) throw new Error('No variants found');
-
-        // Step 2: query inventory levels for those items — returns location_id per level
-        const levResp = await fetch(`${restBase}/inventory_levels.json?inventory_item_ids=${itemIds.join(',')}`, {
-          headers: restHeaders, signal: AbortSignal.timeout(10000),
-        });
-        if (!levResp.ok) throw new Error(`inventory_levels: ${levResp.status}`);
-        const levData = await levResp.json();
-        const locIds = new Set<number>();
-        for (const lev of levData.inventory_levels || []) {
-          if (lev.location_id) locIds.add(lev.location_id);
-        }
-
-        // Step 3: try to get location names (may fail without read_locations)
-        const locations: any[] = [];
-        for (const lid of locIds) {
-          try {
-            const locResp = await fetch(`${restBase}/locations/${lid}.json`, {
-              headers: restHeaders, signal: AbortSignal.timeout(5000),
-            });
-            if (locResp.ok) {
-              const locData = await locResp.json();
-              const l = locData.location;
-              locations.push({
-                id: `gid://shopify/Location/${l.id}`,
-                name: l.name,
-                address: { address1: l.address1, city: l.city, country: l.country_name },
-                isActive: l.active,
-              });
-            } else {
-              // Can't read location details — use ID as name
-              locations.push({
-                id: `gid://shopify/Location/${lid}`,
-                name: `Location ${lid}`,
-                address: {},
-                isActive: true,
-              });
-            }
-          } catch {
-            locations.push({
-              id: `gid://shopify/Location/${lid}`,
-              name: `Location ${lid}`,
-              address: {},
-              isActive: true,
-            });
+        if (!prodResp.ok) throw new Error(`products: ${prodResp.status}`);
+        const prodData = await prodResp.json();
+        // Take one variant per product to maximise location coverage
+        const itemIds: number[] = [];
+        for (const prod of prodData.products || []) {
+          const v = prod.variants?.[0];
+          if (v?.inventory_item_id && !itemIds.includes(v.inventory_item_id)) {
+            itemIds.push(v.inventory_item_id);
           }
         }
-        if (locations.length > 0) {
-          return res.status(200).json({ locations });
+        if (!itemIds.length) throw new Error('No variants found');
+
+        // Step 2: query inventory levels in batches of 50
+        const locIds = new Set<number>();
+        for (let i = 0; i < itemIds.length; i += 50) {
+          const batch = itemIds.slice(i, i + 50);
+          const levResp = await fetch(`${restBase}/inventory_levels.json?inventory_item_ids=${batch.join(',')}`, {
+            headers: restHeaders, signal: AbortSignal.timeout(10000),
+          });
+          if (levResp.ok) {
+            const levData = await levResp.json();
+            for (const lev of levData.inventory_levels || []) {
+              if (lev.location_id) locIds.add(lev.location_id);
+            }
+          }
         }
+
+        if (!locIds.size) throw new Error('No location IDs found in inventory levels');
+
+        // Step 3: resolve location names
+        const locations: any[] = [];
+        for (const lid of locIds) {
+          const gid = `gid://shopify/Location/${lid}`;
+          // Try GraphQL inventoryLevel → location name (doesn't need read_locations)
+          try {
+            const nameData = await gql(`{
+              inventoryItems(first: 1) {
+                edges { node {
+                  inventoryLevel(locationId: "${gid}") {
+                    location { id name }
+                  }
+                }}
+              }
+            }`);
+            const loc = nameData.data?.inventoryItems?.edges?.[0]?.node?.inventoryLevel?.location;
+            if (loc?.name) {
+              locations.push({ id: gid, name: loc.name, address: {}, isActive: true });
+              continue;
+            }
+          } catch {}
+          locations.push({ id: gid, name: `Location ${lid}`, address: {}, isActive: true });
+        }
+        return res.status(200).json({ locations });
       } catch (e: any) {
-        // REST fallback failed
+        // Final fallback
       }
 
       return res.status(200).json({ locations: [], errors: [{ message: 'Could not discover locations. Ensure the Shopify app has read_products and read_inventory scopes.' }] });
