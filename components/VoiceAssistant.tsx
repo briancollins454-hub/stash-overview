@@ -2508,6 +2508,16 @@ Visible: ${visibleFaces.current.size || 'unknown'}`;
                 <p className="text-[10px] font-mono tracking-wider text-indigo-400/70 uppercase mb-1">STASH AI</p>
                 <p className="text-sm text-gray-200 leading-snug">{minimizedToast}</p>
               </div>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setMinimizedToast(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setMinimizedToast(null); } }}
+                className="ml-auto -mt-1 -mr-1 p-1 rounded-lg text-white/30 hover:text-white/80 hover:bg-white/10 transition-colors flex-shrink-0"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </span>
             </div>
           </button>
         </div>
