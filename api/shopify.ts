@@ -96,16 +96,18 @@ async function handleInventory(req: VercelRequest, res: VercelResponse, domain: 
     }
 
     if (inventoryAction === 'inventory' && locationId) {
-      const q = `query($locationId:ID!,$first:Int!,$after:String){location(id:$locationId){id name inventoryLevels(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id quantities(names:["available","on_hand","committed","incoming"]){name quantity}item{id sku variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}}}`;
-      const data = await gql(q, { locationId, first: 50, after: cursor || null });
-      const loc = data.data?.location;
-      if (!loc) return res.status(404).json({ error: 'Location not found' });
-      const items = (loc.inventoryLevels.edges||[]).map((e:any)=>{
-        const n=e.node;const qm:Record<string,number>={};(n.quantities||[]).forEach((q:any)=>{qm[q.name]=q.quantity;});
-        const v=n.item?.variant;const p=v?.product;
-        return{inventoryItemId:n.item?.id,inventoryLevelId:n.id,sku:n.item?.sku||'',barcode:v?.barcode||'',variantId:v?.id,variantTitle:v?.title,displayName:v?.displayName,price:v?.price,productId:p?.id,productTitle:p?.title,vendor:p?.vendor,productType:p?.productType,imageUrl:p?.featuredImage?.url,available:qm.available??0,onHand:qm.on_hand??0,committed:qm.committed??0,incoming:qm.incoming??0};
+      // Use inventoryItems query (read_inventory scope) instead of location() (read_locations scope)
+      const q = `query($first:Int!,$after:String){inventoryItems(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id sku inventoryLevel(locationId:"${locationId}"){id quantities(names:["available","on_hand","committed","incoming"]){name quantity}}variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}`;
+      const data = await gql(q, { first: 50, after: cursor || null });
+      const root = data.data?.inventoryItems;
+      if (!root) return res.status(200).json({ items: [], pageInfo: { hasNextPage: false }, error: data.errors?.[0]?.message });
+      const items = (root.edges||[]).filter((e:any) => e.node.inventoryLevel).map((e:any)=>{
+        const n=e.node;const lev=n.inventoryLevel;const qm:Record<string,number>={};
+        (lev.quantities||[]).forEach((q:any)=>{qm[q.name]=q.quantity;});
+        const v=n.variant;const p=v?.product;
+        return{inventoryItemId:n.id,inventoryLevelId:lev.id,sku:n.sku||'',barcode:v?.barcode||'',variantId:v?.id,variantTitle:v?.title,displayName:v?.displayName,price:v?.price,productId:p?.id,productTitle:p?.title,vendor:p?.vendor,productType:p?.productType,imageUrl:p?.featuredImage?.url,available:qm.available??0,onHand:qm.on_hand??0,committed:qm.committed??0,incoming:qm.incoming??0};
       });
-      return res.status(200).json({ items, pageInfo: loc.inventoryLevels.pageInfo, locationName: loc.name });
+      return res.status(200).json({ items, pageInfo: root.pageInfo, locationName: locationId.includes('111232942466') ? 'Local Stock' : '20 Church Street' });
     }
 
     if (inventoryAction === 'search' && locationId && search) {
