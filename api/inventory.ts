@@ -29,28 +29,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // List all warehouse locations
     if (action === 'locations') {
-      // Try GraphQL first
+      // Try direct GraphQL locations query (needs read_locations scope)
       const data = await gql(`{ locations(first: 20) { edges { node { id name address { address1 city country } isActive } } } }`);
       if (!data.errors && data.data?.locations?.edges?.length) {
         const locations = data.data.locations.edges.map((e: any) => e.node);
         return res.status(200).json({ locations });
       }
-      // Fallback to REST API (works with read_inventory scope)
-      const restResp = await fetch(`https://${domain}/admin/api/2025-01/locations.json`, {
-        headers: { 'X-Shopify-Access-Token': token, Accept: 'application/json' },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (restResp.ok) {
-        const restData = await restResp.json();
-        const locations = (restData.locations || []).map((l: any) => ({
-          id: `gid://shopify/Location/${l.id}`,
-          name: l.name,
-          address: { address1: l.address1, city: l.city, country: l.country_name },
-          isActive: l.active,
-        }));
-        return res.status(200).json({ locations });
+      // Fallback: extract locations from product inventory levels (works with read_inventory + read_products)
+      const invData = await gql(`{
+        productVariants(first: 5) {
+          edges { node {
+            inventoryItem {
+              inventoryLevels(first: 20) {
+                edges { node {
+                  location { id name address { address1 city country } }
+                }}
+              }
+            }
+          }}
+        }
+      }`);
+      if (!invData.errors) {
+        const locMap = new Map<string, any>();
+        for (const ve of invData.data?.productVariants?.edges || []) {
+          for (const le of ve.node?.inventoryItem?.inventoryLevels?.edges || []) {
+            const loc = le.node?.location;
+            if (loc && !locMap.has(loc.id)) {
+              locMap.set(loc.id, { id: loc.id, name: loc.name, address: loc.address, isActive: true });
+            }
+          }
+        }
+        if (locMap.size > 0) {
+          return res.status(200).json({ locations: Array.from(locMap.values()) });
+        }
       }
-      return res.status(200).json({ locations: [], errors: data.errors || [{ message: `REST fallback also failed: ${restResp.status}` }] });
+      return res.status(200).json({ locations: [], errors: data.errors || invData.errors || [{ message: 'Could not retrieve locations' }] });
     }
 
     // Fetch inventory levels for a location (paginated)
