@@ -82,6 +82,7 @@ const fetchApi = async (body: any) => {
 const ShopifyInventory: React.FC = () => {
   // State
   const [locations, setLocations] = useState<Location[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(true);
   const [activeLocationId, setActiveLocationId] = useState<string>('');
   const [localWarehouseId, setLocalWarehouseId] = useState<string>('');
   const [externalWarehouseId, setExternalWarehouseId] = useState<string>('');
@@ -115,9 +116,18 @@ const ShopifyInventory: React.FC = () => {
   // Load locations on mount
   useEffect(() => {
     (async () => {
+      setLocationsLoading(true);
       try {
         const data = await fetchApi({ action: 'locations' });
+        if (data.errors) {
+          setError('Shopify API error: ' + (data.errors[0]?.message || JSON.stringify(data.errors)));
+          return;
+        }
         setLocations(data.locations || []);
+        if (!data.locations?.length) {
+          setError('No Shopify locations found. Check that the Shopify app has the read_inventory / read_locations permission scope.');
+          return;
+        }
         // Try to auto-detect local/external from saved config
         const saved = localStorage.getItem('stash_inventory_config');
         if (saved) {
@@ -136,6 +146,8 @@ const ShopifyInventory: React.FC = () => {
         }
       } catch (e: any) {
         setError(e.message);
+      } finally {
+        setLocationsLoading(false);
       }
     })();
   }, []);
@@ -370,6 +382,14 @@ const ShopifyInventory: React.FC = () => {
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full space-y-4">
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Warehouse className="w-5 h-5" /> Configure Warehouse Locations</h2>
             <p className="text-sm text-slate-500">Select which Shopify location is your local warehouse and which is external/supplier stock.</p>
+            {locationsLoading ? (
+              <p className="text-sm text-slate-500 py-4 text-center">Loading locations from Shopify...</p>
+            ) : locations.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
+                No locations returned from Shopify. Check that the app has <strong>read_locations</strong> and <strong>read_inventory</strong> access scopes.
+                {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+              </div>
+            ) : (<>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Local Warehouse (your building)</label>
               <select value={localWarehouseId} onChange={e => setLocalWarehouseId(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
@@ -384,6 +404,8 @@ const ShopifyInventory: React.FC = () => {
                 {locations.filter(l => l.id !== localWarehouseId).map(l => <option key={l.id} value={l.id}>{l.name}{l.address?.address1 ? ` — ${l.address.address1}` : ''}</option>)}
               </select>
             </div>
+            </>)
+            }
             <div className="flex gap-2 justify-end pt-2">
               <button onClick={() => setShowConfig(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
               <button onClick={saveConfig} disabled={!localWarehouseId} className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">Save</button>

@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
-  if (origin === 'https://stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+  if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -29,9 +29,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // List all warehouse locations
     if (action === 'locations') {
+      // Try GraphQL first
       const data = await gql(`{ locations(first: 20) { edges { node { id name address { address1 city country } isActive } } } }`);
-      const locations = (data.data?.locations?.edges || []).map((e: any) => e.node);
-      return res.status(200).json({ locations });
+      if (!data.errors && data.data?.locations?.edges?.length) {
+        const locations = data.data.locations.edges.map((e: any) => e.node);
+        return res.status(200).json({ locations });
+      }
+      // Fallback to REST API (works with read_inventory scope)
+      const restResp = await fetch(`https://${domain}/admin/api/2025-01/locations.json`, {
+        headers: { 'X-Shopify-Access-Token': token, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (restResp.ok) {
+        const restData = await restResp.json();
+        const locations = (restData.locations || []).map((l: any) => ({
+          id: `gid://shopify/Location/${l.id}`,
+          name: l.name,
+          address: { address1: l.address1, city: l.city, country: l.country_name },
+          isActive: l.active,
+        }));
+        return res.status(200).json({ locations });
+      }
+      return res.status(200).json({ locations: [], errors: data.errors || [{ message: `REST fallback also failed: ${restResp.status}` }] });
     }
 
     // Fetch inventory levels for a location (paginated)
