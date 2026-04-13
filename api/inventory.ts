@@ -28,6 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const restHeaders = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
   const restBase = `https://${domain}/admin/api/2025-01`;
+  // v2 - hardcoded locations
 
   try {
     // List all warehouse locations
