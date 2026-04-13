@@ -41,6 +41,9 @@ export interface ApiSettings {
   autoRefreshInterval?: number;
   shipStationApiKey?: string;
   shipStationApiSecret?: string;
+  qboRealmId?: string;
+  qboAccessToken?: string;
+  qboBaseUrl?: string;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -410,6 +413,15 @@ CREATE POLICY "Allow all" ON stash_reference_products FOR ALL USING (true);`;
                         <div className="space-y-3">
                             <input type={showSecrets ? "text" : "password"} value={apiSettings.shipStationApiKey || ''} onChange={e => handleApiChange('shipStationApiKey', e.target.value)} placeholder="API Key" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
                             <input type={showSecrets ? "text" : "password"} value={apiSettings.shipStationApiSecret || ''} onChange={e => handleApiChange('shipStationApiSecret', e.target.value)} placeholder="API Secret" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                   </div>
+                   <div className="space-y-4 p-5 bg-slate-50 border border-slate-200 rounded-2xl">
+                        <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-widest flex items-center gap-2">📒 QuickBooks Online</h4>
+                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Pull A/P aging, A/R balances, and customer credits from QuickBooks</p>
+                        <div className="space-y-3">
+                            <input type="text" value={apiSettings.qboRealmId || ''} onChange={e => handleApiChange('qboRealmId', e.target.value)} placeholder="Company ID (Realm ID)" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            <input type={showSecrets ? "text" : "password"} value={apiSettings.qboAccessToken || ''} onChange={e => handleApiChange('qboAccessToken', e.target.value)} placeholder="OAuth Access Token" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
+                            <input type="text" value={apiSettings.qboBaseUrl || ''} onChange={e => handleApiChange('qboBaseUrl', e.target.value)} placeholder="Base URL (default: https://quickbooks.api.intuit.com)" className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
                         </div>
                    </div>
                    <button onClick={() => setShowSecrets(!showSecrets)} className="text-[9px] font-black uppercase text-indigo-600 hover:text-indigo-800 tracking-widest flex items-center gap-1">{showSecrets ? <EyeOff className="w-3 h-3"/> : <Eye className="w-3 h-3"/>} {showSecrets ? 'Hide Passwords' : 'Reveal Secrets'}</button>

@@ -4,7 +4,7 @@ import {
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
   ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
-  FileSpreadsheet
+  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { DecoJob } from '../types';
@@ -21,8 +21,51 @@ interface Props {
 
 type SortField = 'customer' | 'balance' | 'age' | 'terms' | 'billable' | 'invoiced' | 'jobCount';
 type SortDir = 'asc' | 'desc';
-type ViewMode = 'customers' | 'orders' | 'aging';
+type ViewMode = 'customers' | 'orders' | 'aging' | 'payables' | 'credits';
 type AgingBucket = '0-30' | '31-60' | '61-90' | '90+';
+type APAgingBucket = 'due-soon' | 'current' | '1-30' | '31-60' | '61-90' | '91+';
+
+// QuickBooks data types
+interface QBBill {
+  id: string;
+  vendorName: string;
+  vendorId: string;
+  totalAmount: number;
+  balance: number;
+  dueDate: string | null;
+  txnDate: string | null;
+}
+
+interface QBInvoice {
+  id: string;
+  docNumber: string | null;
+  customerName: string;
+  customerId: string;
+  totalAmount: number;
+  balance: number;
+  dueDate: string | null;
+  txnDate: string | null;
+}
+
+interface QBCustomerCredit {
+  id: string;
+  name: string;
+  balance: number;
+  creditAmount: number;
+}
+
+interface APVendorSummary {
+  vendorName: string;
+  vendorId: string;
+  'due-soon': number;
+  current: number;
+  '1-30': number;
+  '31-60': number;
+  '61-90': number;
+  '91+': number;
+  total: number;
+  bills: QBBill[];
+}
 type PaymentFilter = 'all' | 'outstanding' | 'paid' | 'invoiced' | 'overdue';
 
 interface CustomerAccount {
@@ -80,6 +123,41 @@ const agingBucketColor: Record<AgingBucket, string> = {
   '90+': 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
 };
 
+const apAgingBucketLabel: Record<APAgingBucket, string> = {
+  'due-soon': 'Due 0–7 Days',
+  'current': 'Current',
+  '1-30': '1–30 Days',
+  '31-60': '31–60 Days',
+  '61-90': '61–90 Days',
+  '91+': '91+ Days',
+};
+
+const apAgingBucketColor: Record<APAgingBucket, string> = {
+  'due-soon': 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  'current': 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  '1-30': 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  '31-60': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
+  '61-90': 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+  '91+': 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+};
+
+const getAPAgingBucket = (dueDate: string | null): APAgingBucket => {
+  if (!dueDate) return 'current';
+  const due = new Date(dueDate);
+  if (isNaN(due.getTime())) return 'current';
+  const daysUntilDue = Math.floor((due.getTime() - Date.now()) / 86400000);
+  // Due within 0-7 days (upcoming)
+  if (daysUntilDue >= 0 && daysUntilDue <= 7) return 'due-soon';
+  // Not yet due (more than 7 days away)
+  if (daysUntilDue > 7) return 'current';
+  // Overdue — how many days past due
+  const daysOverdue = Math.abs(daysUntilDue);
+  if (daysOverdue <= 30) return '1-30';
+  if (daysOverdue <= 60) return '31-60';
+  if (daysOverdue <= 90) return '61-90';
+  return '91+';
+};
+
 const paymentStatusLabel = (ps: string | undefined): string => {
   if (!ps) return 'Unknown';
   const n = parseInt(ps);
@@ -135,6 +213,76 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncMode, setSyncMode] = useState<'cache' | 'incremental' | 'full'>('cache');
   const abortRef = useRef<AbortController | null>(null);
+
+  // --- QuickBooks state ---
+  const [qbBills, setQbBills] = useState<QBBill[]>([]);
+  const [qbInvoices, setQbInvoices] = useState<QBInvoice[]>([]);
+  const [qbCredits, setQbCredits] = useState<QBCustomerCredit[]>([]);
+  const [qbLoading, setQbLoading] = useState(false);
+  const [qbError, setQbError] = useState<string | null>(null);
+  const [qbLastSynced, setQbLastSynced] = useState<string | null>(null);
+  const qbConfigured = !!(settings.qboRealmId && settings.qboAccessToken);
+
+  const fetchQBData = useCallback(async () => {
+    if (!settings.qboRealmId || !settings.qboAccessToken) return;
+    setQbLoading(true); setQbError(null);
+    const body = { realmId: settings.qboRealmId, accessToken: settings.qboAccessToken, baseUrl: settings.qboBaseUrl };
+    try {
+      const [apRes, arRes, credRes] = await Promise.all([
+        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ap-aging' }) }),
+        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ar-balance' }) }),
+        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'customer-credits' }) }),
+      ]);
+      const [apData, arData, credData] = await Promise.all([apRes.json(), arRes.json(), credRes.json()]);
+      if (apData.ok) setQbBills(apData.bills || []);
+      else setQbError(apData.error || 'A/P query failed');
+      if (arData.ok) setQbInvoices(arData.invoices || []);
+      if (credData.ok) setQbCredits(credData.customers || []);
+      setQbLastSynced(new Date().toISOString());
+    } catch (e: any) {
+      setQbError(e.message || 'Failed to fetch QuickBooks data');
+    } finally {
+      setQbLoading(false);
+    }
+  }, [settings.qboRealmId, settings.qboAccessToken, settings.qboBaseUrl]);
+
+  // Auto-fetch QB data when configured
+  useEffect(() => {
+    if (qbConfigured && !qbLastSynced && !qbLoading) fetchQBData();
+  }, [qbConfigured]);
+
+  // --- A/P Aging by vendor ---
+  const apVendorSummaries = useMemo<APVendorSummary[]>(() => {
+    if (qbBills.length === 0) return [];
+    const map = new Map<string, APVendorSummary>();
+    qbBills.forEach(bill => {
+      const key = bill.vendorName || 'Unknown Vendor';
+      if (!map.has(key)) {
+        map.set(key, { vendorName: key, vendorId: bill.vendorId, 'due-soon': 0, current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '91+': 0, total: 0, bills: [] });
+      }
+      const entry = map.get(key)!;
+      const bucket = getAPAgingBucket(bill.dueDate);
+      entry[bucket] += bill.balance;
+      entry.total += bill.balance;
+      entry.bills.push(bill);
+    });
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  }, [qbBills]);
+
+  const apTotals = useMemo(() => {
+    const totals: Record<APAgingBucket | 'total', number> = { 'due-soon': 0, current: 0, '1-30': 0, '31-60': 0, '61-90': 0, '91+': 0, total: 0 };
+    apVendorSummaries.forEach(v => {
+      (['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).forEach(b => { totals[b] += v[b]; });
+      totals.total += v.total;
+    });
+    return totals;
+  }, [apVendorSummaries]);
+
+  // --- QB A/R total for cross-check ---
+  const qbARTotal = useMemo(() => qbInvoices.reduce((s, inv) => s + inv.balance, 0), [qbInvoices]);
+  const qbCreditTotal = useMemo(() => qbCredits.reduce((s, c) => s + c.creditAmount, 0), [qbCredits]);
+
+  // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
   const CACHE_KEY = 'stash_finance_jobs';
   const CACHE_TS_KEY = 'stash_finance_synced';
@@ -399,6 +547,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       };
     });
   }, [allJobs]);
+
+  // Customers with credit (negative outstanding balance in Deco)
+  const customersWithCredit = useMemo(() => {
+    return customerAccounts.filter(a => a.totalOutstanding < 0).sort((a, b) => a.totalOutstanding - b.totalOutstanding);
+  }, [customerAccounts]);
+  const totalCredit = useMemo(() => customersWithCredit.reduce((s, a) => s + Math.abs(a.totalOutstanding), 0), [customersWithCredit]);
 
   // Global summary stats
   const summary = useMemo(() => {
@@ -831,8 +985,72 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(summary.total)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">{summary.customersWithBalance} account{summary.customersWithBalance !== 1 ? 's' : ''}</div>
         </div>
+        {/* Customer Credits */}
+        {customersWithCredit.length > 0 && (
+          <div className={`${card} p-4 border-l-4 border-l-purple-500 cursor-pointer hover:ring-2 ring-purple-400 transition-all`} onClick={() => setViewMode('credits')}>
+            <div className={headerText}>Customer Credits</div>
+            <div className="text-xl sm:text-2xl font-black text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(totalCredit)}</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">{customersWithCredit.length} customer{customersWithCredit.length !== 1 ? 's' : ''} with credit</div>
+          </div>
+        )}
 
       </div>
+
+      {/* QB Cross-Check Row */}
+      {(qbConfigured || qbBills.length > 0) && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {/* QB A/R Balance */}
+          <div className={`${card} p-4 border-l-4 border-l-indigo-500`}>
+            <div className={headerText}><Scale className="w-3 h-3 inline-block mr-1 -mt-0.5" />QB A/R Balance</div>
+            <div className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{qbInvoices.length > 0 ? formatCurrency(qbARTotal) : '—'}</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">
+              {qbInvoices.length > 0 ? `${qbInvoices.length} open invoices` : qbLoading ? 'Loading...' : 'Not synced'}
+            </div>
+          </div>
+          {/* Deco vs QB Variance */}
+          {qbInvoices.length > 0 && (
+            <div className={`${card} p-4`}>
+              <div className={headerText}>Deco vs QB Variance</div>
+              {(() => {
+                const variance = summary.invoicedOutstanding - qbARTotal;
+                const isClose = Math.abs(variance) < 100;
+                return (
+                  <>
+                    <div className={`text-xl sm:text-2xl font-black mt-1 ${isClose ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {variance >= 0 ? '+' : ''}{formatCurrency(variance)}
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{isClose ? '✓ In sync' : 'Deco − QuickBooks difference'}</div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+          {/* A/P Total Owed */}
+          <div className={`${card} p-4 border-l-4 border-l-rose-500 cursor-pointer hover:ring-2 ring-rose-400 transition-all`} onClick={() => setViewMode('payables')}>
+            <div className={headerText}><Building2 className="w-3 h-3 inline-block mr-1 -mt-0.5" />A/P Total Owed</div>
+            <div className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">{qbBills.length > 0 ? formatCurrency(apTotals.total) : '—'}</div>
+            <div className="text-[10px] text-gray-400 mt-0.5">{qbBills.length > 0 ? `${apVendorSummaries.length} suppliers` : qbLoading ? 'Loading...' : 'Click to view'}</div>
+          </div>
+          {/* QB Customer Credits */}
+          {qbCredits.length > 0 && (
+            <div className={`${card} p-4 border-l-4 border-l-violet-500 cursor-pointer hover:ring-2 ring-violet-400 transition-all`} onClick={() => setViewMode('credits')}>
+              <div className={headerText}><CircleDollarSign className="w-3 h-3 inline-block mr-1 -mt-0.5" />QB Credits</div>
+              <div className="text-xl sm:text-2xl font-black text-violet-600 dark:text-violet-400 mt-1">{formatCurrency(qbCreditTotal)}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">{qbCredits.length} customer{qbCredits.length !== 1 ? 's' : ''}</div>
+            </div>
+          )}
+          {/* Sync button */}
+          <div className={`${card} p-4 flex flex-col items-center justify-center`}>
+            <button onClick={fetchQBData} disabled={qbLoading || !qbConfigured} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${qbLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-indigo-300 border-slate-600 hover:bg-slate-600' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+              {qbLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              {qbLoading ? 'Syncing QB...' : 'Sync QuickBooks'}
+            </button>
+            {qbLastSynced && <div className="text-[9px] text-gray-400 mt-1">Last: {new Date(qbLastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
+            {qbError && <div className="text-[9px] text-red-400 mt-1 truncate max-w-[200px]">{qbError}</div>}
+            {!qbConfigured && <div className="text-[9px] text-amber-400 mt-1">Set QB credentials in Settings</div>}
+          </div>
+        </div>
+      )}
 
       {/* Second row: Billing + Aging */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -945,7 +1163,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
           {/* View mode tabs */}
           <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-slate-600">
-            {([['customers', 'By Customer', Users], ['orders', 'By Order', Receipt], ['aging', 'Aging Report', Clock]] as const).map(([mode, label, Icon]) => (
+            {([['customers', 'By Customer', Users], ['orders', 'By Order', Receipt], ['aging', 'Aging Report', Clock], ['payables', 'A/P Aging', Building2], ['credits', 'Credits', Gift]] as const).map(([mode, label, Icon]) => (
               <button key={mode} onClick={() => setViewMode(mode)} className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors ${viewMode === mode ? 'bg-indigo-600 text-white' : `${isDark ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}`}>
                 <Icon className="w-3.5 h-3.5" /> {label}
               </button>
@@ -1315,6 +1533,223 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             <div className={`${card} text-center py-12 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
               <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-500 opacity-50" />
               <p className="text-sm font-medium">No outstanding invoiced balances</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ A/P Aging View (QuickBooks Payables) ═══════════════ */}
+      {viewMode === 'payables' && (
+        <div className="space-y-4">
+          {!qbConfigured && (
+            <div className={`${card} p-6 text-center`}>
+              <Building2 className="w-10 h-10 mx-auto mb-3 text-gray-400 opacity-40" />
+              <p className={`text-sm font-bold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>QuickBooks not connected</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Add your QBO Realm ID and Access Token in Settings → Connections to see A/P aging data.</p>
+            </div>
+          )}
+
+          {qbConfigured && qbBills.length === 0 && !qbLoading && (
+            <div className={`${card} p-6 text-center`}>
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-green-500 opacity-50" />
+              <p className={`text-sm font-bold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>No outstanding bills</p>
+              <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>All accounts payable are clear in QuickBooks.</p>
+              <button onClick={fetchQBData} className="mt-3 px-4 py-2 rounded-lg text-[10px] font-bold bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-300">
+                <RefreshCw className="w-3.5 h-3.5 inline mr-1" /> Refresh from QB
+              </button>
+            </div>
+          )}
+
+          {qbBills.length > 0 && (
+            <>
+              {/* A/P Aging Summary Header */}
+              <div className={`${card} p-4`}>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className={`text-sm font-black ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    <Building2 className="w-4 h-4 inline-block mr-2 -mt-0.5 text-rose-500" />
+                    A/P Ageing Summary Report
+                  </h3>
+                  <span className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Marx Corporate · As of {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                </div>
+                <p className={`text-[10px] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                  Data from QuickBooks Online{qbLastSynced ? ` · Synced ${new Date(qbLastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                </p>
+              </div>
+
+              {/* A/P Aging Bucket Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => {
+                  const borderColors: Record<APAgingBucket, string> = {
+                    'due-soon': 'border-l-purple-500', current: 'border-l-green-500', '1-30': 'border-l-blue-500',
+                    '31-60': 'border-l-yellow-500', '61-90': 'border-l-orange-500', '91+': 'border-l-red-500',
+                  };
+                  const textColors: Record<APAgingBucket, string> = {
+                    'due-soon': 'text-purple-600 dark:text-purple-400', current: 'text-green-600 dark:text-green-400', '1-30': 'text-blue-600 dark:text-blue-400',
+                    '31-60': 'text-yellow-600 dark:text-yellow-400', '61-90': 'text-orange-600 dark:text-orange-400', '91+': 'text-red-600 dark:text-red-400',
+                  };
+                  return (
+                    <div key={bucket} className={`${card} p-3 border-l-4 ${borderColors[bucket]}`}>
+                      <div className={headerText}>{apAgingBucketLabel[bucket]}</div>
+                      <div className={`text-lg font-black mt-1 ${textColors[bucket]}`}>{formatCurrency(apTotals[bucket])}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* A/P Aging Bar */}
+              {apTotals.total > 0 && (
+                <div className={`${card} p-4`}>
+                  <div className={`${headerText} mb-3`}>A/P Aging Distribution</div>
+                  <div className="flex h-8 rounded-lg overflow-hidden">
+                    {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => {
+                      const pct = (apTotals[bucket] / apTotals.total) * 100;
+                      if (pct === 0) return null;
+                      const colors: Record<APAgingBucket, string> = {
+                        'due-soon': 'bg-purple-500', current: 'bg-green-500', '1-30': 'bg-blue-500',
+                        '31-60': 'bg-yellow-500', '61-90': 'bg-orange-500', '91+': 'bg-red-500',
+                      };
+                      return (
+                        <div key={bucket} className={`${colors[bucket]} flex items-center justify-center text-white text-[10px] font-bold transition-all`}
+                          style={{ width: `${Math.max(pct, 4)}%` }}
+                          title={`${apAgingBucketLabel[bucket]}: ${formatCurrency(apTotals[bucket])} (${pct.toFixed(1)}%)`}>
+                          {pct >= 8 && `${pct.toFixed(0)}%`}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-4 mt-2 flex-wrap">
+                    {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => {
+                      const dotColors: Record<APAgingBucket, string> = {
+                        'due-soon': 'bg-purple-500', current: 'bg-green-500', '1-30': 'bg-blue-500',
+                        '31-60': 'bg-yellow-500', '61-90': 'bg-orange-500', '91+': 'bg-red-500',
+                      };
+                      return (
+                        <div key={bucket} className="flex items-center gap-1.5 text-[10px]">
+                          <div className={`w-2.5 h-2.5 rounded-sm ${dotColors[bucket]}`} />
+                          <span className={isDark ? 'text-gray-400' : 'text-gray-500'}>{apAgingBucketLabel[bucket]}: {formatCurrency(apTotals[bucket])}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Supplier Table */}
+              <div className={card}>
+                <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+                  <div className={headerText}>Supplier</div>
+                  <div className={`${headerText} text-right`}>Due Soon</div>
+                  <div className={`${headerText} text-right`}>Current</div>
+                  <div className={`${headerText} text-right`}>1–30</div>
+                  <div className={`${headerText} text-right`}>31–60</div>
+                  <div className={`${headerText} text-right`}>61–90</div>
+                  <div className={`${headerText} text-right`}>91+</div>
+                  <div className={`${headerText} text-right`}>Total</div>
+                </div>
+
+                {apVendorSummaries.map((vendor, i) => (
+                  <div key={vendor.vendorId || i} className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
+                    <div className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{vendor.vendorName}</div>
+                    {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => (
+                      <div key={bucket} className={`text-xs text-right min-w-[75px] ${vendor[bucket] > 0 ? (isDark ? 'text-gray-200 font-bold' : 'text-gray-800 font-bold') : 'text-gray-300 dark:text-gray-600'}`}>
+                        {vendor[bucket] > 0 ? formatCurrency(vendor[bucket]) : ''}
+                      </div>
+                    ))}
+                    <div className={`text-xs font-black text-right min-w-[85px] text-rose-600 dark:text-rose-400`}>{formatCurrency(vendor.total)}</div>
+                  </div>
+                ))}
+
+                {/* Totals row */}
+                <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-3 ${isDark ? 'bg-slate-700/50' : 'bg-gray-50'}`}>
+                  <div className={`text-xs font-black uppercase tracking-widest ${isDark ? 'text-white' : 'text-gray-900'}`}>TOTAL</div>
+                  {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => (
+                    <div key={bucket} className={`text-xs font-black text-right min-w-[75px] ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                      {apTotals[bucket] > 0 ? formatCurrency(apTotals[bucket]) : ''}
+                    </div>
+                  ))}
+                  <div className="text-sm font-black text-right min-w-[85px] text-rose-600 dark:text-rose-400">{formatCurrency(apTotals.total)}</div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════ Credits View ═══════════════ */}
+      {viewMode === 'credits' && (
+        <div className="space-y-4">
+          <div className={`${card} p-3`}>
+            <div className="flex items-center gap-2">
+              <Gift className="w-3.5 h-3.5 text-purple-500" />
+              <span className={`text-[10px] font-bold uppercase tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                Customers with credit balances — from Deco (negative outstanding){qbCredits.length > 0 ? ' and QuickBooks' : ''}
+              </span>
+            </div>
+          </div>
+
+          {/* Deco Credits */}
+          {customersWithCredit.length > 0 && (
+            <div className={`${card} border-l-4 border-l-purple-500 overflow-hidden`}>
+              <div className={`px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-3">
+                  <Gift className="w-4 h-4 text-purple-500" />
+                  <span className={`text-sm font-black ${isDark ? 'text-white' : 'text-gray-900'}`}>Deco Customer Credits</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300`}>
+                    {customersWithCredit.length} customer{customersWithCredit.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <span className="text-lg font-black text-purple-600 dark:text-purple-400">{formatCurrency(totalCredit)}</span>
+              </div>
+
+              {customersWithCredit.map((account, i) => (
+                <div key={account.customerId} className={`flex items-center gap-3 px-4 py-2.5 ${i < customersWithCredit.length - 1 ? `border-b ${isDark ? 'border-slate-700/50' : 'border-gray-50'}` : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-xs font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{account.name}</span>
+                    <span className={`text-[10px] ml-2 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {account.jobCount} job{account.jobCount !== 1 ? 's' : ''} · {account.accountTerms}
+                    </span>
+                    {priorityNotes[account.customerId] && <span className="text-[10px] text-amber-500 ml-2">📝 {priorityNotes[account.customerId]}</span>}
+                  </div>
+                  <span className="text-sm font-black text-purple-600 dark:text-purple-400 min-w-[90px] text-right">
+                    {formatCurrency(Math.abs(account.totalOutstanding))} credit
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {customersWithCredit.length === 0 && qbCredits.length === 0 && (
+            <div className={`${card} text-center py-12 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+              <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-green-500 opacity-50" />
+              <p className="text-sm font-medium">No customer credits found</p>
+              <p className="text-xs mt-1">No customers have negative balances in Deco{qbConfigured ? ' or QuickBooks' : ''}.</p>
+            </div>
+          )}
+
+          {/* QuickBooks Credits */}
+          {qbCredits.length > 0 && (
+            <div className={`${card} border-l-4 border-l-violet-500 overflow-hidden`}>
+              <div className={`px-4 py-3 flex items-center justify-between border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+                <div className="flex items-center gap-3">
+                  <CircleDollarSign className="w-4 h-4 text-violet-500" />
+                  <span className={`text-sm font-black ${isDark ? 'text-white' : 'text-gray-900'}`}>QuickBooks Customer Credits</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300`}>
+                    {qbCredits.length} customer{qbCredits.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <span className="text-lg font-black text-violet-600 dark:text-violet-400">{formatCurrency(qbCreditTotal)}</span>
+              </div>
+
+              {qbCredits.map((customer, i) => (
+                <div key={customer.id} className={`flex items-center gap-3 px-4 py-2.5 ${i < qbCredits.length - 1 ? `border-b ${isDark ? 'border-slate-700/50' : 'border-gray-50'}` : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <span className={`text-xs font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{customer.name}</span>
+                  </div>
+                  <span className="text-sm font-black text-violet-600 dark:text-violet-400 min-w-[90px] text-right">
+                    {formatCurrency(customer.creditAmount)} credit
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>
