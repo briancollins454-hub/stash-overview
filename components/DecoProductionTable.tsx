@@ -173,34 +173,77 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const printItems = job.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType));
             const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
             const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-            // ---- RISK SCORE (0-100) ----
+            // ---- RISK SCORE (0-100) + REASONS + NEXT STEPS ----
             let riskScore = 0;
+            const riskReasons: string[] = [];
+            const nextSteps: string[] = [];
             if (daysUntilDue !== null) {
-                if (daysUntilDue < 0) riskScore += 40 + Math.min(Math.abs(daysUntilDue) * 2, 20);
-                else if (daysUntilDue === 0) riskScore += 35;
-                else if (daysUntilDue <= 2) riskScore += 25;
-                else if (daysUntilDue <= 5) riskScore += 15;
-                else if (daysUntilDue <= 7) riskScore += 8;
-            } else { riskScore += 10; }
+                if (daysUntilDue < 0) {
+                    riskScore += 40 + Math.min(Math.abs(daysUntilDue) * 2, 20);
+                    riskReasons.push(`Overdue by ${Math.abs(daysUntilDue)} day${Math.abs(daysUntilDue) !== 1 ? 's' : ''}`);
+                    nextSteps.push('Rush this job — contact customer if delivery will slip');
+                } else if (daysUntilDue === 0) {
+                    riskScore += 35;
+                    riskReasons.push('Due today');
+                    nextSteps.push('Prioritise for immediate production');
+                } else if (daysUntilDue <= 2) {
+                    riskScore += 25;
+                    riskReasons.push(`Only ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} until due`);
+                    nextSteps.push('Move to front of queue');
+                } else if (daysUntilDue <= 5) {
+                    riskScore += 15;
+                    riskReasons.push(`Due in ${daysUntilDue} days`);
+                } else if (daysUntilDue <= 7) {
+                    riskScore += 8;
+                }
+            } else {
+                riskScore += 10;
+                riskReasons.push('No due date set');
+                nextSteps.push('Set a due date in DecoNetwork');
+            }
             if (daysUntilDue !== null && est.totalMinutes > 0) {
                 const hoursAvail = daysUntilDue * 8;
                 const hoursNeeded = est.totalMinutes / 60;
-                if (hoursNeeded > hoursAvail) riskScore += 20;
-                else if (hoursNeeded > hoursAvail * 0.7) riskScore += 10;
+                if (hoursNeeded > hoursAvail) {
+                    riskScore += 20;
+                    riskReasons.push(`Needs ${fmtTime(est.totalMinutes)} but only ${Math.max(0, daysUntilDue)}d left`);
+                    nextSteps.push('Start production now or negotiate deadline');
+                } else if (hoursNeeded > hoursAvail * 0.7) {
+                    riskScore += 10;
+                    riskReasons.push('Production time is tight against deadline');
+                    nextSteps.push('Schedule today to stay on track');
+                }
             }
             const stLower = job.status.toLowerCase();
-            if (stLower.includes('awaiting stock') || stLower.includes('not ordered')) riskScore += 15;
-            else if (stLower.includes('awaiting artwork') || stLower.includes('awaiting review')) riskScore += 10;
-            else if (stLower.includes('hold')) riskScore += 12;
+            if (stLower.includes('awaiting stock') || stLower.includes('not ordered')) {
+                riskScore += 15;
+                riskReasons.push('Stock not received / not ordered');
+                nextSteps.push('Chase supplier or place stock order');
+            } else if (stLower.includes('awaiting artwork') || stLower.includes('awaiting review')) {
+                riskScore += 10;
+                riskReasons.push('Waiting on artwork approval');
+                nextSteps.push('Chase customer for artwork sign-off');
+            } else if (stLower.includes('hold')) {
+                riskScore += 12;
+                riskReasons.push('Job is on hold');
+                nextSteps.push('Review hold reason and unblock');
+            }
             if (jobValue > 500) riskScore += 5;
-            if (decoTypes.length === 0) riskScore += 8;
+            if (decoTypes.length === 0) {
+                riskScore += 8;
+                riskReasons.push('No decoration type identified');
+                nextSteps.push('Run Sync Types or check job in DecoNetwork');
+            }
             riskScore = Math.min(100, Math.max(0, riskScore));
             const riskLevel = riskScore >= 60 ? 'critical' as const : riskScore >= 40 ? 'high' as const : riskScore >= 20 ? 'medium' as const : 'low' as const;
+            if (riskReasons.length === 0) {
+                riskReasons.push('On track — no issues detected');
+            }
             // ---- READINESS GATES ----
             const stockReady = !stLower.includes('awaiting stock') && !stLower.includes('not ordered');
             const artReady = !stLower.includes('awaiting artwork') && !stLower.includes('awaiting review');
             const poReady = !stLower.includes('awaiting po');
-            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd, embTotal, embDone, printTotal, printDone, riskScore, riskLevel, stockReady, artReady, poReady };
+            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd, embTotal, embDone, printTotal, printDone, riskScore, riskLevel, riskReasons, nextSteps, stockReady, artReady, poReady };
         });
     }, [decoJobs, now]);
 
@@ -661,7 +704,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                             <span className={pphColor}>{job.poundPerHour > 0 ? `£${job.poundPerHour.toFixed(0)}` : '—'}</span>
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <span className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${
+                                            <span
+                                                title={`${job.riskReasons.join(' · ')}${job.nextSteps.length ? '\n→ ' + job.nextSteps.join('\n→ ') : ''}`}
+                                                className={`px-1.5 py-0.5 rounded border text-[8px] font-black cursor-help ${
                                                 job.riskLevel === 'critical' ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse' :
                                                 job.riskLevel === 'high' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' :
                                                 job.riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
@@ -722,6 +767,39 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                                             })}
                                                         </tbody>
                                                     </table>
+                                                </div>
+                                                {/* Risk Analysis */}
+                                                <div className="mt-2 pt-2 border-t border-white/5">
+                                                    <div className="flex items-start gap-6">
+                                                        <div className="flex-1">
+                                                            <div className="text-[8px] font-black uppercase tracking-widest text-white/25 mb-1">Why {job.riskLevel === 'low' ? 'low risk' : 'at risk'}</div>
+                                                            <div className="space-y-0.5">
+                                                                {job.riskReasons.map((r: string, i: number) => (
+                                                                    <div key={i} className="flex items-start gap-1.5 text-[9px]">
+                                                                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                                                                            job.riskLevel === 'critical' ? 'bg-red-400' :
+                                                                            job.riskLevel === 'high' ? 'bg-orange-400' :
+                                                                            job.riskLevel === 'medium' ? 'bg-amber-400' : 'bg-emerald-400'
+                                                                        }`} />
+                                                                        <span className="text-white/50">{r}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        {job.nextSteps.length > 0 && (
+                                                            <div className="flex-1">
+                                                                <div className="text-[8px] font-black uppercase tracking-widest text-white/25 mb-1">Next Steps</div>
+                                                                <div className="space-y-0.5">
+                                                                    {job.nextSteps.map((s: string, i: number) => (
+                                                                        <div key={i} className="flex items-start gap-1.5 text-[9px]">
+                                                                            <span className="text-indigo-400 font-bold mt-px">→</span>
+                                                                            <span className="text-indigo-300/70">{s}</span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5">
                                                     <button
