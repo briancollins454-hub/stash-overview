@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { action, endpoint, params, jobIds } = req.body || {};
 
   // Helper: fetch orders via date-range search and filter by requested IDs
-  // Scans from NEWEST first (high offset) so recent orders are found quickly
+  // Uses PARALLEL page fetches — all pages at once to beat Vercel 10s timeout
   async function fetchOrdersByIds(requestedIds: string[], includeDecoration: boolean): Promise<{jobId: string, order: any}[]> {
     const idSet = new Set(requestedIds.map(id => String(id).trim()));
     const found = new Map<string, any>();
@@ -31,13 +31,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
     const BATCH = 200;
 
-    const baseParams = (): URLSearchParams => {
+    const buildUrl = (limit: number, offset: number): string => {
       const qp = new URLSearchParams();
       qp.append('username', username);
       qp.append('password', password);
       qp.append('field', '1');
       qp.append('condition', '4');
       qp.append('date1', dateStr);
+      qp.append('limit', limit.toString());
+      qp.append('offset', offset.toString());
       qp.append('include_workflow_data', '1');
       qp.append('skip_login_token', '1');
       if (includeDecoration) {
@@ -45,20 +47,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         qp.append('include_decoration_data', '1');
         qp.append('include_artwork_data', '1');
       }
-      return qp;
+      return `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
     };
 
-    // Phase 1: Get total count with a tiny request
+    // Step 1: Get total count with a tiny request
     let total = 0;
     try {
-      const qp = baseParams();
-      qp.append('limit', '1');
-      qp.append('offset', '0');
-      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
+      const resp = await fetch(buildUrl(1, 0), { method: 'GET', signal: AbortSignal.timeout(8000) });
       const data = await resp.json();
       total = data.total || 0;
-      // Check this one order too
       for (const order of (data.orders || [])) {
         const oid = String(order.order_id);
         if (idSet.has(oid)) found.set(oid, order);
@@ -66,46 +63,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log(`[Deco API] Total orders in ${lookbackDays}-day window: ${total}`);
     } catch (e: any) {
       console.error(`[Deco API] Failed to get total:`, e.message);
+      return requestedIds.map(id => ({ jobId: id, order: null }));
     }
 
     if (found.size >= idSet.size) return requestedIds.map(id => ({ jobId: id, order: found.get(String(id).trim()) || null }));
 
-    // Phase 2: Scan from the END (newest orders first)
-    // This finds recent orders like #224803 in the first batch instead of the last
-    let offset = Math.max(0, total - BATCH);
-    let batchesScanned = 0;
-    const MAX_BATCHES = 10; // Safety limit
-
-    while (offset >= 0 && batchesScanned < MAX_BATCHES) {
-      try {
-        const qp = baseParams();
-        qp.append('limit', BATCH.toString());
-        qp.append('offset', offset.toString());
-        const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-        const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-        const data = await resp.json();
-        const orders = data.orders || [];
-        batchesScanned++;
-
-        console.log(`[Deco API] Batch offset=${offset}: ${orders.length} orders, found so far=${found.size}/${idSet.size}`);
-
-        for (const order of orders) {
-          const oid = String(order.order_id);
-          if (idSet.has(oid) && !found.has(oid)) {
-            found.set(oid, order);
-          }
-        }
-
-        if (found.size >= idSet.size) { console.log(`[Deco API] ✅ All IDs found`); break; }
-        if (offset === 0) { console.log(`[Deco API] Reached start of results`); break; }
-        offset = Math.max(0, offset - BATCH);
-      } catch (e: any) {
-        console.error(`[Deco API] Batch failed at offset ${offset}:`, e.message);
-        break;
-      }
+    // Step 2: Fire ALL page requests in PARALLEL — one network round-trip
+    const offsets: number[] = [];
+    for (let o = 0; o < total; o += BATCH) {
+      offsets.push(o);
     }
+    console.log(`[Deco API] Launching ${offsets.length} parallel page fetches for ${total} orders`);
 
-    console.log(`[Deco API] Search complete: ${batchesScanned} batches, found ${found.size}/${idSet.size}`);
+    const pageResults = await Promise.allSettled(
+      offsets.map(offset =>
+        fetch(buildUrl(BATCH, offset), { method: 'GET', signal: AbortSignal.timeout(50000) })
+          .then(r => r.json())
+          .then(data => {
+            const orders = data.orders || [];
+            for (const order of orders) {
+              const oid = String(order.order_id);
+              if (idSet.has(oid) && !found.has(oid)) {
+                found.set(oid, order);
+              }
+            }
+            return orders.length;
+          })
+      )
+    );
+
+    const succeeded = pageResults.filter(r => r.status === 'fulfilled').length;
+    const failed = pageResults.filter(r => r.status === 'rejected').length;
+    console.log(`[Deco API] Parallel scan done: ${succeeded} pages OK, ${failed} failed, found ${found.size}/${idSet.size}`);
 
     return requestedIds.map(id => ({
       jobId: id,
