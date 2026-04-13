@@ -627,29 +627,16 @@ export const fetchDecoFinancials = async (
 export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): Promise<DecoJob | null> => {
     if (!settings.useLiveData) return MOCK_DECO_JOBS.find(j => j.jobNumber === jobId) || null;
     
-    console.group(`[DecoSearch] Looking up job #${jobId}`);
-    console.log('useLiveData:', settings.useLiveData);
-    console.time(`[DecoSearch] #${jobId}`);
+    // Use bulk action which handles the broken per-ID lookup via date-range pagination
     try {
         const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds: [jobId.trim()] });
         const json = await res.json();
-        console.log('[DecoSearch] API response:', { status: res.status, results: json.results?.length, raw: json });
         const result = (json.results || []).find((r: any) => r.order);
         if (result) {
-            console.log('[DecoSearch] ✅ Found job:', { order_id: result.order?.order_id, billing_name: result.order?.billing_name });
             const items = parseDecoItems(result.order);
-            const job = buildDecoJob(result.order, items);
-            console.timeEnd(`[DecoSearch] #${jobId}`);
-            console.groupEnd();
-            return job;
-        } else {
-            console.warn('[DecoSearch] ❌ Job not in results. Results:', json.results?.map((r: any) => ({ jobId: r.jobId, hasOrder: !!r.order })));
+            return buildDecoJob(result.order, items);
         }
-    } catch (e: any) {
-        console.error('[DecoSearch] ❌ Error:', e.message || e);
-    }
-    console.timeEnd(`[DecoSearch] #${jobId}`);
-    console.groupEnd();
+    } catch (e) { }
     return null;
 };
 

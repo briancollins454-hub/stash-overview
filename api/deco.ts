@@ -189,31 +189,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Bulk fetch: fetch multiple jobs by ID — try direct lookup first, fall back to date-scan
+  // Bulk fetch: fetch multiple jobs by ID
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
-      // For small batches (≤5), try direct lookup first — much faster when it works
-      if (jobIds.length <= 5) {
-        const results = await Promise.all(jobIds.map(async (id: string) => {
-          const order = await fetchOrderById(id, false);
-          return { jobId: id, order };
-        }));
-        const missing = results.filter(r => !r.order).map(r => r.jobId);
-        if (missing.length > 0) {
-          console.log(`[Deco API] Direct lookup missed ${missing.length} IDs:`, missing, '— falling back to date-scan');
-          // Fall back to reliable date-scan for any missing IDs
-          const fallbackResults = await fetchOrdersByIds(missing, false);
-          // Merge fallback results into the main results
-          for (const fb of fallbackResults) {
-            if (fb.order) {
-              const idx = results.findIndex(r => r.jobId === fb.jobId);
-              if (idx >= 0) results[idx] = fb;
-            }
-          }
-        }
-        return res.status(200).json({ results });
-      }
-      // For larger batches, use the date-scan approach directly
       const results = await fetchOrdersByIds(jobIds, false);
       return res.status(200).json({ results });
     } catch (error: any) {
