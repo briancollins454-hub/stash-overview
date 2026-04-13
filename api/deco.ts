@@ -95,40 +95,87 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
   }
 
-  // Direct lookup: fetch a single order by its ID using order number search
+  // Direct lookup: try multiple strategies to find a single order by ID
   async function fetchOrderById(orderId: string, includeDecoration: boolean): Promise<any | null> {
     const id = String(orderId).trim();
     console.log(`[Deco API] Direct lookup for order #${id}`);
+    
+    const extraParams: Record<string, string> = {
+      include_workflow_data: '1',
+      skip_login_token: '1',
+    };
+    if (includeDecoration) {
+      extraParams.include_product_data = '1';
+      extraParams.include_decoration_data = '1';
+      extraParams.include_artwork_data = '1';
+    }
+
+    // Strategy 1: manage_orders/get?id=<orderId> (direct get)
     try {
-      const qp = new URLSearchParams();
-      qp.append('username', username);
-      qp.append('password', password);
-      qp.append('field', '0');       // field 0 = order number
-      qp.append('condition', '0');   // condition 0 = equals
-      qp.append('string', id);
-      qp.append('criteria', id);
-      qp.append('limit', '5');
-      qp.append('include_workflow_data', '1');
-      qp.append('skip_login_token', '1');
-      if (includeDecoration) {
-        qp.append('include_product_data', '1');
-        qp.append('include_decoration_data', '1');
-        qp.append('include_artwork_data', '1');
+      const qp = new URLSearchParams({ username, password, id, ...extraParams });
+      const url = `https://${domain}/api/json/manage_orders/get?${qp.toString()}`;
+      console.log(`[Deco API] Strategy 1: manage_orders/get?id=${id}`);
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+      const data = await resp.json();
+      if (data && data.order_id) {
+        console.log(`[Deco API] ✅ Strategy 1 hit: order_id=${data.order_id}`);
+        return data;
       }
+      if (data?.order && data.order.order_id) {
+        console.log(`[Deco API] ✅ Strategy 1 hit (nested): order_id=${data.order.order_id}`);
+        return data.order;
+      }
+      console.log(`[Deco API] Strategy 1 response:`, JSON.stringify(data).slice(0, 300));
+    } catch (e: any) {
+      console.log(`[Deco API] Strategy 1 failed:`, e.message);
+    }
+
+    // Strategy 2: manage_orders/find with field=0 (order number), condition=0 (equals)
+    try {
+      const qp = new URLSearchParams({ username, password, field: '0', condition: '0', string: id, criteria: id, limit: '5', ...extraParams });
       const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      console.log(`[Deco API] Strategy 2: find field=0,condition=0,string=${id}`);
       const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
       const data = await resp.json();
       const orders = data.orders || [];
-      console.log(`[Deco API] Direct lookup result: ${orders.length} orders returned, total=${data.total}`);
+      console.log(`[Deco API] Strategy 2: ${orders.length} results, total=${data.total}`);
       const match = orders.find((o: any) => String(o.order_id) === id);
-      if (match) {
-        console.log(`[Deco API] ✅ Direct match: order_id=${match.order_id}, billing=${match.billing_name}`);
-        return match;
-      }
-      console.log(`[Deco API] Direct lookup: no exact match for #${id} in ${orders.length} results`);
+      if (match) { console.log(`[Deco API] ✅ Strategy 2 hit`); return match; }
     } catch (e: any) {
-      console.error(`[Deco API] Direct lookup error:`, e.message);
+      console.log(`[Deco API] Strategy 2 failed:`, e.message);
     }
+
+    // Strategy 3: manage_orders/find with field=6 (order ID field variant), condition=0
+    try {
+      const qp = new URLSearchParams({ username, password, field: '6', condition: '0', string: id, criteria: id, limit: '5', ...extraParams });
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      console.log(`[Deco API] Strategy 3: find field=6,condition=0,string=${id}`);
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      console.log(`[Deco API] Strategy 3: ${orders.length} results, total=${data.total}`);
+      const match = orders.find((o: any) => String(o.order_id) === id);
+      if (match) { console.log(`[Deco API] ✅ Strategy 3 hit`); return match; }
+    } catch (e: any) {
+      console.log(`[Deco API] Strategy 3 failed:`, e.message);
+    }
+
+    // Strategy 4: manage_orders/find with field=0, condition=2 (contains) — looser match
+    try {
+      const qp = new URLSearchParams({ username, password, field: '0', condition: '2', string: id, criteria: id, limit: '5', ...extraParams });
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      console.log(`[Deco API] Strategy 4: find field=0,condition=2 (contains),string=${id}`);
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      console.log(`[Deco API] Strategy 4: ${orders.length} results, total=${data.total}`);
+      const match = orders.find((o: any) => String(o.order_id) === id);
+      if (match) { console.log(`[Deco API] ✅ Strategy 4 hit`); return match; }
+    } catch (e: any) {
+      console.log(`[Deco API] Strategy 4 failed:`, e.message);
+    }
+
+    console.warn(`[Deco API] ❌ All strategies failed for order #${id}`);
     return null;
   }
 
@@ -151,17 +198,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const order = await fetchOrderById(id, false);
           return { jobId: id, order };
         }));
-        // Check if any are still missing, fallback to date-scan for those
+        // Check if any are still missing — log but don't fall back to slow date-scan for single lookups
         const missing = results.filter(r => !r.order).map(r => r.jobId);
         if (missing.length > 0) {
-          console.log(`[Deco API] Direct lookup missed ${missing.length} IDs, falling back to date-scan`);
-          const fallback = await fetchOrdersByIds(missing, false);
-          for (const fb of fallback) {
-            if (fb.order) {
-              const idx = results.findIndex(r => r.jobId === fb.jobId);
-              if (idx >= 0) results[idx] = fb;
-            }
-          }
+          console.warn(`[Deco API] Direct lookup missed ${missing.length} IDs:`, missing, '(skipping date-scan fallback)');
         }
         return res.status(200).json({ results });
       }
