@@ -67,10 +67,10 @@ const LOW_STOCK_THRESHOLD = 5;
 const OVERSTOCK_THRESHOLD = 100;
 
 const fetchApi = async (body: any) => {
-  const resp = await fetch('/api/stock', {
+  const resp = await fetch('/api/shopify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ action: 'inventory', inventoryAction: body.action, ...body }),
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: 'Request failed' }));
@@ -78,6 +78,11 @@ const fetchApi = async (body: any) => {
   }
   return resp.json();
 };
+
+const LOCATIONS = [
+  { id: 'gid://shopify/Location/111232942466', name: 'Local Stock', address: {}, isActive: true },
+  { id: 'gid://shopify/Location/22963719', name: '20 Church Street', address: {}, isActive: true },
+];
 
 const ShopifyInventory: React.FC = () => {
   // State
