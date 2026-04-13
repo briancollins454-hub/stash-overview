@@ -10,11 +10,19 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * Supports passing credentials from client (stored in settings) or env vars.
  */
 
+function envFirst(...keys: string[]): string {
+  for (const k of keys) {
+    const v = process.env[k]?.trim();
+    if (v) return v;
+  }
+  return '';
+}
+
 function getConfig(body: Record<string, unknown>) {
-  const realmId = (body.realmId as string)?.trim() || process.env.QBO_REALM_ID?.trim() || '';
-  const accessToken = (body.accessToken as string)?.trim() || process.env.QBO_ACCESS_TOKEN?.trim() || '';
-  const baseUrl = ((body.baseUrl as string)?.trim() || process.env.QBO_BASE_URL?.trim() || 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
-  const minorVersion = (body.minorVersion as string)?.trim() || process.env.QBO_MINOR_VERSION?.trim() || '75';
+  const realmId = (body.realmId as string)?.trim() || envFirst('QBO_REALM_ID', 'QUICKBOOKS_REALM_ID', 'QB_REALM_ID');
+  const accessToken = (body.accessToken as string)?.trim() || envFirst('QBO_ACCESS_TOKEN', 'QUICKBOOKS_ACCESS_TOKEN', 'QB_ACCESS_TOKEN');
+  const baseUrl = ((body.baseUrl as string)?.trim() || envFirst('QBO_BASE_URL', 'QUICKBOOKS_BASE_URL', 'QB_BASE_URL') || 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
+  const minorVersion = (body.minorVersion as string)?.trim() || envFirst('QBO_MINOR_VERSION') || '75';
   return { realmId, accessToken, baseUrl, minorVersion };
 }
 
@@ -37,8 +45,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = body.action as string;
   const config = getConfig(body);
 
+  // Diagnostics endpoint — reports which env vars are detected (never exposes values)
+  if (action === 'diagnose') {
+    const envVars = ['QBO_REALM_ID', 'QUICKBOOKS_REALM_ID', 'QB_REALM_ID', 'QBO_ACCESS_TOKEN', 'QUICKBOOKS_ACCESS_TOKEN', 'QB_ACCESS_TOKEN', 'QBO_BASE_URL'];
+    const detected: Record<string, boolean> = {};
+    envVars.forEach(k => { detected[k] = !!(process.env[k]?.trim()); });
+    return res.json({
+      hasRealmId: !!config.realmId,
+      hasAccessToken: !!config.accessToken,
+      envVarsDetected: detected,
+      baseUrl: config.baseUrl,
+    });
+  }
+
   if (!config.realmId || !config.accessToken) {
-    return res.status(400).json({ error: 'QuickBooks credentials not configured. Set QBO_REALM_ID and QBO_ACCESS_TOKEN in settings or environment.' });
+    return res.status(400).json({
+      error: 'QuickBooks credentials not configured. Set QBO_REALM_ID and QBO_ACCESS_TOKEN in environment variables.',
+      hasRealmId: !!config.realmId,
+      hasAccessToken: !!config.accessToken,
+    });
   }
 
   const endpoint = `${config.baseUrl}/v3/company/${encodeURIComponent(config.realmId)}/query?minorversion=${encodeURIComponent(config.minorVersion)}`;
