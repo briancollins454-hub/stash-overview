@@ -182,34 +182,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  const endpoint = `${config.baseUrl}/v3/company/${encodeURIComponent(config.realmId)}/query?minorversion=${encodeURIComponent(config.minorVersion)}`;
-  const headers = {
+  const queryEndpoint = `${config.baseUrl}/v3/company/${encodeURIComponent(config.realmId)}/query?minorversion=${encodeURIComponent(config.minorVersion)}`;
+  const authHeaders = {
     authorization: `Bearer ${config.accessToken}`,
     accept: 'application/json',
-    'content-type': 'text/plain',
   };
+
+  async function runQuery(sql: string) {
+    const url = `${queryEndpoint}&query=${encodeURIComponent(sql)}`;
+    const response = await fetch(url, { method: 'GET', headers: authHeaders, signal: AbortSignal.timeout(30000) });
+    const text = await response.text();
+    if (!response.ok) return { ok: false as const, status: response.status, text };
+    try {
+      return { ok: true as const, data: JSON.parse(text) };
+    } catch {
+      return { ok: false as const, status: 502, text: 'Invalid JSON from QBO' };
+    }
+  }
 
   try {
     if (action === 'test-connection') {
-      // Simple query to verify connection
-      const query = 'select Id from CompanyInfo';
-      const response = await fetch(endpoint, { method: 'POST', headers, body: query, signal: AbortSignal.timeout(15000) });
-      const text = await response.text();
-      if (!response.ok) return res.status(response.status).json({ error: `QBO returned ${response.status}`, detail: text.slice(0, 500) });
-      return res.json({ ok: true, status: response.status });
+      const result = await runQuery('SELECT Id FROM CompanyInfo');
+      if (!result.ok) return res.status(result.status).json({ error: `QBO returned ${result.status}`, detail: result.text.slice(0, 500) });
+      return res.json({ ok: true, status: 200 });
     }
 
     if (action === 'ap-aging') {
-      // Pull all unpaid bills (accounts payable) — grouped by vendor with aging
-      const query = `select Id, VendorRef, TotalAmt, DueDate, TxnDate, Balance, MetaData from Bill where Balance > '0' order by DueDate asc maxresults 1000`;
-      const response = await fetch(endpoint, { method: 'POST', headers, body: query, signal: AbortSignal.timeout(30000) });
-      const text = await response.text();
-      if (!response.ok) return res.status(response.status).json({ error: `QBO AP query failed (${response.status})`, detail: text.slice(0, 500) });
+      const result = await runQuery("SELECT Id, VendorRef, TotalAmt, DueDate, TxnDate, Balance FROM Bill WHERE Balance > '0' MAXRESULTS 1000");
+      if (!result.ok) return res.status(result.status).json({ error: `QBO AP query failed (${result.status})`, detail: result.text.slice(0, 500) });
 
-      let data: unknown;
-      try { data = JSON.parse(text); } catch { return res.status(502).json({ error: 'Invalid JSON from QBO' }); }
-
-      const bills = ((data as any)?.QueryResponse?.Bill || []) as Record<string, unknown>[];
+      const bills = (result.data?.QueryResponse?.Bill || []) as Record<string, unknown>[];
 
       const results = bills.map(bill => ({
         id: String(bill.Id ?? ''),
@@ -225,16 +227,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'ar-balance') {
-      // Pull all unpaid invoices (accounts receivable) — for cross-check with Deco
-      const query = `select Id, DocNumber, CustomerRef, TotalAmt, Balance, DueDate, TxnDate, MetaData from Invoice where Balance > '0' order by DueDate asc maxresults 1000`;
-      const response = await fetch(endpoint, { method: 'POST', headers, body: query, signal: AbortSignal.timeout(30000) });
-      const text = await response.text();
-      if (!response.ok) return res.status(response.status).json({ error: `QBO AR query failed (${response.status})`, detail: text.slice(0, 500) });
+      const result = await runQuery("SELECT Id, DocNumber, CustomerRef, TotalAmt, Balance, DueDate, TxnDate FROM Invoice WHERE Balance > '0' MAXRESULTS 1000");
+      if (!result.ok) return res.status(result.status).json({ error: `QBO AR query failed (${result.status})`, detail: result.text.slice(0, 500) });
 
-      let data: unknown;
-      try { data = JSON.parse(text); } catch { return res.status(502).json({ error: 'Invalid JSON from QBO' }); }
-
-      const invoices = ((data as any)?.QueryResponse?.Invoice || []) as Record<string, unknown>[];
+      const invoices = (result.data?.QueryResponse?.Invoice || []) as Record<string, unknown>[];
 
       const results = invoices.map(inv => ({
         id: String(inv.Id ?? ''),
@@ -254,16 +250,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Also support pulling customer credit balances (negative balances / overpayments)
     if (action === 'customer-credits') {
-      // Pull customer balances including credits (negative = credit owed to customer)
-      const query = `select Id, DisplayName, Balance from Customer where Balance < '0' order by Balance asc maxresults 500`;
-      const response = await fetch(endpoint, { method: 'POST', headers, body: query, signal: AbortSignal.timeout(30000) });
-      const text = await response.text();
-      if (!response.ok) return res.status(response.status).json({ error: `QBO customer credits query failed (${response.status})`, detail: text.slice(0, 500) });
+      const result = await runQuery("SELECT Id, DisplayName, Balance FROM Customer WHERE Balance < '0' MAXRESULTS 500");
+      if (!result.ok) return res.status(result.status).json({ error: `QBO customer credits query failed (${result.status})`, detail: result.text.slice(0, 500) });
 
-      let data: unknown;
-      try { data = JSON.parse(text); } catch { return res.status(502).json({ error: 'Invalid JSON from QBO' }); }
-
-      const customers = ((data as any)?.QueryResponse?.Customer || []) as Record<string, unknown>[];
+      const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
 
       const results = customers.map(c => ({
         id: String(c.Id ?? ''),
