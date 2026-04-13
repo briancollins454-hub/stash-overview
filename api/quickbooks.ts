@@ -1,14 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 /**
- * QuickBooks Online API proxy — pulls A/P Ageing Summary and A/R balance data.
+ * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
  *
  * POST /api/quickbooks
- * Body: { action: 'ap-aging' | 'ar-balance' | 'test-connection', realmId, accessToken, baseUrl?, minorVersion? }
+ * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'test-connection' | 'diagnose' }
  *
- * We proxy through our server to keep OAuth tokens off the client.
- * Supports passing credentials from client (stored in settings) or env vars.
+ * Credentials are resolved in order:
+ *   1. Client-provided in request body (realmId, accessToken)
+ *   2. Stored OAuth tokens in Supabase (from /api/qbo-auth flow)
+ *   3. Raw env vars (QBO_REALM_ID, QBO_ACCESS_TOKEN)
  */
+
+const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
+const TOKEN_ROW_ID = 'qbo_tokens';
 
 function envFirst(...keys: string[]): string {
   for (const k of keys) {
@@ -18,12 +23,116 @@ function envFirst(...keys: string[]): string {
   return '';
 }
 
-function getConfig(body: Record<string, unknown>) {
-  const realmId = (body.realmId as string)?.trim() || envFirst('QBO_REALM_ID', 'QUICKBOOKS_REALM_ID', 'QB_REALM_ID');
-  const accessToken = (body.accessToken as string)?.trim() || envFirst('QBO_ACCESS_TOKEN', 'QUICKBOOKS_ACCESS_TOKEN', 'QB_ACCESS_TOKEN');
+async function getStoredTokens(): Promise<{ realmId: string; accessToken: string; refreshToken: string; updatedAt: string; expiresIn: number } | null> {
+  const supabaseUrl = process.env.SUPABASE_URL?.trim();
+  const supabaseKey = process.env.SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/stash_qbo_tokens?id=eq.${TOKEN_ROW_ID}&select=*`, {
+      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const row = rows[0];
+    if (!row.access_token || !row.realm_id) return null;
+    return {
+      realmId: row.realm_id,
+      accessToken: row.access_token,
+      refreshToken: row.refresh_token || '',
+      updatedAt: row.updated_at || row.created_at || '',
+      expiresIn: row.expires_in || 3600,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number } | null> {
+  const clientId = process.env.QBO_CLIENT_ID?.trim();
+  const clientSecret = process.env.QBO_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  try {
+    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const res = await fetch(QBO_TOKEN_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }).toString(),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json() as Record<string, unknown>;
+    if (!res.ok || !data.access_token) return null;
+
+    // Update stored tokens
+    const supabaseUrl = process.env.SUPABASE_URL?.trim();
+    const supabaseKey = process.env.SUPABASE_ANON_KEY?.trim();
+    if (supabaseUrl && supabaseKey) {
+      await fetch(`${supabaseUrl}/rest/v1/stash_qbo_tokens`, {
+        method: 'POST',
+        headers: {
+          apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          id: TOKEN_ROW_ID,
+          access_token: data.access_token,
+          refresh_token: data.refresh_token || refreshToken,
+          expires_in: data.expires_in || 3600,
+          updated_at: new Date().toISOString(),
+        }),
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => {});
+    }
+
+    return {
+      accessToken: data.access_token as string,
+      refreshToken: (data.refresh_token as string) || refreshToken,
+      expiresIn: (data.expires_in as number) || 3600,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveConfig(body: Record<string, unknown>) {
+  // 1. Client-provided creds
+  let realmId = (body.realmId as string)?.trim() || '';
+  let accessToken = (body.accessToken as string)?.trim() || '';
   const baseUrl = ((body.baseUrl as string)?.trim() || envFirst('QBO_BASE_URL', 'QUICKBOOKS_BASE_URL', 'QB_BASE_URL') || 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
   const minorVersion = (body.minorVersion as string)?.trim() || envFirst('QBO_MINOR_VERSION') || '75';
-  return { realmId, accessToken, baseUrl, minorVersion };
+
+  if (realmId && accessToken) return { realmId, accessToken, baseUrl, minorVersion, source: 'client' as const };
+
+  // 2. Stored OAuth tokens from Supabase
+  const stored = await getStoredTokens();
+  if (stored) {
+    const updatedMs = new Date(stored.updatedAt).getTime();
+    const isExpired = Date.now() > updatedMs + (stored.expiresIn * 1000) - 60000; // 1 min buffer
+
+    if (isExpired && stored.refreshToken) {
+      const refreshed = await refreshAccessToken(stored.refreshToken);
+      if (refreshed) {
+        return { realmId: stored.realmId, accessToken: refreshed.accessToken, baseUrl, minorVersion, source: 'oauth-refreshed' as const };
+      }
+    }
+
+    if (!isExpired) {
+      return { realmId: stored.realmId, accessToken: stored.accessToken, baseUrl, minorVersion, source: 'oauth' as const };
+    }
+  }
+
+  // 3. Raw env vars
+  realmId = envFirst('QBO_REALM_ID', 'QUICKBOOKS_REALM_ID', 'QB_REALM_ID');
+  accessToken = envFirst('QBO_ACCESS_TOKEN', 'QUICKBOOKS_ACCESS_TOKEN', 'QB_ACCESS_TOKEN');
+  if (realmId && accessToken) return { realmId, accessToken, baseUrl, minorVersion, source: 'env' as const };
+
+  return { realmId, accessToken, baseUrl, minorVersion, source: 'none' as const };
 }
 
 function escapeQboString(value: string) {
@@ -43,26 +152,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const body = (req.body || {}) as Record<string, unknown>;
   const action = body.action as string;
-  const config = getConfig(body);
 
   // Diagnostics endpoint — reports which env vars are detected (never exposes values)
   if (action === 'diagnose') {
-    const envVars = ['QBO_REALM_ID', 'QUICKBOOKS_REALM_ID', 'QB_REALM_ID', 'QBO_ACCESS_TOKEN', 'QUICKBOOKS_ACCESS_TOKEN', 'QB_ACCESS_TOKEN', 'QBO_BASE_URL'];
+    const config = await resolveConfig(body);
+    const envVars = ['QBO_REALM_ID', 'QBO_ACCESS_TOKEN', 'QBO_CLIENT_ID', 'QBO_CLIENT_SECRET', 'QBO_BASE_URL', 'SUPABASE_URL'];
     const detected: Record<string, boolean> = {};
     envVars.forEach(k => { detected[k] = !!(process.env[k]?.trim()); });
+    const stored = await getStoredTokens();
     return res.json({
       hasRealmId: !!config.realmId,
       hasAccessToken: !!config.accessToken,
+      source: config.source,
+      hasStoredTokens: !!stored,
+      storedTokenExpired: stored ? Date.now() > new Date(stored.updatedAt).getTime() + (stored.expiresIn * 1000) : null,
       envVarsDetected: detected,
       baseUrl: config.baseUrl,
     });
   }
 
+  const config = await resolveConfig(body);
+
   if (!config.realmId || !config.accessToken) {
     return res.status(400).json({
-      error: 'QuickBooks credentials not configured. Set QBO_REALM_ID and QBO_ACCESS_TOKEN in environment variables.',
+      error: 'QuickBooks not connected. Use the "Connect to QuickBooks" button on the Financial Dashboard, or set QBO_REALM_ID and QBO_ACCESS_TOKEN as env vars.',
       hasRealmId: !!config.realmId,
       hasAccessToken: !!config.accessToken,
+      source: config.source,
     });
   }
 

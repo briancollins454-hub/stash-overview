@@ -222,6 +222,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [qbError, setQbError] = useState<string | null>(null);
   const [qbLastSynced, setQbLastSynced] = useState<string | null>(null);
   const [qbServerConfigured, setQbServerConfigured] = useState(false);
+  const [qbConnecting, setQbConnecting] = useState(false);
   const qbConfigured = !!(settings.qboRealmId && settings.qboAccessToken) || qbServerConfigured;
 
   const fetchQBData = useCallback(async () => {
@@ -249,13 +250,39 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     }
   }, [settings.qboRealmId, settings.qboAccessToken, settings.qboBaseUrl]);
 
-  // Probe server on mount to check if QB env vars are configured
+  const connectToQuickBooks = useCallback(async () => {
+    setQbConnecting(true);
+    try {
+      const res = await fetch('/api/qbo-auth?action=authorize');
+      const data = await res.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        setQbError(data.error || 'Failed to get QuickBooks authorization URL');
+        setQbConnecting(false);
+      }
+    } catch (e: any) {
+      setQbError(e.message || 'Failed to connect to QuickBooks');
+      setQbConnecting(false);
+    }
+  }, []);
+
+  // Check QB connection status on mount
   useEffect(() => {
-    if (settings.qboRealmId && settings.qboAccessToken) return; // client-side creds take priority
-    fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test-connection' }) })
+    if (settings.qboRealmId && settings.qboAccessToken) return;
+    fetch('/api/qbo-auth?action=status')
       .then(r => r.json())
-      .then(data => { if (data.ok) setQbServerConfigured(true); })
+      .then(data => { if (data.connected) setQbServerConfigured(true); })
       .catch(() => {});
+  }, []);
+
+  // Handle ?qbo=connected return from OAuth flow
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('qbo') === 'connected') {
+      setQbServerConfigured(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   // Auto-fetch QB data when configured
@@ -1053,13 +1080,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           )}
           {/* Sync button */}
           <div className={`${card} p-4 flex flex-col items-center justify-center`}>
-            <button onClick={fetchQBData} disabled={qbLoading || !qbConfigured} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${qbLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-indigo-300 border-slate-600 hover:bg-slate-600' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+            <button onClick={qbConfigured ? fetchQBData : connectToQuickBooks} disabled={qbLoading || qbConnecting} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${qbLoading ? 'opacity-50 cursor-not-allowed' : ''} ${isDark ? 'bg-slate-700 text-indigo-300 border-slate-600 hover:bg-slate-600' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
               {qbLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              {qbLoading ? 'Syncing QB...' : 'Sync QuickBooks'}
+              {!qbConfigured ? 'Connect QuickBooks' : qbLoading ? 'Syncing QB...' : 'Sync QuickBooks'}
             </button>
             {qbLastSynced && <div className="text-[9px] text-gray-400 mt-1">Last: {new Date(qbLastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
             {qbError && <div className="text-[9px] text-red-400 mt-1 truncate max-w-[200px]">{qbError}</div>}
-            {!qbConfigured && <div className="text-[9px] text-amber-400 mt-1">Set QB credentials in Settings</div>}
           </div>
         </div>
       )}
@@ -1557,7 +1583,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             <div className={`${card} p-6 text-center`}>
               <Building2 className="w-10 h-10 mx-auto mb-3 text-gray-400 opacity-40" />
               <p className={`text-sm font-bold ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>QuickBooks not connected</p>
-              <p className={`text-xs mt-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Add your QBO Realm ID and Access Token in Settings → Connections to see A/P aging data.</p>
+              <p className={`text-xs mt-1 mb-3 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Connect your QuickBooks account to see A/P aging data.</p>
+              <button onClick={connectToQuickBooks} disabled={qbConnecting} className="px-5 py-2.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50">
+                {qbConnecting ? 'Redirecting to QuickBooks...' : 'Connect to QuickBooks'}
+              </button>
+              {qbError && <p className="text-xs text-red-500 mt-2">{qbError}</p>}
             </div>
           )}
 
