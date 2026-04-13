@@ -67,10 +67,11 @@ const LOW_STOCK_THRESHOLD = 5;
 const OVERSTOCK_THRESHOLD = 100;
 
 const fetchApi = async (body: any) => {
+  const { action: inventoryAction, ...rest } = body;
   const resp = await fetch('/api/shopify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'inventory', inventoryAction: body.action, ...body }),
+    body: JSON.stringify({ ...rest, action: 'inventory', inventoryAction }),
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: 'Request failed' }));
