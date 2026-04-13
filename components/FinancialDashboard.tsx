@@ -221,12 +221,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [qbLoading, setQbLoading] = useState(false);
   const [qbError, setQbError] = useState<string | null>(null);
   const [qbLastSynced, setQbLastSynced] = useState<string | null>(null);
-  const qbConfigured = !!(settings.qboRealmId && settings.qboAccessToken);
+  const [qbServerConfigured, setQbServerConfigured] = useState(false);
+  const qbConfigured = !!(settings.qboRealmId && settings.qboAccessToken) || qbServerConfigured;
 
   const fetchQBData = useCallback(async () => {
-    if (!settings.qboRealmId || !settings.qboAccessToken) return;
     setQbLoading(true); setQbError(null);
-    const body = { realmId: settings.qboRealmId, accessToken: settings.qboAccessToken, baseUrl: settings.qboBaseUrl };
+    const body: any = {};
+    if (settings.qboRealmId) body.realmId = settings.qboRealmId;
+    if (settings.qboAccessToken) body.accessToken = settings.qboAccessToken;
+    if (settings.qboBaseUrl) body.baseUrl = settings.qboBaseUrl;
     try {
       const [apRes, arRes, credRes] = await Promise.all([
         fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ap-aging' }) }),
@@ -245,6 +248,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       setQbLoading(false);
     }
   }, [settings.qboRealmId, settings.qboAccessToken, settings.qboBaseUrl]);
+
+  // Probe server on mount to check if QB env vars are configured
+  useEffect(() => {
+    if (settings.qboRealmId && settings.qboAccessToken) return; // client-side creds take priority
+    fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test-connection' }) })
+      .then(r => r.json())
+      .then(data => { if (data.ok) setQbServerConfigured(true); })
+      .catch(() => {});
+  }, []);
 
   // Auto-fetch QB data when configured
   useEffect(() => {
