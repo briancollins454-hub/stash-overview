@@ -95,6 +95,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
   }
 
+  // Direct lookup: fetch a single order by its ID using order number search
+  async function fetchOrderById(orderId: string, includeDecoration: boolean): Promise<any | null> {
+    const id = String(orderId).trim();
+    console.log(`[Deco API] Direct lookup for order #${id}`);
+    try {
+      const qp = new URLSearchParams();
+      qp.append('username', username);
+      qp.append('password', password);
+      qp.append('field', '0');       // field 0 = order number
+      qp.append('condition', '0');   // condition 0 = equals
+      qp.append('string', id);
+      qp.append('criteria', id);
+      qp.append('limit', '5');
+      qp.append('include_workflow_data', '1');
+      qp.append('skip_login_token', '1');
+      if (includeDecoration) {
+        qp.append('include_product_data', '1');
+        qp.append('include_decoration_data', '1');
+        qp.append('include_artwork_data', '1');
+      }
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      console.log(`[Deco API] Direct lookup result: ${orders.length} orders returned, total=${data.total}`);
+      const match = orders.find((o: any) => String(o.order_id) === id);
+      if (match) {
+        console.log(`[Deco API] ✅ Direct match: order_id=${match.order_id}, billing=${match.billing_name}`);
+        return match;
+      }
+      console.log(`[Deco API] Direct lookup: no exact match for #${id} in ${orders.length} results`);
+    } catch (e: any) {
+      console.error(`[Deco API] Direct lookup error:`, e.message);
+    }
+    return null;
+  }
+
   // Stitch enrichment: fetch jobs with full artwork/decoration data
   if (action === 'enrich_stitch' && Array.isArray(jobIds)) {
     try {
@@ -105,9 +142,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Bulk fetch: fetch multiple jobs by ID
+  // Bulk fetch: fetch multiple jobs by ID — direct lookup first, then date-scan fallback
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
+      // For small batches (≤5), use direct lookup per job — much faster and no date limit
+      if (jobIds.length <= 5) {
+        const results = await Promise.all(jobIds.map(async (id: string) => {
+          const order = await fetchOrderById(id, false);
+          return { jobId: id, order };
+        }));
+        // Check if any are still missing, fallback to date-scan for those
+        const missing = results.filter(r => !r.order).map(r => r.jobId);
+        if (missing.length > 0) {
+          console.log(`[Deco API] Direct lookup missed ${missing.length} IDs, falling back to date-scan`);
+          const fallback = await fetchOrdersByIds(missing, false);
+          for (const fb of fallback) {
+            if (fb.order) {
+              const idx = results.findIndex(r => r.jobId === fb.jobId);
+              if (idx >= 0) results[idx] = fb;
+            }
+          }
+        }
+        return res.status(200).json({ results });
+      }
+      // For larger batches, use the date-scan approach
       const results = await fetchOrdersByIds(jobIds, false);
       return res.status(200).json({ results });
     } catch (error: any) {
