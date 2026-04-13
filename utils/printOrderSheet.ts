@@ -58,9 +58,9 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.saved-notes { background: #fefce8; border: 1px solid #fde047; padding: 4px; font-size: 8px; margin-top: 4px; }',
     '.saved-notes .note { border-bottom: 1px dotted #ddd; padding: 1px 0; }',
     '.saved-notes .note:last-child { border: none; }',
-    '.sticker { width: 3.5in; height: 2.2in; border: none; padding: 16px 14px 12px 14px; overflow: hidden; font-size: 14px; line-height: 1.35; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
+    '.sticker { width: 3.5in; height: 2.4in; border: none; padding: 16px 14px 12px 14px; overflow: hidden; font-size: 17px; line-height: 1.4; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
     '.sticker p { margin: 0; }',
-    '.sticker .note-text { font-size: 11px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
+    '.sticker .note-text { font-size: 13px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
     '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
@@ -103,11 +103,11 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '</td>' +
     '<td style="vertical-align:top;text-align:right;padding:10mm 10mm 0 0;">' +
       '<div class="sticker">' +
-      '<p style="font-weight:bold;font-size:16px;margin-bottom:4px;">#' + escapeHtml(order.shopify.orderNumber) + ' ' + escapeHtml(order.shopify.customerName) + '</p>' +
-      addrLines.map(function(l) { return '<p style="font-size:14px;">' + l + '</p>'; }).join('') +
-      (addr && addr.phone ? '<p style="font-size:13px;">' + escapeHtml(addr.phone || '') + '</p>' : '') +
-      (orderNote ? '<p style="margin-top:3px;font-weight:bold;font-size:12px;">Note:</p><p class="note-text">' + orderNote + '</p>' : '') +
-      '<p style="margin-top:4px;font-size:13px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
+      '<p style="font-weight:bold;font-size:19px;margin-bottom:4px;">#' + escapeHtml(order.shopify.orderNumber) + ' ' + escapeHtml(order.shopify.customerName) + '</p>' +
+      addrLines.map(function(l) { return '<p style="font-size:17px;">' + l + '</p>'; }).join('') +
+      (addr && addr.phone ? '<p style="font-size:15px;">' + escapeHtml(addr.phone || '') + '</p>' : '') +
+      (orderNote ? '<p style="margin-top:3px;font-weight:bold;font-size:14px;">Note:</p><p class="note-text">' + orderNote + '</p>' : '') +
+      '<p style="margin-top:4px;font-size:15px;">Shipping Paid: <strong>' + shippingCost + '</strong></p>' +
       '</div>' +
     '</td>' +
     '</tr></table>';
