@@ -67,7 +67,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Determine action from query param (GET) or body (POST)
-  const action = (req.query?.action as string) || (req.body?.action as string) || '';
+  // Auto-detect callback if code+realmId are present (QuickBooks redirect)
+  let action = (req.query?.action as string) || (req.body?.action as string) || '';
+  if (!action && req.query?.code && req.query?.realmId) {
+    action = 'callback';
+  }
 
   try {
     // ─── AUTHORIZE ───────────────────────────────────────────
