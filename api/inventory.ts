@@ -26,44 +26,80 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return resp.json();
   }
 
+  const restHeaders = { 'X-Shopify-Access-Token': token, Accept: 'application/json' };
+  const restBase = `https://${domain}/admin/api/2025-01`;
+
   try {
     // List all warehouse locations
     if (action === 'locations') {
-      // Try direct GraphQL locations query (needs read_locations scope)
-      const data = await gql(`{ locations(first: 20) { edges { node { id name address { address1 city country } isActive } } } }`);
-      if (!data.errors && data.data?.locations?.edges?.length) {
-        const locations = data.data.locations.edges.map((e: any) => e.node);
-        return res.status(200).json({ locations });
-      }
-      // Fallback: extract locations from product inventory levels (works with read_inventory + read_products)
-      const invData = await gql(`{
-        productVariants(first: 5) {
-          edges { node {
-            inventoryItem {
-              inventoryLevels(first: 20) {
-                edges { node {
-                  location { id name address { address1 city country } }
-                }}
-              }
-            }
-          }}
+      // Strategy: get a few product variants via REST, then query their inventory levels
+      // to discover which location_ids exist — works with read_products + read_inventory scopes
+      try {
+        // Step 1: get a few variants to find inventory_item_ids
+        const varResp = await fetch(`${restBase}/variants.json?limit=10&fields=id,inventory_item_id,title`, {
+          headers: restHeaders, signal: AbortSignal.timeout(10000),
+        });
+        if (!varResp.ok) throw new Error(`variants: ${varResp.status}`);
+        const varData = await varResp.json();
+        const itemIds = (varData.variants || [])
+          .map((v: any) => v.inventory_item_id)
+          .filter(Boolean)
+          .slice(0, 5);
+        if (!itemIds.length) throw new Error('No variants found');
+
+        // Step 2: query inventory levels for those items — returns location_id per level
+        const levResp = await fetch(`${restBase}/inventory_levels.json?inventory_item_ids=${itemIds.join(',')}`, {
+          headers: restHeaders, signal: AbortSignal.timeout(10000),
+        });
+        if (!levResp.ok) throw new Error(`inventory_levels: ${levResp.status}`);
+        const levData = await levResp.json();
+        const locIds = new Set<number>();
+        for (const lev of levData.inventory_levels || []) {
+          if (lev.location_id) locIds.add(lev.location_id);
         }
-      }`);
-      if (!invData.errors) {
-        const locMap = new Map<string, any>();
-        for (const ve of invData.data?.productVariants?.edges || []) {
-          for (const le of ve.node?.inventoryItem?.inventoryLevels?.edges || []) {
-            const loc = le.node?.location;
-            if (loc && !locMap.has(loc.id)) {
-              locMap.set(loc.id, { id: loc.id, name: loc.name, address: loc.address, isActive: true });
+
+        // Step 3: try to get location names (may fail without read_locations)
+        const locations: any[] = [];
+        for (const lid of locIds) {
+          try {
+            const locResp = await fetch(`${restBase}/locations/${lid}.json`, {
+              headers: restHeaders, signal: AbortSignal.timeout(5000),
+            });
+            if (locResp.ok) {
+              const locData = await locResp.json();
+              const l = locData.location;
+              locations.push({
+                id: `gid://shopify/Location/${l.id}`,
+                name: l.name,
+                address: { address1: l.address1, city: l.city, country: l.country_name },
+                isActive: l.active,
+              });
+            } else {
+              // Can't read location details — use ID as name
+              locations.push({
+                id: `gid://shopify/Location/${lid}`,
+                name: `Location ${lid}`,
+                address: {},
+                isActive: true,
+              });
             }
+          } catch {
+            locations.push({
+              id: `gid://shopify/Location/${lid}`,
+              name: `Location ${lid}`,
+              address: {},
+              isActive: true,
+            });
           }
         }
-        if (locMap.size > 0) {
-          return res.status(200).json({ locations: Array.from(locMap.values()) });
+        if (locations.length > 0) {
+          return res.status(200).json({ locations });
         }
+      } catch (e: any) {
+        // REST fallback failed
       }
-      return res.status(200).json({ locations: [], errors: data.errors || invData.errors || [{ message: 'Could not retrieve locations' }] });
+
+      return res.status(200).json({ locations: [], errors: [{ message: 'Could not discover locations. Ensure the Shopify app has read_products and read_inventory scopes.' }] });
     }
 
     // Fetch inventory levels for a location (paginated)
