@@ -32,12 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[Deco API] fetchOrdersByIds called`, { requestedIds, lookbackDays, dateStr, includeDecoration });
 
     let offset = 0;
-    const BATCH = 100;
-    const MAX = 800;
+    const BATCH = 200;
     let totalScanned = 0;
     let apiTotal = 0;
 
-    while (offset < MAX) {
+    while (true) {
       try {
         const qp = new URLSearchParams();
         qp.append('username', username);
@@ -86,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`[Deco API] Search complete: scanned ${totalScanned}/${apiTotal} orders in ${offset / BATCH + 1} batches, found ${found.size}/${idSet.size}`);
     if (found.size < idSet.size) {
       const missing = requestedIds.filter(id => !found.has(String(id).trim()));
-      console.warn(`[Deco API] ❌ Missing IDs:`, missing, `(lookback: ${lookbackDays} days, maxOffset: ${MAX})`);
+      console.warn(`[Deco API] ❌ Missing IDs:`, missing, `(lookback: ${lookbackDays} days, scanned: ${totalScanned}/${apiTotal})`);
     }
 
     return requestedIds.map(id => ({
