@@ -67,16 +67,10 @@ const LOW_STOCK_THRESHOLD = 5;
 const OVERSTOCK_THRESHOLD = 100;
 
 const fetchApi = async (body: any) => {
-  // Route through /api/shopify with inv- prefixed actions
-  const actionMap: Record<string, string> = {
-    locations: 'inv-locations', inventory: 'inv-levels', search: 'inv-search',
-    adjust: 'inv-adjust', updatePrice: 'inv-price', salesVelocity: 'inv-velocity',
-  };
-  const mapped = { ...body, action: actionMap[body.action] || body.action };
-  const resp = await fetch('/api/shopify', {
+  const resp = await fetch('/api/stock', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(mapped),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: 'Request failed' }));
