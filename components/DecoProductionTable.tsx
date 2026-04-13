@@ -118,7 +118,7 @@ const STATUS_BADGE: Record<string, { cls: string; short: string }> = {
     'Cancelled': { cls: 'bg-red-500/10 text-red-400/60 border-red-500/20', short: 'CANCELLED' },
 };
 
-type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer';
+type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer' | 'risk';
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'active' | 'production' | 'awaiting';
 
@@ -173,7 +173,34 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const printItems = job.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType));
             const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
             const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd, embTotal, embDone, printTotal, printDone };
+            // ---- RISK SCORE (0-100) ----
+            let riskScore = 0;
+            if (daysUntilDue !== null) {
+                if (daysUntilDue < 0) riskScore += 40 + Math.min(Math.abs(daysUntilDue) * 2, 20);
+                else if (daysUntilDue === 0) riskScore += 35;
+                else if (daysUntilDue <= 2) riskScore += 25;
+                else if (daysUntilDue <= 5) riskScore += 15;
+                else if (daysUntilDue <= 7) riskScore += 8;
+            } else { riskScore += 10; }
+            if (daysUntilDue !== null && est.totalMinutes > 0) {
+                const hoursAvail = daysUntilDue * 8;
+                const hoursNeeded = est.totalMinutes / 60;
+                if (hoursNeeded > hoursAvail) riskScore += 20;
+                else if (hoursNeeded > hoursAvail * 0.7) riskScore += 10;
+            }
+            const stLower = job.status.toLowerCase();
+            if (stLower.includes('awaiting stock') || stLower.includes('not ordered')) riskScore += 15;
+            else if (stLower.includes('awaiting artwork') || stLower.includes('awaiting review')) riskScore += 10;
+            else if (stLower.includes('hold')) riskScore += 12;
+            if (jobValue > 500) riskScore += 5;
+            if (decoTypes.length === 0) riskScore += 8;
+            riskScore = Math.min(100, Math.max(0, riskScore));
+            const riskLevel = riskScore >= 60 ? 'critical' as const : riskScore >= 40 ? 'high' as const : riskScore >= 20 ? 'medium' as const : 'low' as const;
+            // ---- READINESS GATES ----
+            const stockReady = !stLower.includes('awaiting stock') && !stLower.includes('not ordered');
+            const artReady = !stLower.includes('awaiting artwork') && !stLower.includes('awaiting review');
+            const poReady = !stLower.includes('awaiting po');
+            return { ...job, est, totalQty, jobValue, poundPerHour, decoTypes, daysUntilDue, daysInProd, embTotal, embDone, printTotal, printDone, riskScore, riskLevel, stockReady, artReady, poReady };
         });
     }, [decoJobs, now]);
 
@@ -223,6 +250,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 case 'status': cmp = a.status.localeCompare(b.status); break;
                 case 'ordered': cmp = (a.daysInProd ?? 0) - (b.daysInProd ?? 0); break;
                 case 'customer': cmp = a.customerName.localeCompare(b.customerName); break;
+                case 'risk': cmp = b.riskScore - a.riskScore; break;
             }
             return sortDir === 'desc' ? -cmp : cmp;
         });
@@ -558,11 +586,15 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             <th className="px-3 py-2.5 w-16 text-center cursor-pointer hover:text-white/60" onClick={() => toggleSort('pph')}>
                                 <span className="flex items-center gap-1 justify-center">£/hr <SortIcon col="pph" /></span>
                             </th>
+                            <th className="px-3 py-2.5 w-14 text-center cursor-pointer hover:text-white/60" onClick={() => toggleSort('risk')}>
+                                <span className="flex items-center gap-1 justify-center">Risk <SortIcon col="risk" /></span>
+                            </th>
+                            <th className="px-3 py-2.5 w-10 text-center" title="Stock · Artwork · PO">Ready</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.03]">
                         {filtered.length === 0 && (
-                            <tr><td colSpan={14} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
+                            <tr><td colSpan={16} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
                         )}
                         {filtered.map(job => {
                             const isExpanded = expandedJob === job.id;
@@ -628,11 +660,26 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                         <td className="px-3 py-2.5 text-center">
                                             <span className={pphColor}>{job.poundPerHour > 0 ? `£${job.poundPerHour.toFixed(0)}` : '—'}</span>
                                         </td>
+                                        <td className="px-3 py-2.5 text-center">
+                                            <span className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${
+                                                job.riskLevel === 'critical' ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse' :
+                                                job.riskLevel === 'high' ? 'bg-orange-500/20 text-orange-300 border-orange-500/40' :
+                                                job.riskLevel === 'medium' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                                                'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                            }`}>{job.riskScore}</span>
+                                        </td>
+                                        <td className="px-3 py-2.5 text-center">
+                                            <span className="inline-flex gap-0.5">
+                                                <span title="Stock" className={`w-2 h-2 rounded-full ${job.stockReady ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+                                                <span title="Artwork" className={`w-2 h-2 rounded-full ${job.artReady ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+                                                <span title="PO" className={`w-2 h-2 rounded-full ${job.poReady ? 'bg-emerald-400' : 'bg-red-400 animate-pulse'}`} />
+                                            </span>
+                                        </td>
                                     </tr>
                                     {/* Expanded item detail */}
                                     {isExpanded && (
                                         <tr>
-                                            <td colSpan={14} className="bg-[#16162e] px-4 py-3">
+                                            <td colSpan={16} className="bg-[#16162e] px-4 py-3">
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-left text-[9px]">
                                                         <thead>

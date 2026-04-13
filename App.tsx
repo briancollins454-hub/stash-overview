@@ -76,6 +76,7 @@ const CommandCenter = lazyRetry(() => import('./components/CommandCenter'));
 const MorningBriefing = lazyRetry(() => import('./components/MorningBriefing'));
 const PriorityBoard = lazyRetry(() => import('./components/PriorityBoard'));
 const DigestManager = lazyRetry(() => import('./components/DigestManager'));
+const ProductionIntelligence = lazyRetry(() => import('./components/ProductionIntelligence'));
 const DecoProductionTable = lazyRetry(() => import('./components/DecoProductionTable'));
 const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
 import NotificationBell from './components/NotificationBell';
@@ -2445,6 +2446,12 @@ const App: React.FC = () => {
             {activeTab === 'production' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <div className="space-y-6">
+                  <ErrorBoundary fallbackTitle="Production Intelligence Error">
+                    <ProductionIntelligence
+                      decoJobs={rawDecoJobs}
+                      onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
+                    />
+                  </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Deco Production Table Error">
                     <DecoProductionTable
                       decoJobs={rawDecoJobs}
