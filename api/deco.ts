@@ -29,9 +29,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     minDate.setDate(minDate.getDate() - lookbackDays);
     const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
 
+    console.log(`[Deco API] fetchOrdersByIds called`, { requestedIds, lookbackDays, dateStr, includeDecoration });
+
     let offset = 0;
     const BATCH = 100;
     const MAX = 800;
+    let totalScanned = 0;
+    let apiTotal = 0;
 
     while (offset < MAX) {
       try {
@@ -54,6 +58,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(30000) });
         const data = await resp.json();
         const orders = data.orders || [];
+        totalScanned += orders.length;
+        apiTotal = data.total || apiTotal;
+
+        console.log(`[Deco API] Batch offset=${offset}: ${orders.length} orders, total=${data.total}, found so far=${found.size}/${idSet.size}`);
+        if (orders.length > 0) {
+          const sampleIds = orders.slice(0, 5).map((o: any) => o.order_id);
+          console.log(`[Deco API] Sample order_ids in batch:`, sampleIds);
+        }
 
         for (const order of orders) {
           const oid = String(order.order_id);
@@ -63,12 +75,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
 
         // Stop if we found all requested IDs or no more results
-        if (found.size >= idSet.size) break;
-        if (orders.length < BATCH || offset + orders.length >= (data.total || 0)) break;
+        if (found.size >= idSet.size) { console.log(`[Deco API] ✅ All IDs found`); break; }
+        if (orders.length < BATCH || offset + orders.length >= (data.total || 0)) { console.log(`[Deco API] End of results: batch=${orders.length}, offset=${offset}, total=${data.total}`); break; }
         offset += orders.length;
       } catch {
         break;
       }
+    }
+
+    console.log(`[Deco API] Search complete: scanned ${totalScanned}/${apiTotal} orders in ${offset / BATCH + 1} batches, found ${found.size}/${idSet.size}`);
+    if (found.size < idSet.size) {
+      const missing = requestedIds.filter(id => !found.has(String(id).trim()));
+      console.warn(`[Deco API] ❌ Missing IDs:`, missing, `(lookback: ${lookbackDays} days, maxOffset: ${MAX})`);
     }
 
     return requestedIds.map(id => ({
