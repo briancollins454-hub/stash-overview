@@ -32,76 +32,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // List all warehouse locations
     if (action === 'locations') {
-      // Paginate through ALL products to discover every location_id via inventory_levels
-      try {
-        const locIds = new Set<number>();
-        let sinceId = 0;
-        // Page through products (250 per page, up to 8 pages = 2000 products)
-        for (let page = 0; page < 8; page++) {
-          const prodResp = await fetch(`${restBase}/products.json?limit=250&since_id=${sinceId}&fields=id,variants`, {
-            headers: restHeaders, signal: AbortSignal.timeout(12000),
-          });
-          if (!prodResp.ok) break;
-          const prodData = await prodResp.json();
-          const products = prodData.products || [];
-          if (!products.length) break;
-
-          // One variant per product
-          const itemIds: number[] = [];
-          for (const prod of products) {
-            const v = prod.variants?.[0];
-            if (v?.inventory_item_id) itemIds.push(v.inventory_item_id);
-            sinceId = Math.max(sinceId, prod.id);
-          }
-
-          // Query inventory levels in batches of 50
-          for (let i = 0; i < itemIds.length; i += 50) {
-            const batch = itemIds.slice(i, i + 50);
-            const levResp = await fetch(`${restBase}/inventory_levels.json?inventory_item_ids=${batch.join(',')}`, {
-              headers: restHeaders, signal: AbortSignal.timeout(10000),
-            });
-            if (levResp.ok) {
-              const levData = await levResp.json();
-              for (const lev of levData.inventory_levels || []) {
-                if (lev.location_id) locIds.add(lev.location_id);
-              }
-            }
-          }
-
-          // Stop early once we've found 2+ locations
-          if (locIds.size >= 2) break;
-        }
-
-        if (!locIds.size) throw new Error('No location IDs found');
-
-        // Resolve location names via GraphQL
-        const locations: any[] = [];
-        for (const lid of locIds) {
-          const gid = `gid://shopify/Location/${lid}`;
-          try {
-            const nameData = await gql(`{
-              inventoryItems(first: 1) {
-                edges { node {
-                  inventoryLevel(locationId: "${gid}") {
-                    location { id name }
-                  }
-                }}
-              }
-            }`);
-            const loc = nameData.data?.inventoryItems?.edges?.[0]?.node?.inventoryLevel?.location;
-            if (loc?.name) {
-              locations.push({ id: gid, name: loc.name, address: {}, isActive: true });
-              continue;
-            }
-          } catch {}
-          locations.push({ id: gid, name: `Location ${lid}`, address: {}, isActive: true });
-        }
-        return res.status(200).json({ locations });
-      } catch (e: any) {
-        // fallback
-      }
-
-      return res.status(200).json({ locations: [], errors: [{ message: 'Could not discover locations.' }] });
+      return res.status(200).json({ locations: [
+        { id: 'gid://shopify/Location/111232942466', name: 'Local Stock', address: {}, isActive: true },
+        { id: 'gid://shopify/Location/22963719', name: '20 Church Street', address: {}, isActive: true },
+      ]});
     }
 
     // Fetch inventory levels for a location (paginated)
