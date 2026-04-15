@@ -108,6 +108,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Direct lookup: try multiple strategies to find a single order by ID
+  // Field reference (DecoNetwork manage_orders/find):
+  //   field=1 + condition=1 + string=<id> → Order ID exact match (PROVEN WORKING)
+  //   field=2 + condition=1 → PO number, field=7 → External ref, field=3 → Line ID
   async function fetchOrderById(orderId: string, includeDecoration: boolean): Promise<any | null> {
     const id = String(orderId).trim();
     console.log(`[Deco API] Direct lookup for order #${id}`);
@@ -122,72 +125,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       extraParams.include_artwork_data = '1';
     }
 
-    // Strategy 1: manage_orders/get?id=<orderId> (direct get)
-    try {
-      const qp = new URLSearchParams({ username, password, id, ...extraParams });
-      const url = `https://${domain}/api/json/manage_orders/get?${qp.toString()}`;
-      console.log(`[Deco API] Strategy 1: manage_orders/get?id=${id}`);
-      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-      const data = await resp.json();
-      if (data && data.order_id) {
-        console.log(`[Deco API] ✅ Strategy 1 hit: order_id=${data.order_id}`);
-        return data;
+    // Try each field/condition combo — field=1 (Order ID) is the primary, rest are fallbacks
+    const strategies = [
+      { field: '1', condition: '1', label: 'Order ID exact' },
+      { field: '1', condition: '0', label: 'Order ID eq' },
+      { field: '2', condition: '1', label: 'PO number' },
+      { field: '7', condition: '1', label: 'External ref' },
+      { field: '3', condition: '1', label: 'Line ID' },
+    ];
+
+    for (const strat of strategies) {
+      try {
+        const qp = new URLSearchParams({
+          username, password,
+          field: strat.field, condition: strat.condition,
+          string: id, criteria: id, limit: '5',
+          ...extraParams
+        });
+        const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+        console.log(`[Deco API] Strategy ${strat.label}: field=${strat.field},condition=${strat.condition},string=${id}`);
+        const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
+        const text = await resp.text();
+        if (text.startsWith('<')) { console.log(`[Deco API] ${strat.label}: returned HTML, skipping`); continue; }
+        const data = JSON.parse(text);
+        const orders = data.orders || [];
+        console.log(`[Deco API] ${strat.label}: ${orders.length} results, total=${data.total}`);
+        if (orders.length > 0) {
+          const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
+          console.log(`[Deco API] ✅ ${strat.label} hit: order_id=${match.order_id}`);
+          return match;
+        }
+      } catch (e: any) {
+        console.log(`[Deco API] ${strat.label} failed:`, e.message);
       }
-      if (data?.order && data.order.order_id) {
-        console.log(`[Deco API] ✅ Strategy 1 hit (nested): order_id=${data.order.order_id}`);
-        return data.order;
-      }
-      console.log(`[Deco API] Strategy 1 response:`, JSON.stringify(data).slice(0, 300));
-    } catch (e: any) {
-      console.log(`[Deco API] Strategy 1 failed:`, e.message);
     }
 
-    // Strategy 2: manage_orders/find with field=0 (order number), condition=0 (equals)
-    try {
-      const qp = new URLSearchParams({ username, password, field: '0', condition: '0', string: id, criteria: id, limit: '5', ...extraParams });
-      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-      console.log(`[Deco API] Strategy 2: find field=0,condition=0,string=${id}`);
-      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-      const data = await resp.json();
-      const orders = data.orders || [];
-      console.log(`[Deco API] Strategy 2: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
-      if (match) { console.log(`[Deco API] ✅ Strategy 2 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
-    } catch (e: any) {
-      console.log(`[Deco API] Strategy 2 failed:`, e.message);
-    }
-
-    // Strategy 3: manage_orders/find with field=6 (order ID field variant), condition=0
-    try {
-      const qp = new URLSearchParams({ username, password, field: '6', condition: '0', string: id, criteria: id, limit: '5', ...extraParams });
-      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-      console.log(`[Deco API] Strategy 3: find field=6,condition=0,string=${id}`);
-      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-      const data = await resp.json();
-      const orders = data.orders || [];
-      console.log(`[Deco API] Strategy 3: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
-      if (match) { console.log(`[Deco API] ✅ Strategy 3 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
-    } catch (e: any) {
-      console.log(`[Deco API] Strategy 3 failed:`, e.message);
-    }
-
-    // Strategy 4: manage_orders/find with field=0, condition=2 (contains) — looser match
-    try {
-      const qp = new URLSearchParams({ username, password, field: '0', condition: '2', string: id, criteria: id, limit: '5', ...extraParams });
-      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-      console.log(`[Deco API] Strategy 4: find field=0,condition=2 (contains),string=${id}`);
-      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(15000) });
-      const data = await resp.json();
-      const orders = data.orders || [];
-      console.log(`[Deco API] Strategy 4: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
-      if (match) { console.log(`[Deco API] ✅ Strategy 4 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
-    } catch (e: any) {
-      console.log(`[Deco API] Strategy 4 failed:`, e.message);
-    }
-
-    console.warn(`[Deco API] ❌ All strategies failed for order #${id}`);
+    console.warn(`[Deco API] ❌ All direct strategies failed for order #${id}`);
     return null;
   }
 
@@ -246,7 +219,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       diag.steps.push({ step: 'direct-get', error: e.message });
     }
 
-    // Step 3: Find by order_number field=0
+    // Step 3: Find by field=1 (Order ID), condition=1 (exact match) — the proven working combo
+    try {
+      const qp = new URLSearchParams({ username, password, field: '1', condition: '1', string: targetId, criteria: targetId, limit: '5', include_workflow_data: '1', skip_login_token: '1' });
+      const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(10000) });
+      const data = await resp.json();
+      const orders = data.orders || [];
+      diag.steps.push({ step: 'find-field1-cond1', total: data.total, count: orders.length, orderIds: orders.map((o: any) => ({ order_id: o.order_id, order_number: o.order_number, id: o.id })) });
+    } catch (e: any) {
+      diag.steps.push({ step: 'find-field1-cond1', error: e.message });
+    }
+
+    // Step 4: Find by order_number field=0
     try {
       const qp = new URLSearchParams({ username, password, field: '0', condition: '0', string: targetId, criteria: targetId, limit: '5', include_workflow_data: '1', skip_login_token: '1' });
       const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
