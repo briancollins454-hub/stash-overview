@@ -627,9 +627,9 @@ export const fetchDecoFinancials = async (
 export const fetchSingleDecoJob = async (settings: ApiSettings, jobId: string): Promise<DecoJob | null> => {
     if (!settings.useLiveData) return MOCK_DECO_JOBS.find(j => j.jobNumber === jobId) || null;
     
-    // Use bulk action which handles the broken per-ID lookup via date-range pagination
+    // Use single action which tries direct lookup strategies first, then falls back to date scan
     try {
-        const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds: [jobId.trim()] });
+        const res = await fetchServerRoute('/api/deco', { action: 'single', jobIds: [jobId.trim()] });
         const json = await res.json();
         const result = (json.results || []).find((r: any) => r.order);
         if (result) {
