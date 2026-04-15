@@ -263,7 +263,7 @@ const parseDecoItems = (job: any): DecoItem[] => {
 const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
     const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
     return {
-        id: job.order_id.toString(), jobNumber: job.order_id.toString(),
+        id: job.order_id.toString(), jobNumber: (job.order_number || job.order_id).toString(),
         poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job',
         customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status),
         dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled,
@@ -562,7 +562,7 @@ export const fetchDecoFinancials = async (
             const custName = job.billing_details?.company ||
                 `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || 'Unknown';
             allJobs.push({
-                id: String(job.order_id), jobNumber: String(job.order_id),
+                id: String(job.order_id), jobNumber: String(job.order_number || job.order_id),
                 poNumber: job.customer_po_number || '', jobName: job.job_name || '',
                 customerName: custName,
                 status: mapDecoStatus(job.order_status_name || job.order_status),

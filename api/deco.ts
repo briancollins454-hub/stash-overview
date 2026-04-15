@@ -22,6 +22,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Helper: fetch orders via date-range search and filter by requested IDs
   // Uses PARALLEL page fetches — all pages at once to beat Vercel 10s timeout
+  // Match an order against any of its ID fields
+  function orderMatchesId(order: any, id: string): boolean {
+    return String(order.order_id) === id || String(order.order_number) === id || String(order.id) === id;
+  }
+
   async function fetchOrdersByIds(requestedIds: string[], includeDecoration: boolean): Promise<{jobId: string, order: any}[]> {
     const idSet = new Set(requestedIds.map(id => String(id).trim()));
     const found = new Map<string, any>();
@@ -57,8 +62,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await resp.json();
       total = data.total || 0;
       for (const order of (data.orders || [])) {
-        const oid = String(order.order_id);
-        if (idSet.has(oid)) found.set(oid, order);
+        for (const rid of idSet) {
+          if (!found.has(rid) && orderMatchesId(order, rid)) found.set(rid, order);
+        }
       }
       console.log(`[Deco API] Total orders in ${lookbackDays}-day window: ${total}`);
     } catch (e: any) {
@@ -82,9 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .then(data => {
             const orders = data.orders || [];
             for (const order of orders) {
-              const oid = String(order.order_id);
-              if (idSet.has(oid) && !found.has(oid)) {
-                found.set(oid, order);
+              for (const rid of idSet) {
+                if (!found.has(rid) && orderMatchesId(order, rid)) found.set(rid, order);
               }
             }
             return orders.length;
@@ -146,8 +151,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await resp.json();
       const orders = data.orders || [];
       console.log(`[Deco API] Strategy 2: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => String(o.order_id) === id);
-      if (match) { console.log(`[Deco API] ✅ Strategy 2 hit`); return match; }
+      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
+      if (match) { console.log(`[Deco API] ✅ Strategy 2 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
     } catch (e: any) {
       console.log(`[Deco API] Strategy 2 failed:`, e.message);
     }
@@ -161,8 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await resp.json();
       const orders = data.orders || [];
       console.log(`[Deco API] Strategy 3: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => String(o.order_id) === id);
-      if (match) { console.log(`[Deco API] ✅ Strategy 3 hit`); return match; }
+      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
+      if (match) { console.log(`[Deco API] ✅ Strategy 3 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
     } catch (e: any) {
       console.log(`[Deco API] Strategy 3 failed:`, e.message);
     }
@@ -176,8 +181,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await resp.json();
       const orders = data.orders || [];
       console.log(`[Deco API] Strategy 4: ${orders.length} results, total=${data.total}`);
-      const match = orders.find((o: any) => String(o.order_id) === id);
-      if (match) { console.log(`[Deco API] ✅ Strategy 4 hit`); return match; }
+      const match = orders.find((o: any) => orderMatchesId(o, id)) || orders[0];
+      if (match) { console.log(`[Deco API] ✅ Strategy 4 hit: order_id=${match.order_id}, order_number=${match.order_number}`); return match; }
     } catch (e: any) {
       console.log(`[Deco API] Strategy 4 failed:`, e.message);
     }
