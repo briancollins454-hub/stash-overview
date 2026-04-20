@@ -51,9 +51,12 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, [loadFromFinanceCache]);
 
   const jobs = useMemo(() => {
+    // "Not invoiced" = no invoice sent, no payment request — paymentStatus "0" or "Unpaid" or empty
+    const NOT_INVOICED = new Set(['0', 'unpaid', 'not invoiced', 'undefined', '']);
     return allJobs.filter(j => {
       const bal = typeof j.outstandingBalance === 'string' ? parseFloat(j.outstandingBalance) : (j.outstandingBalance || 0);
-      return !!j.dateShipped && bal > 0 && j.status !== 'Cancelled';
+      const ps = (j.paymentStatus || '').toString().toLowerCase().trim();
+      return !!j.dateShipped && bal > 0 && j.status !== 'Cancelled' && NOT_INVOICED.has(ps);
     }).map(j => ({
       ...j,
       outstandingBalance: typeof j.outstandingBalance === 'string' ? parseFloat(j.outstandingBalance as any) : (j.outstandingBalance || 0),
