@@ -1,23 +1,58 @@
-import React, { useState, useMemo } from 'react';
-import { Package, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Package, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download, Loader2, RefreshCw } from 'lucide-react';
 import { DecoJob } from '../types';
+import { fetchDecoFinancials } from '../services/apiService';
+import { ApiSettings } from './SettingsModal';
 
 interface Props {
   decoJobs: DecoJob[];
   isDark: boolean;
+  settings: ApiSettings;
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
 type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'orderTotal' | 'daysSinceShipped';
 type SortDir = 'asc' | 'desc';
 
-const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) => {
+const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('daysSinceShipped');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [allJobs, setAllJobs] = useState<DecoJob[]>(decoJobs);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState('');
+  const hasFetched = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const loadFullData = useCallback(async () => {
+    if (!settings.useLiveData) return;
+    setIsLoading(true);
+    setLoadProgress('Fetching all orders...');
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const jobs = await fetchDecoFinancials(settings, 2020, (cur, total) => {
+        setLoadProgress(`Loading ${cur} / ${total || '?'} orders...`);
+      }, ac.signal);
+      if (!ac.signal.aborted) setAllJobs(jobs);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') console.error('ShippedNotInvoiced fetch error:', e);
+    } finally {
+      if (!ac.signal.aborted) { setIsLoading(false); setLoadProgress(''); }
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    if (!hasFetched.current) {
+      hasFetched.current = true;
+      loadFullData();
+    }
+    return () => { abortRef.current?.abort(); };
+  }, [loadFullData]);
 
   const jobs = useMemo(() => {
-    return decoJobs.filter(j =>
+    return allJobs.filter(j =>
       !!j.dateShipped &&
       !j.dateInvoiced &&
       (j.outstandingBalance || 0) > 0 &&
@@ -28,7 +63,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
         ? Math.floor((Date.now() - new Date(j.dateShipped).getTime()) / 86400000)
         : 0,
     }));
-  }, [decoJobs]);
+  }, [allJobs]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -104,10 +139,13 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
             Shipped Not Invoiced
           </h2>
           <p className={`text-sm ${textSecondary} mt-0.5`}>
-            Jobs shipped with outstanding balance but no invoice sent
+            {isLoading ? loadProgress : 'Jobs shipped with outstanding balance but no invoice sent'}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={loadFullData} disabled={isLoading} className={`p-2 rounded-lg border ${borderColor} ${cardBg} ${isLoading ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Refresh data">
+            <RefreshCw className={`w-4 h-4 ${textSecondary} ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
           <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
             <span className={`text-xs ${textSecondary}`}>Total Outstanding</span>
             <p className="text-lg font-bold text-amber-500">{fmt(totalOutstanding)}</p>
