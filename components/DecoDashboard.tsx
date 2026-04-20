@@ -36,6 +36,7 @@ interface DecoDashboardProps {
     productMappings?: Record<string, string>;
     confirmedMatches?: Record<string, string>;
     eanIndex?: Map<string, string>;
+    itemJobLinks?: Record<string, string>;
 }
 
 const parseItemName = (name: string) => {
@@ -183,7 +184,7 @@ const getDecoBadge = (type: string | undefined) => {
 const DecoDashboard: React.FC<DecoDashboardProps> = ({ 
     apiSettings, orders, excludedTags, onManualLink, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, initialSearchId, onClearInitialSearch,
     onTimelineScan, onBulkScan, onNavigateToJob, sortOption, onSortChange, selectedFilterTags,
-    selectedOrderIds, onSelectionChange, productMappings, confirmedMatches, eanIndex
+    selectedOrderIds, onSelectionChange, productMappings, confirmedMatches, eanIndex, itemJobLinks
 }) => {
     const [viewMode, setViewMode] = useState<'search' | 'list'>('search');
     const [searchId, setSearchId] = useState('');
@@ -351,7 +352,7 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                   onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
                   productMappings={productMappings || {}}
                   confirmedMatches={confirmedMatches || {}}
-                  itemJobLinks={{}}
+                  itemJobLinks={itemJobLinks || {}}
                   eanIndex={eanIndex}
                 />
             )}

@@ -2367,6 +2367,7 @@ const App: React.FC = () => {
                 productMappings={productMappings}
                 confirmedMatches={confirmedMatches}
                 eanIndex={eanIndex}
+                itemJobLinks={itemJobLinks}
               />
             )}
             {activeTab === 'stock' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Stock Manager Error"><StockManager physicalStock={physicalStock} setPhysicalStock={updatePhysicalStock} returnStock={returnStock} setReturnStock={updateReturnStock} referenceProducts={referenceProducts} setReferenceProducts={updateReferenceProducts} orders={unifiedOrders} availableTags={allAvailableTags} /></ErrorBoundary></Suspense>}
@@ -2402,6 +2403,7 @@ const App: React.FC = () => {
                 productMappings={productMappings}
                 confirmedMatches={confirmedMatches}
                 eanIndex={eanIndex}
+                itemJobLinks={itemJobLinks}
               />
             </Suspense>)}
             {activeTab === 'analyst' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Analyst Error"><ProcessAnalyst orders={unifiedOrders} /></ErrorBoundary></Suspense>}

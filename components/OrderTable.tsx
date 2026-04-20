@@ -53,6 +53,7 @@ export interface OrderTableProps {
     noteCounts?: Record<string, number>;
     settings?: ApiSettings;
     eanIndex?: Map<string, string>;
+    itemJobLinks?: Record<string, string>;
 }
 
 // --- Helper Components ---
@@ -145,7 +146,7 @@ function guessProductionMethod(name: string, sku: string): string {
 
 const OrderTable: React.FC<OrderTableProps> = ({ 
     orders, excludedTags, sortOption, onSortChange, shopifyDomain, onTimelineScan, onBulkScan, onPabblySync, onConfirmMatch, onRefreshJob, onSearchJob, onBulkMatch, onManualLink, onNavigateToJob, onItemJobLink, isBulkScanning, scanProgress, scanCount,
-    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts, settings, eanIndex
+    selectedOrderIds, onSelectionChange, groupingMode = 'club', productMappings, confirmedMatches, onOpenNotes, noteCounts, settings, eanIndex, itemJobLinks
 }) => {
   const [mappingModalOpen, setMappingModalOpen] = useState(false);
   const [ordersForMapping, setOrdersForMapping] = useState<UnifiedOrder[]>([]);
@@ -665,7 +666,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
               onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
               productMappings={productMappings || {}}
               confirmedMatches={confirmedMatches || {}}
-              itemJobLinks={{}}
+              itemJobLinks={itemJobLinks || {}}
               eanIndex={eanIndex}
           />
       )}
