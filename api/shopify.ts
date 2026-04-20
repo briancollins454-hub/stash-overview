@@ -97,7 +97,7 @@ async function handleInventory(req: VercelRequest, res: VercelResponse, domain: 
 
     if (inventoryAction === 'inventory' && locationId) {
       // Use location-based inventoryLevels connection to only fetch items stocked at this specific location
-      const q = `query($locationId:ID!,$first:Int!,$after:String){location(id:$locationId){inventoryLevels(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id quantities(names:["available","on_hand","committed","incoming"]){name quantity}item{id sku variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}}}`;
+      const q = `query($locationId:ID!,$first:Int!,$after:String){location(id:$locationId){name inventoryLevels(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id quantities(names:["available","on_hand","committed","incoming"]){name quantity}item{id sku variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}}}`;
       const data = await gql(q, { locationId, first: 50, after: cursor || null });
       
       const root = data.data?.location?.inventoryLevels;
