@@ -51,26 +51,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, [loadFromFinanceCache]);
 
   const jobs = useMemo(() => {
-    const candidates = allJobs.filter(j => {
+    return allJobs.filter(j => {
       const bal = typeof j.outstandingBalance === 'string' ? parseFloat(j.outstandingBalance) : (j.outstandingBalance || 0);
       return !!j.dateShipped && bal > 0 && j.status !== 'Cancelled';
-    });
-    // Debug: understand what values Deco actually uses
-    const psCounts: Record<string, number> = {};
-    const invoicedCounts = { yes: 0, no: 0 };
-    candidates.forEach(j => {
-      const ps = j.paymentStatus || 'EMPTY';
-      psCounts[ps] = (psCounts[ps] || 0) + 1;
-      if (j.dateInvoiced) invoicedCounts.yes++; else invoicedCounts.no++;
-    });
-    console.log('[ShippedNotInvoiced] SHIPPED+BALANCE>0:', candidates.length,
-      '\npaymentStatus values:', psCounts,
-      '\ndateInvoiced set?', invoicedCounts,
-      '\nSample jobs:', candidates.slice(0, 5).map(j => ({
-        job: j.jobNumber, ps: j.paymentStatus, invoiced: j.dateInvoiced,
-        payments: j.payments?.length, balance: j.outstandingBalance
-      })));
-    return candidates.map(j => ({
+    }).map(j => ({
       ...j,
       outstandingBalance: typeof j.outstandingBalance === 'string' ? parseFloat(j.outstandingBalance as any) : (j.outstandingBalance || 0),
       daysSinceShipped: j.dateShipped
@@ -213,7 +197,6 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     ['', 'Job Name'],
                     ['orderTotal', 'Order Total'],
                     ['outstandingBalance', 'Outstanding'],
-                    ['', 'Payment Status'],
                     ['dateShipped', 'Shipped'],
                     ['daysSinceShipped', 'Days Ago'],
                   ] as [SortKey | '', string][]).map(([key, label]) => (
@@ -245,7 +228,6 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     <td className={`px-4 py-3 ${textSecondary} max-w-[200px] truncate`}>{j.jobName}</td>
                     <td className={`px-4 py-3 ${textPrimary} font-medium`}>{fmt(j.orderTotal || 0)}</td>
                     <td className="px-4 py-3 font-bold text-amber-500">{fmt(j.outstandingBalance || 0)}</td>
-                    <td className={`px-4 py-3 ${textSecondary} text-xs`}>{j.paymentStatus || '—'}{j.dateInvoiced ? ` (inv: ${fmtDate(j.dateInvoiced)})` : ''}</td>
                     <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateShipped)}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${

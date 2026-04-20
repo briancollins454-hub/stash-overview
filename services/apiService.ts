@@ -552,26 +552,11 @@ export const fetchDecoFinancials = async (
             include_user_assignments: '1',
             include_custom_fields: '1',
             include_sales_data: '1',
-            include_history: '1',
-            include_payment_data: '1',
-            include_emails: '1',
         };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const orders = data.orders || [];
         if (!apiTotal) apiTotal = data.total || 0;
         if (!orders.length) break;
-        // TEMP DIAGNOSTIC: dump first raw order to see ALL available fields
-        if (offset === 0 && orders.length > 0) {
-            const raw = orders[0];
-            console.log('[DECO RAW] First order keys:', Object.keys(raw).sort());
-            console.log('[DECO RAW] Full first order:', JSON.stringify(raw).slice(0, 5000));
-            // Look specifically for invoice/email/payment fields
-            const interestingKeys = Object.keys(raw).filter(k =>
-                /invoice|email|payment|history|activity|log|request|sent|remind/i.test(k)
-            );
-            console.log('[DECO RAW] Invoice/email/payment related keys:', interestingKeys);
-            interestingKeys.forEach(k => console.log(`[DECO RAW] ${k}:`, JSON.stringify(raw[k]).slice(0, 1000)));
-        }
 
         for (const job of orders) {
             const custName = job.billing_details?.company ||
