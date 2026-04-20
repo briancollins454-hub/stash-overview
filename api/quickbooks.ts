@@ -208,7 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'ap-aging') {
-      const result = await runQuery("SELECT Id, VendorRef, TotalAmt, DueDate, TxnDate, Balance FROM Bill WHERE Balance > '0' MAXRESULTS 1000");
+      const result = await runQuery("SELECT Id, VendorRef, TotalAmt, DueDate, TxnDate, Balance, EmailStatus FROM Bill WHERE Balance > '0' MAXRESULTS 1000");
       if (!result.ok) return res.status(result.status).json({ error: `QBO AP query failed (${result.status})`, detail: result.text.slice(0, 500) });
 
       const bills = (result.data?.QueryResponse?.Bill || []) as Record<string, unknown>[];
@@ -221,6 +221,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         balance: typeof bill.Balance === 'number' ? bill.Balance : Number(bill.Balance) || 0,
         dueDate: typeof bill.DueDate === 'string' ? bill.DueDate : null,
         txnDate: typeof bill.TxnDate === 'string' ? bill.TxnDate : null,
+        emailStatus: typeof bill.EmailStatus === 'string' ? bill.EmailStatus : null,
       }));
 
       return res.json({ ok: true, bills: results, count: results.length });

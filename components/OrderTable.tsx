@@ -662,7 +662,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
               orders={ordersForMapping.map(o => o.shopify)}
               currentDecoJobId={ordersForMapping.length === 1 ? ordersForMapping[0].decoJobId : undefined}
               onSearchJob={onSearchJob}
-              onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId })), learnedPatterns)}
+              onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
               productMappings={productMappings || {}}
               confirmedMatches={confirmedMatches || {}}
               itemJobLinks={{}}

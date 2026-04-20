@@ -22,7 +22,7 @@ interface DecoDashboardProps {
     onConfirmMatch?: (itemKey: string, decoId: string) => void;
     onRefreshJob?: (jobId: string) => Promise<void>;
     onSearchJob?: (jobId: string) => Promise<DecoJob | null>;
-    onBulkMatch?: (mappings: { itemKey: string, decoId: string }[], learnedPatterns?: Record<string, string>) => void;
+    onBulkMatch?: (mappings: { itemKey: string, decoId: string, jobId?: string }[], learnedPatterns?: Record<string, string>) => void;
     initialSearchId?: string | null;
     onClearInitialSearch?: () => void;
     onTimelineScan?: (id: string) => void;
@@ -348,7 +348,7 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                   orders={bulkMapOrders} 
                   currentDecoJobId={bulkMapJobId} 
                   onSearchJob={onSearchJob} 
-                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings, learnedPatterns)}
+                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
                   productMappings={productMappings || {}}
                   confirmedMatches={confirmedMatches || {}}
                   itemJobLinks={{}}

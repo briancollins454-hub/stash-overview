@@ -34,6 +34,7 @@ interface QBBill {
   balance: number;
   dueDate: string | null;
   txnDate: string | null;
+  emailStatus: string | null;
 }
 
 interface QBInvoice {
@@ -1678,7 +1679,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
               {/* Supplier Table */}
               <div className={card}>
-                <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+                <div className={`grid grid-cols-[1fr_75px_75px_75px_75px_75px_75px_85px_70px] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
                   <div className={headerText}>Supplier</div>
                   <div className={`${headerText} text-right`}>Due Soon</div>
                   <div className={`${headerText} text-right`}>Current</div>
@@ -1687,29 +1688,39 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                   <div className={`${headerText} text-right`}>61–90</div>
                   <div className={`${headerText} text-right`}>91+</div>
                   <div className={`${headerText} text-right`}>Total</div>
+                  <div className={`${headerText} text-center`}>Requested</div>
                 </div>
 
-                {apVendorSummaries.map((vendor, i) => (
-                  <div key={vendor.vendorId || i} className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
+                {apVendorSummaries.map((vendor, i) => {
+                  const sentCount = vendor.bills.filter(b => b.emailStatus === 'EmailSent').length;
+                  const allSent = sentCount > 0 && sentCount === vendor.bills.length;
+                  const someSent = sentCount > 0 && sentCount < vendor.bills.length;
+                  return (
+                  <div key={vendor.vendorId || i} className={`grid grid-cols-[1fr_75px_75px_75px_75px_75px_75px_85px_70px] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
                     <div className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{vendor.vendorName}</div>
                     {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => (
-                      <div key={bucket} className={`text-xs text-right min-w-[75px] ${vendor[bucket] > 0 ? (isDark ? 'text-gray-200 font-bold' : 'text-gray-800 font-bold') : 'text-gray-300 dark:text-gray-600'}`}>
+                      <div key={bucket} className={`text-xs text-right ${vendor[bucket] > 0 ? (isDark ? 'text-gray-200 font-bold' : 'text-gray-800 font-bold') : 'text-gray-300 dark:text-gray-600'}`}>
                         {vendor[bucket] > 0 ? formatCurrency(vendor[bucket]) : ''}
                       </div>
                     ))}
-                    <div className={`text-xs font-black text-right min-w-[85px] text-rose-600 dark:text-rose-400`}>{formatCurrency(vendor.total)}</div>
+                    <div className={`text-xs font-black text-right text-rose-600 dark:text-rose-400`}>{formatCurrency(vendor.total)}</div>
+                    <div className="text-xs text-center">
+                      {allSent ? <span className="text-green-600 dark:text-green-400 font-bold">✓</span> : someSent ? <span className="text-amber-500 font-bold" title={`${sentCount}/${vendor.bills.length} sent`}>{sentCount}/{vendor.bills.length}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {/* Totals row */}
-                <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-3 ${isDark ? 'bg-slate-700/50' : 'bg-gray-50'}`}>
+                <div className={`grid grid-cols-[1fr_75px_75px_75px_75px_75px_75px_85px_70px] gap-2 px-4 py-3 ${isDark ? 'bg-slate-700/50' : 'bg-gray-50'}`}>
                   <div className={`text-xs font-black uppercase tracking-widest ${isDark ? 'text-white' : 'text-gray-900'}`}>TOTAL</div>
                   {(['due-soon', 'current', '1-30', '31-60', '61-90', '91+'] as APAgingBucket[]).map(bucket => (
-                    <div key={bucket} className={`text-xs font-black text-right min-w-[75px] ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    <div key={bucket} className={`text-xs font-black text-right ${isDark ? 'text-white' : 'text-gray-900'}`}>
                       {apTotals[bucket] > 0 ? formatCurrency(apTotals[bucket]) : ''}
                     </div>
                   ))}
-                  <div className="text-sm font-black text-right min-w-[85px] text-rose-600 dark:text-rose-400">{formatCurrency(apTotals.total)}</div>
+                  <div className="text-sm font-black text-right text-rose-600 dark:text-rose-400">{formatCurrency(apTotals.total)}</div>
+                  <div></div>
                 </div>
               </div>
             </>

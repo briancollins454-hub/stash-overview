@@ -1534,7 +1534,7 @@ const App: React.FC = () => {
       handleRefreshJob(jobId);
   };
 
-  const handleBulkConfirmMatch = (mappings: { itemKey: string, decoId: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => {
+  const handleBulkConfirmMatch = (mappings: { itemKey: string, decoId: string, jobId?: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => {
       setConfirmedMatches((prev: Record<string, string>) => {
           const next: Record<string, string> = { ...prev };
           mappings.forEach(m => { next[m.itemKey] = m.decoId; });
@@ -1552,15 +1552,27 @@ const App: React.FC = () => {
           Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => saveProductMapping(apiSettings, sPattern, dPattern).catch(console.error));
       }
 
-      if (jobId) {
+      // Save job links per-item — each mapping can carry its own jobId
+      const jobsToRefresh = new Set<string>();
+      const itemsWithJobs = mappings.filter(m => m.jobId || jobId);
+      if (itemsWithJobs.length > 0) {
           setItemJobLinks(prev => {
               const next = { ...prev };
-              mappings.forEach(m => { next[m.itemKey] = jobId; });
+              itemsWithJobs.forEach(m => {
+                  const j = m.jobId || jobId;
+                  if (j) next[m.itemKey] = j;
+              });
               setLocalItem('stash_item_job_links', next).catch(console.error);
               return next;
           });
-          mappings.forEach(m => saveCloudJobLink(apiSettings, m.itemKey, jobId).catch(console.error));
-          handleRefreshJob(jobId);
+          itemsWithJobs.forEach(m => {
+              const j = m.jobId || jobId;
+              if (j) {
+                  saveCloudJobLink(apiSettings, m.itemKey, j).catch(console.error);
+                  jobsToRefresh.add(j);
+              }
+          });
+          jobsToRefresh.forEach(j => handleRefreshJob(j));
       }
       if (mappings.length > 0) {
           saveCloudMappingBatch(apiSettings, mappings.map(m => ({ item_id: m.itemKey, deco_id: m.decoId }))).catch(console.error);
@@ -2306,7 +2318,7 @@ const App: React.FC = () => {
                   } 
                   return job; 
                 }} 
-                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, m[0]?.jobId, lp)} 
+                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, undefined, lp)} 
                 onManualLink={handleManualJobLink} 
                 onItemJobLink={async (orderNumber, itemId, jobId) => { 
                   setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 

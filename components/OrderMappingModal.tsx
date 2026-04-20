@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ShopifyOrder, DecoJob, DecoItem } from '../types';
 import { standardizeSize, isEligibleForMapping } from '../services/apiService';
 import { suggestMapping } from '../services/geminiService';
@@ -15,7 +15,7 @@ interface OrderMappingModalProps {
   itemJobLinks: Record<string, string>;
   eanIndex?: Map<string, string>;
   onSearchJob: (jobId: string) => Promise<DecoJob | null>;
-  onSaveMappings: (mappings: { itemKey: string, decoId: string }[], jobId: string, learnedPatterns?: Record<string, string>) => void;
+  onSaveMappings: (mappings: { itemKey: string, decoId: string, jobId?: string }[], jobId: string, learnedPatterns?: Record<string, string>) => void;
 }
 
 const getShopifyPattern = (item: any) => {
@@ -58,16 +58,20 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
   const [decoJob, setDecoJob] = useState<DecoJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<{[key: string]: string}>({});
+  const [mappingJobs, setMappingJobs] = useState<{[key: string]: string}>({});
   const [mirroredKeys, setMirroredKeys] = useState<Set<string>>(new Set());
   const [autoMappedKeys, setAutoMappedKeys] = useState<Set<string>>(new Set());
 
   const targetOrders = orders || (order ? [order] : []);
+  const prevOpenRef = useRef(false);
 
   useEffect(() => {
-      if (isOpen) {
+      // Only reset state when the modal transitions from closed to open
+      if (isOpen && !prevOpenRef.current) {
           setSearchId(currentDecoJobId || '');
           setDecoJob(null);
           setMappings({});
+          setMappingJobs({});
           setMirroredKeys(new Set());
           setAutoMappedKeys(new Set());
           setError(null);
@@ -75,6 +79,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
               handleSearch(currentDecoJobId);
           }
       }
+      prevOpenRef.current = isOpen;
   }, [isOpen, currentDecoJobId]);
 
   useEffect(() => {
@@ -107,11 +112,12 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           if (job) {
               setDecoJob(job);
               
-              // Auto-map based on learned patterns
+              // Auto-map based on learned patterns + track which job each mapping belongs to
               setMappings(prev => {
                   const next = { ...prev };
                   let autoMappedCount = 0;
                   const newAutoKeys = new Set<string>();
+                  const newJobEntries: {[key: string]: string} = {};
                   
                   targetOrders.forEach(o => {
                       o.items.forEach(sItem => {
@@ -141,6 +147,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                   const decoId = eanMatch.vendorSku || eanMatch.productCode || eanMatch.name;
                                   const idx = job.items.indexOf(eanMatch);
                                   next[sItem.id] = `${decoId}@@@${idx}`;
+                                  newJobEntries[sItem.id] = job.jobNumber;
                                   newAutoKeys.add(sItem.id);
                                   autoMappedCount++;
                                   return;
@@ -157,6 +164,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                   const decoId = match.vendorSku || match.productCode || match.name;
                                   const idx = job.items.indexOf(match);
                                   next[sItem.id] = `${decoId}@@@${idx}`;
+                                  newJobEntries[sItem.id] = job.jobNumber;
                                   autoMappedCount++;
                               }
                           }
@@ -164,6 +172,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                   });
                   
                   if (newAutoKeys.size > 0) setAutoMappedKeys(prev => new Set([...prev, ...newAutoKeys]));
+                  if (Object.keys(newJobEntries).length > 0) setMappingJobs(prev => ({ ...prev, ...newJobEntries }));
                   return next;
               });
           }
@@ -186,6 +195,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
 
       // 1. Instant Local Match for clear-cut cases
       const nextMappings = { ...mappings };
+      const nextJobs = { ...mappingJobs };
       const remainingItems: any[] = [];
       let localMatchCount = 0;
 
@@ -213,6 +223,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
             const decoId = eanMatch.vendorSku || eanMatch.productCode || eanMatch.name;
             const idx = decoJob.items.indexOf(eanMatch);
             nextMappings[sItem.id] = `${decoId}@@@${idx}`;
+            nextJobs[sItem.id] = decoJob.jobNumber;
             localMatchCount++;
             return;
           }
@@ -228,6 +239,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           const decoId = exactMatch.vendorSku || exactMatch.productCode || exactMatch.name;
           const idx = decoJob.items.indexOf(exactMatch);
           nextMappings[sItem.id] = `${decoId}@@@${idx}`;
+          nextJobs[sItem.id] = decoJob.jobNumber;
           localMatchCount++;
         } else {
           remainingItems.push(sItem);
@@ -237,6 +249,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
       // Apply local matches immediately for instant feedback
       if (localMatchCount > 0) {
         setMappings({ ...nextMappings });
+        setMappingJobs({ ...nextJobs });
       }
 
       if (remainingItems.length === 0) {
@@ -248,16 +261,19 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
       const suggestions = await suggestMapping(remainingItems, decoJob.items);
       
       const aiMappings = { ...nextMappings };
+      const aiJobs = { ...nextJobs };
       suggestions.forEach(s => {
         const decoItem = decoJob.items.find(d => d.name === s.decoItemName);
         if (decoItem && s.confidence > 0.7 && !aiMappings[s.shopifyItemId]) {
           const decoId = decoItem.vendorSku || decoItem.productCode || decoItem.name;
           const idx = decoJob.items.indexOf(decoItem);
           aiMappings[s.shopifyItemId] = `${decoId}@@@${idx}`;
+          aiJobs[s.shopifyItemId] = decoJob.jobNumber;
         }
       });
       
       setMappings(aiMappings);
+      setMappingJobs(aiJobs);
     } catch (e) {
       console.error("AI Suggest Error:", e);
     } finally {
@@ -268,6 +284,14 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
   const handleSelect = (itemKey: string, decoId: string) => {
       const nextMappings = { ...mappings, [itemKey]: decoId };
       const nextMirrored = new Set(mirroredKeys);
+      const nextJobs = { ...mappingJobs };
+
+      // Track which job this mapping belongs to
+      if (decoId && decoJob) {
+          nextJobs[itemKey] = decoJob.jobNumber;
+      } else if (!decoId) {
+          delete nextJobs[itemKey];
+      }
 
       // Find the source item to get its signature for mirroring
       let sourceItem: any = null;
@@ -291,8 +315,13 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                           // If we are setting a mapping, overwrite even if already mapped (to ensure consistency across identical items)
                           // If we are clearing a mapping (decoId === ''), clear it for the whole group
                           nextMappings[item.id] = decoId;
-                          if (decoId) nextMirrored.add(item.id);
-                          else nextMirrored.delete(item.id);
+                          if (decoId) {
+                              nextMirrored.add(item.id);
+                              if (decoJob) nextJobs[item.id] = decoJob.jobNumber;
+                          } else {
+                              nextMirrored.delete(item.id);
+                              delete nextJobs[item.id];
+                          }
                       }
                   }
               });
@@ -305,6 +334,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
 
       setMappings(nextMappings);
       setMirroredKeys(nextMirrored);
+      setMappingJobs(nextJobs);
   };
 
   const handleSave = () => {
@@ -335,7 +365,8 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
 
           return {
               itemKey: key,
-              decoId: value
+              decoId: value,
+              jobId: mappingJobs[key]
           };
       });
 
