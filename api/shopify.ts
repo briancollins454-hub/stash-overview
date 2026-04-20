@@ -96,26 +96,31 @@ async function handleInventory(req: VercelRequest, res: VercelResponse, domain: 
     }
 
     if (inventoryAction === 'inventory' && locationId) {
-      // Use inventoryItems query (read_inventory scope) instead of location() (read_locations scope)
-      const q = `query($first:Int!,$after:String){inventoryItems(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id sku inventoryLevel(locationId:"${locationId}"){id quantities(names:["available","on_hand","committed","incoming"]){name quantity}}variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}`;
+      // Use inventoryLevels connection (inventoryLevel singular was deprecated and returns null in 2025-01)
+      const q = `query($first:Int!,$after:String){inventoryItems(first:$first,after:$after){pageInfo{hasNextPage endCursor}edges{node{id sku inventoryLevels(first:10){edges{node{id location{id}quantities(names:["available","on_hand","committed","incoming"]){name quantity}}}}variant{id title price displayName barcode inventoryQuantity product{id title vendor productType featuredImage{url}}}}}}}`;
       const data = await gql(q, { first: 50, after: cursor || null });
       const root = data.data?.inventoryItems;
       if (!root) return res.status(200).json({ items: [], pageInfo: { hasNextPage: false }, error: data.errors?.[0]?.message });
-      const items = (root.edges||[]).filter((e:any) => e.node.inventoryLevel).map((e:any)=>{
-        const n=e.node;const lev=n.inventoryLevel;const qm:Record<string,number>={};
+      const items = (root.edges||[]).map((e:any)=>{
+        const n=e.node;
+        const lev = (n.inventoryLevels?.edges||[]).map((le:any)=>le.node).find((l:any)=>l.location?.id===locationId);
+        if (!lev) return null;
+        const qm:Record<string,number>={};
         (lev.quantities||[]).forEach((q:any)=>{qm[q.name]=q.quantity;});
         const v=n.variant;const p=v?.product;
         return{inventoryItemId:n.id,inventoryLevelId:lev.id,sku:n.sku||'',barcode:v?.barcode||'',variantId:v?.id,variantTitle:v?.title,displayName:v?.displayName,price:v?.price,productId:p?.id,productTitle:p?.title,vendor:p?.vendor,productType:p?.productType,imageUrl:p?.featuredImage?.url,available:qm.available??0,onHand:qm.on_hand??0,committed:qm.committed??0,incoming:qm.incoming??0};
-      });
+      }).filter(Boolean);
       return res.status(200).json({ items, pageInfo: root.pageInfo, locationName: locationId.includes('111232942466') ? 'Local Stock' : '20 Church Street' });
     }
 
     if (inventoryAction === 'search' && locationId && search) {
-      const q = `query($query:String!,$first:Int!){products(first:$first,query:$query){edges{node{id title vendor productType featuredImage{url}variants(first:100){edges{node{id title price displayName barcode sku inventoryQuantity inventoryItem{id inventoryLevel(locationId:"${locationId}"){id quantities(names:["available","on_hand","committed"]){name quantity}}}}}}}}}}`;
+      const q = `query($query:String!,$first:Int!){products(first:$first,query:$query){edges{node{id title vendor productType featuredImage{url}variants(first:100){edges{node{id title price displayName barcode sku inventoryQuantity inventoryItem{id inventoryLevels(first:10){edges{node{id location{id}quantities(names:["available","on_hand","committed"]){name quantity}}}}}}}}}}}}`;
       const data = await gql(q, { query: search, first: 20 });
       const products = (data.data?.products?.edges||[]).map((pe:any)=>{
         const p=pe.node;const variants=(p.variants?.edges||[]).map((ve:any)=>{
-          const v=ve.node;const lev=v.inventoryItem?.inventoryLevel;const qm:Record<string,number>={};
+          const v=ve.node;
+          const lev=(v.inventoryItem?.inventoryLevels?.edges||[]).map((le:any)=>le.node).find((l:any)=>l.location?.id===locationId);
+          const qm:Record<string,number>={};
           (lev?.quantities||[]).forEach((q:any)=>{qm[q.name]=q.quantity;});
           return{variantId:v.id,title:v.title,price:v.price,displayName:v.displayName,barcode:v.barcode,sku:v.sku,inventoryItemId:v.inventoryItem?.id,inventoryLevelId:lev?.id,available:qm.available??v.inventoryQuantity??0,onHand:qm.on_hand??0,committed:qm.committed??0};
         });return{productId:p.id,title:p.title,vendor:p.vendor,productType:p.productType,imageUrl:p.featuredImage?.url,variants};

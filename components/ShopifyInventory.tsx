@@ -193,12 +193,16 @@ const ShopifyInventory: React.FC = () => {
     setError(null);
     let allItems: InventoryItem[] = [];
     let pageCursor: string | null = null;
+    let emptyPages = 0;
     try {
       for (let page = 0; page < 50; page++) { // safety limit
         const data = await fetchApi({ action: 'inventory', locationId: locId, cursor: pageCursor });
-        console.log(`[Inventory] Page ${page}: ${(data.items||[]).length} items, hasNext=${data.pageInfo?.hasNextPage}`);
-        allItems = [...allItems, ...(data.items || [])];
+        const pageItems = data.items || [];
+        console.log(`[Inventory] Page ${page}: ${pageItems.length} items, hasNext=${data.pageInfo?.hasNextPage}`);
+        allItems = [...allItems, ...pageItems];
         if (!data.pageInfo?.hasNextPage) break;
+        emptyPages = pageItems.length === 0 ? emptyPages + 1 : 0;
+        if (emptyPages >= 3) { console.warn('[Inventory] Breaking: 3 consecutive empty pages'); break; }
         pageCursor = data.pageInfo.endCursor;
       }
       console.log(`[Inventory] Total loaded: ${allItems.length} items for location ${locId}`);
