@@ -1,4 +1,4 @@
-const CACHE_NAME = 'stash-sync-v4';
+const CACHE_NAME = 'stash-sync-v5';
 
 // Install: skip waiting immediately so new SW activates right away
 self.addEventListener('install', (event) => {
@@ -37,8 +37,13 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Never cache API calls
-  if (url.pathname.startsWith('/api/')) {
+  // Never cache API calls or direct Supabase requests
+  if (url.pathname.startsWith('/api/') || url.hostname.includes('supabase')) {
+    return;
+  }
+
+  // Only cache GET requests — Cache API doesn't support POST/PUT/DELETE
+  if (request.method !== 'GET') {
     return;
   }
 
