@@ -51,6 +51,17 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, [loadFromFinanceCache]);
 
   const jobs = useMemo(() => {
+    if (allJobs.length > 0) {
+      const withShipped = allJobs.filter(j => !!j.dateShipped);
+      const notInvoiced = withShipped.filter(j => !j.dateInvoiced);
+      const withBalance = notInvoiced.filter(j => (j.outstandingBalance || 0) > 0);
+      const notCancelled = withBalance.filter(j => j.status !== 'Cancelled');
+      console.log('[ShippedNotInvoiced] Total:', allJobs.length, '→ Shipped:', withShipped.length, '→ Not Invoiced:', notInvoiced.length, '→ Balance>0:', withBalance.length, '→ Not Cancelled:', notCancelled.length);
+      if (allJobs.length > 0 && withShipped.length === 0) {
+        const sample = allJobs[0];
+        console.log('[ShippedNotInvoiced] Sample job fields:', { dateShipped: sample.dateShipped, date_shipped: (sample as any).date_shipped, dateInvoiced: sample.dateInvoiced, outstandingBalance: sample.outstandingBalance, outstanding_balance: (sample as any).outstanding_balance, status: sample.status });
+      }
+    }
     return allJobs.filter(j =>
       !!j.dateShipped &&
       !j.dateInvoiced &&
