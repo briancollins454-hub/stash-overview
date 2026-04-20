@@ -34,7 +34,6 @@ interface QBBill {
   balance: number;
   dueDate: string | null;
   txnDate: string | null;
-  emailStatus: string | null;
 }
 
 interface QBInvoice {
@@ -219,6 +218,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [qbBills, setQbBills] = useState<QBBill[]>([]);
   const [qbInvoices, setQbInvoices] = useState<QBInvoice[]>([]);
   const [qbCredits, setQbCredits] = useState<QBCustomerCredit[]>([]);
+  const [paymentRequested, setPaymentRequested] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('stash_payment_requested') || '{}'); } catch { return {}; }
+  });
   const [qbLoading, setQbLoading] = useState(false);
   const [qbError, setQbError] = useState<string | null>(null);
   const [qbLastSynced, setQbLastSynced] = useState<string | null>(null);
@@ -330,6 +332,21 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   // --- Supabase cloud persistence helpers ---
   const saveToSupabase = useCallback(async (jobs: DecoJob[], syncedAt: string) => {
     try {
+      // Strip heavy fields to stay under Vercel's 4.5MB body limit
+      const lean = jobs.map(j => ({
+        ...j,
+        items: j.items.map(item => ({
+          name: item.name,
+          productCode: item.productCode,
+          vendorSku: item.vendorSku,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          isReceived: item.isReceived,
+          isProduced: item.isProduced,
+          isShipped: item.isShipped,
+        })),
+      }));
       await fetch('/api/supabase-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -337,7 +354,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           path: 'stash_finance_cache',
           method: 'POST',
           prefer: 'resolution=merge-duplicates',
-          body: { id: 'finance_jobs', data: jobs, last_synced: syncedAt, updated_at: new Date().toISOString() },
+          body: { id: 'finance_jobs', data: lean, last_synced: syncedAt, updated_at: new Date().toISOString() },
         }),
       });
     } catch { /* non-critical — IndexedDB still works as fallback */ }
@@ -1692,9 +1709,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                 </div>
 
                 {apVendorSummaries.map((vendor, i) => {
-                  const sentCount = vendor.bills.filter(b => b.emailStatus === 'EmailSent').length;
-                  const allSent = sentCount > 0 && sentCount === vendor.bills.length;
-                  const someSent = sentCount > 0 && sentCount < vendor.bills.length;
+                  const vendorKey = vendor.vendorId || vendor.vendorName;
+                  const requestedDate = paymentRequested[vendorKey];
                   return (
                   <div key={vendor.vendorId || i} className={`grid grid-cols-[1fr_75px_75px_75px_75px_75px_75px_85px_70px] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
                     <div className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>{vendor.vendorName}</div>
@@ -1705,7 +1721,21 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     ))}
                     <div className={`text-xs font-black text-right text-rose-600 dark:text-rose-400`}>{formatCurrency(vendor.total)}</div>
                     <div className="text-xs text-center">
-                      {allSent ? <span className="text-green-600 dark:text-green-400 font-bold">✓</span> : someSent ? <span className="text-amber-500 font-bold" title={`${sentCount}/${vendor.bills.length} sent`}>{sentCount}/{vendor.bills.length}</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                      <button
+                        title={requestedDate ? `Requested ${requestedDate} — click to clear` : 'Mark payment requested'}
+                        onClick={() => {
+                          setPaymentRequested(prev => {
+                            const next = { ...prev };
+                            if (next[vendorKey]) delete next[vendorKey];
+                            else next[vendorKey] = new Date().toLocaleDateString('en-GB');
+                            localStorage.setItem('stash_payment_requested', JSON.stringify(next));
+                            return next;
+                          });
+                        }}
+                        className="hover:opacity-70 transition-opacity"
+                      >
+                        {requestedDate ? <span className="text-green-600 dark:text-green-400 font-bold" title={requestedDate}>✓</span> : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                      </button>
                     </div>
                   </div>
                   );
