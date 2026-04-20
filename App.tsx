@@ -1432,8 +1432,13 @@ const App: React.FC = () => {
               currentStatus = 'Not Ordered';
           }
 
+          // Segregate fully produced Deco jobs out of the live queue, treating them as effectively fulfilled.
+          const isPhysicallyShipped = currentStatus === 'Shipped' || currentStatus === 'Invoiced';
+          const effectiveFulfillmentStatus = isPhysicallyShipped ? 'fulfilled' : order.fulfillmentStatus;
+          const effectiveClosedAt = isPhysicallyShipped && !order.closedAt ? (decoJob?.productionDueDate || order.date) : order.closedAt;
+
           return {
-              shopify: { ...order, items: mappedItems },
+              shopify: { ...order, fulfillmentStatus: effectiveFulfillmentStatus, items: mappedItems },
               deco: decoJob,
               matchStatus: (decoJob || resolvedDecoJobId) ? 'linked' : 'unlinked',
               productionStatus: currentStatus,
@@ -1455,8 +1460,8 @@ const App: React.FC = () => {
               isMto: isMtoOrder,
               hasStockItems: stockItems.length > 0,
               isStockDispatchReady, 
-              fulfillmentDate: order.closedAt,
-              fulfillmentDuration: order.closedAt ? calculateWorkingDays(order.date, order.closedAt, holidaySet) : undefined,
+              fulfillmentDate: effectiveClosedAt,
+              fulfillmentDuration: effectiveClosedAt ? calculateWorkingDays(order.date, effectiveClosedAt, holidaySet) : undefined,
               productionDueDate: decoJob?.productionDueDate,
               shipStationTracking: (() => {
                   const ssData = shipStationData.get(order.orderNumber);
@@ -1898,12 +1903,12 @@ const App: React.FC = () => {
           notOnDeco: active.filter(o => !o.decoJobId).length,
           notOnDeco5Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 5).length,
           notOnDeco10Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 10).length,
-          orderComplete: active.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100).length,
+          orderComplete: active.filter(o => o.completionPercentage === 100).length,
           stockReady: active.filter(o => o.isStockDispatchReady).length,
-          partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
+          partiallyReady: active.filter(o => o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
           late: active.filter(o => o.daysRemaining < 0).length,
           dueSoon: active.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5).length,
-          readyForShipping: active.filter(o => (o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady).length,
+          readyForShipping: active.filter(o => o.productionStatus === 'Ready for Shipping' || o.completionPercentage === 100 || (o.completionPercentage >= partialThreshold && o.completionPercentage < 100) || o.isStockDispatchReady).length,
           unfulfilled: active.length,
           productionAfterDispatch: active.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000).length,
           fulfilled7d: fulfilled7d.length,
@@ -1928,10 +1933,10 @@ const App: React.FC = () => {
       else {
           filtered = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
           if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
-          else if (activeQuickFilter === 'ready') filtered = filtered.filter(o => (o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
-          else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100);
+          else if (activeQuickFilter === 'ready') filtered = filtered.filter(o => o.productionStatus === 'Ready for Shipping' || o.completionPercentage === 100 || (o.completionPercentage >= partialThreshold && o.completionPercentage < 100) || o.isStockDispatchReady);
+          else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.completionPercentage === 100);
           else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
-          else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
+          else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
           else if (activeQuickFilter === 'late') filtered = filtered.filter(o => o.daysRemaining < 0);
           else if (activeQuickFilter === 'mapping_gap') filtered = filtered.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100);
           else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
