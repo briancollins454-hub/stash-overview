@@ -119,7 +119,14 @@ CREATE TABLE IF NOT EXISTS stash_product_patterns (
     shopify_pattern TEXT PRIMARY KEY,
     deco_pattern TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);`;
+);
+
+-- Enable Realtime on key tables for live cross-device sync
+ALTER PUBLICATION supabase_realtime ADD TABLE stash_mappings;
+ALTER PUBLICATION supabase_realtime ADD TABLE stash_job_links;
+ALTER PUBLICATION supabase_realtime ADD TABLE stash_product_patterns;
+ALTER PUBLICATION supabase_realtime ADD TABLE stash_orders;
+ALTER PUBLICATION supabase_realtime ADD TABLE stash_deco_jobs;`;
 
   return (
     <div className="max-w-5xl mx-auto pb-24 space-y-8 animate-in fade-in duration-500">

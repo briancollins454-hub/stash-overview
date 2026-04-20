@@ -12,6 +12,7 @@ import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSing
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { initSupabase } from './services/supabase';
+import { startRealtime, stopRealtime } from './services/realtimeService';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
@@ -957,6 +958,77 @@ const App: React.FC = () => {
                     const serverCfg = await cfgRes.json();
                     // Initialise direct Supabase client before any sync calls
                     initSupabase(serverCfg.supabaseUrl, serverCfg.supabaseAnonKey);
+
+                    // Start Supabase Realtime — live sync across all devices
+                    startRealtime(serverCfg.supabaseUrl, serverCfg.supabaseAnonKey, {
+                      onMappingChange: (itemId, decoId) => {
+                        setConfirmedMatches(prev => {
+                          if (prev[itemId] === decoId) return prev; // no-op
+                          const next = { ...prev, [itemId]: decoId };
+                          setLocalItem('stash_confirmed_matches', next).catch(console.error);
+                          return next;
+                        });
+                      },
+                      onJobLinkChange: (orderId, jobId) => {
+                        setItemJobLinks(prev => {
+                          if (prev[orderId] === jobId) return prev;
+                          const next = { ...prev, [orderId]: jobId };
+                          setLocalItem('stash_item_job_links', next).catch(console.error);
+                          return next;
+                        });
+                      },
+                      onPatternChange: (shopifyPattern, decoPattern) => {
+                        setProductMappings(prev => {
+                          if (prev[shopifyPattern] === decoPattern) return prev;
+                          const next = { ...prev, [shopifyPattern]: decoPattern };
+                          setLocalItem('stash_product_mappings', next).catch(console.error);
+                          return next;
+                        });
+                      },
+                      onDataChange: async (table) => {
+                        // Lightweight cloud pull when orders or deco jobs change on another device
+                        try {
+                          const cloudData = await fetchCloudData(apiSettings, { includeOrders: table === 'stash_orders' });
+                          if (!cloudData) return;
+                          if (table === 'stash_orders' && cloudData.orders?.length) {
+                            setRawShopifyOrders(prev => {
+                              const orderMap = new Map(prev.map(o => [o.id, o]));
+                              cloudData.orders.forEach(o => orderMap.set(o.id, o));
+                              const merged = Array.from(orderMap.values());
+                              setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                          if (table === 'stash_deco_jobs' && cloudData.decoJobs?.length) {
+                            setRawDecoJobs(prev => {
+                              const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                              const merged = Array.from(jobMap.values());
+                              setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                          // Also pick up any new mappings/links from the same cloud pull
+                          if (cloudData.mappings) {
+                            setConfirmedMatches(prev => {
+                              const merged = { ...cloudData.mappings, ...prev };
+                              setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                          if (cloudData.links) {
+                            setItemJobLinks(prev => {
+                              const merged = { ...cloudData.links, ...prev };
+                              setLocalItem('stash_item_job_links', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                        } catch (e) {
+                          console.warn('[Realtime] Cloud pull failed:', e);
+                        }
+                      },
+                    });
+
                     setApiSettings(prev => {
                         const merged = {
                             ...prev,
@@ -1091,6 +1163,7 @@ const App: React.FC = () => {
         }
     };
     initialize();
+    return () => { stopRealtime(); };
   }, []);
 
   useEffect(() => {
