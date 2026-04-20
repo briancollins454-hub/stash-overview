@@ -144,6 +144,13 @@ export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrde
         // Dedup by order ID to prevent Postgres error 21000 in batch operations
         const uniqueOrders = Array.from(new Map(orders.map(o => [o.id, o])).values());
         
+        // Clean fulfilled/restocked orders from cloud — they should not be synced
+        try {
+            await fetchWithProxy(`stash_orders?order_data->>fulfillmentStatus=in.(fulfilled,restocked)`, 'DELETE');
+        } catch (cleanupErr) {
+            console.warn('Cloud order cleanup failed (non-fatal):', cleanupErr);
+        }
+        
         const batchSize = 20;
         
         for (let i = 0; i < uniqueOrders.length; i += batchSize) {

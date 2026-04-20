@@ -580,8 +580,12 @@ const App: React.FC = () => {
               const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
               if (cloudData) {
                 cloudFetchOk = true;
-                // Cloud orders fill gaps (lower priority — API data overwrites)
-                (cloudData.orders || []).forEach((o: ShopifyOrder) => orderMap.set(o.id, o));
+                // Cloud orders fill gaps — only unfulfilled/partial, never stale fulfilled
+                (cloudData.orders || []).forEach((o: ShopifyOrder) => {
+                  if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
+                    orderMap.set(o.id, o);
+                  }
+                });
                 // Cloud deco jobs OVERWRITE local cache — cloud is safe because only
                 // API-fresh data gets pushed there (stale cache is never pushed)
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
@@ -646,7 +650,10 @@ const App: React.FC = () => {
             }
 
             if (sOrders.length > 0 && cloudFetchOk) {
-                saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
+                // Only push unfulfilled/partial orders to cloud — NOT fulfilled orders
+                // This prevents stale fulfilled orders from inflating counts on other devices
+                const cloudOrders = mergedOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked');
+                saveCloudOrders(apiSettings, cloudOrders).catch(console.error);
             }
 
             // Push only API-fresh deco jobs to cloud — never stale local cache
@@ -1002,7 +1009,12 @@ const App: React.FC = () => {
                           if (table === 'stash_orders' && cloudData.orders?.length) {
                             setRawShopifyOrders(prev => {
                               const orderMap = new Map(prev.map(o => [o.id, o]));
-                              cloudData.orders.forEach(o => orderMap.set(o.id, o));
+                              // Only merge unfulfilled/partial cloud orders — skip stale fulfilled ones
+                              cloudData.orders.forEach(o => {
+                                if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
+                                  orderMap.set(o.id, o);
+                                }
+                              });
                               const merged = Array.from(orderMap.values());
                               setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
                               return merged;
@@ -1090,7 +1102,7 @@ const App: React.FC = () => {
                     saveCloudMappingBatch(apiSettings, Object.entries(cachedMatches || {}).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
                     saveCloudProductMappingBatch(apiSettings, cachedProductMappings || {}),
                     saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {}),
-                    hasLocalOrders ? saveCloudOrders(apiSettings, initialOrders) : Promise.resolve()
+                    hasLocalOrders ? saveCloudOrders(apiSettings, initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked')) : Promise.resolve()
                 ]).catch(e => console.warn('Local push failed:', e));
             }
 
@@ -1137,10 +1149,12 @@ const App: React.FC = () => {
                 }
 
                 if (cloudData.orders && cloudData.orders.length > 0) {
-                    // Merge cloud orders with local cache, preserving the most complete data from each source
+                    // Merge cloud orders with local cache — only unfulfilled/partial orders
                     const orderMap = new Map<string, ShopifyOrder>();
                     initialOrders.forEach(o => orderMap.set(o.id, o));
                     cloudData.orders.forEach(o => {
+                        // Skip fulfilled/restocked orders from cloud to prevent count inflation
+                        if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
                         const existing = orderMap.get(o.id);
                         if (!existing) {
                             orderMap.set(o.id, o);
