@@ -11,6 +11,7 @@ import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { initSupabase } from './services/supabase';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
@@ -904,6 +905,15 @@ const App: React.FC = () => {
             const savedExcluded = localStorage.getItem('stash_excluded_tags');
             if (savedExcluded) setExcludedTags(JSON.parse(savedExcluded));
 
+            // Early Supabase init from cached settings (so components mounting before config fetch still work)
+            try {
+                const cached = localStorage.getItem('stash_api_settings');
+                if (cached) {
+                    const s = JSON.parse(cached);
+                    if (s.supabaseUrl && s.supabaseAnonKey) initSupabase(s.supabaseUrl, s.supabaseAnonKey);
+                }
+            } catch {}
+
             // Load from IndexedDB first for instant UI
             const [cachedOrders, cachedJobs, cachedMatches, cachedProductMappings, cachedJobLinks] = await Promise.all([
                 getLocalItem<ShopifyOrder[]>('stash_raw_shopify_orders'),
@@ -927,6 +937,8 @@ const App: React.FC = () => {
                 const cfgRes = await fetch('/api/config');
                 if (cfgRes.ok) {
                     const serverCfg = await cfgRes.json();
+                    // Initialise direct Supabase client before any sync calls
+                    initSupabase(serverCfg.supabaseUrl, serverCfg.supabaseAnonKey);
                     setApiSettings(prev => {
                         const merged = {
                             ...prev,

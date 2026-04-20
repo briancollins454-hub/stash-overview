@@ -10,6 +10,7 @@ import ExcelJS from 'exceljs';
 import { DecoJob } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
 import { getItem, setItem } from '../services/localStore';
+import { supabaseFetch } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -329,10 +330,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const CACHE_KEY = 'stash_finance_jobs';
   const CACHE_TS_KEY = 'stash_finance_synced';
 
-  // --- Supabase cloud persistence helpers ---
+  // --- Supabase cloud persistence helpers (direct — no Vercel proxy) ---
   const saveToSupabase = useCallback(async (jobs: DecoJob[], syncedAt: string) => {
     try {
-      // Strip heavy fields to stay under Vercel's 4.5MB body limit
+      // Strip heavy fields to reduce storage size
       const lean = jobs.map(j => ({
         ...j,
         items: j.items.map(item => ({
@@ -347,30 +348,21 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           isShipped: item.isShipped,
         })),
       }));
-      await fetch('/api/supabase-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: 'stash_finance_cache',
-          method: 'POST',
-          prefer: 'resolution=merge-duplicates',
-          body: { id: 'finance_jobs', data: lean, last_synced: syncedAt, updated_at: new Date().toISOString() },
-        }),
-      });
+      await supabaseFetch(
+        'stash_finance_cache',
+        'POST',
+        { id: 'finance_jobs', data: lean, last_synced: syncedAt, updated_at: new Date().toISOString() },
+        'resolution=merge-duplicates'
+      );
     } catch { /* non-critical — IndexedDB still works as fallback */ }
   }, []);
 
   const loadFromSupabase = useCallback(async (): Promise<{ data: DecoJob[]; last_synced: string } | null> => {
     try {
-      const res = await fetch('/api/supabase-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          path: 'stash_finance_cache?id=eq.finance_jobs&select=data,last_synced',
-          method: 'GET',
-        }),
-      });
-      if (!res.ok) return null;
+      const res = await supabaseFetch(
+        'stash_finance_cache?id=eq.finance_jobs&select=data,last_synced',
+        'GET'
+      );
       const rows = await res.json();
       if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data) && rows[0].data.length > 0) {
         return { data: rows[0].data, last_synced: rows[0].last_synced };

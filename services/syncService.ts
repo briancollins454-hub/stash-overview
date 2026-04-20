@@ -1,10 +1,11 @@
 
 import { ApiSettings } from '../components/SettingsModal';
 import { ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct, DecoJob } from '../types';
+import { supabaseFetch } from './supabase';
 
 /**
  * SyncService handles the persistence of user-defined data (mappings/links),
- * cached Shopify order data, and physical inventory to Supabase via server-side routes.
+ * cached Shopify order data, and physical inventory to Supabase directly.
  */
 
 export interface CloudMapping {
@@ -24,32 +25,11 @@ const fetchWithProxy = async (path: string, method: string, body?: any, prefer?:
         const preferValues = ['return=minimal'];
         if (prefer) preferValues.push(prefer);
 
-        const response = await fetch('/api/supabase-data', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                path,
-                method,
-                body,
-                prefer: preferValues.join(', ')
-            })
-        });
-
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            const message = errData.message || errData.details || `Proxy failed with status ${response.status}`;
-            
-            // Create a custom error object that includes the status
-            const error = new Error(message) as any;
-            error.status = response.status;
-            throw error;
-        }
-
-        return response;
+        return await supabaseFetch(path, method, body, preferValues.join(', '));
     } catch (e: any) {
         // Only log as error if it's NOT a 404 (which is often just a missing table)
         if (e.status !== 404) {
-            console.error("Backend Proxy Error:", e.message);
+            console.error("Supabase Error:", e.message);
         }
         throw e;
     }

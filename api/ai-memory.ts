@@ -5,6 +5,7 @@ export const config = { runtime: 'edge' };
 // Stores what the AI has seen, learned, and knows about people/environment.
 
 interface SupabaseHeaders {
+  [key: string]: string | undefined;
   'Content-Type': string;
   apikey: string;
   Authorization: string;
