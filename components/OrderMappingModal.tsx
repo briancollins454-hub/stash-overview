@@ -90,13 +90,20 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
               if (Object.keys(prev).length > 0) return prev;
               
               const preFilled: {[key: string]: string} = {};
+              const preFilledJobs: {[key: string]: string} = {};
               targetOrders.forEach(o => {
                   o.items.forEach(item => {
                       if (item.linkedDecoItemId) {
                           preFilled[item.id] = item.linkedDecoItemId;
+                          // Preserve the per-item job link so re-saving doesn't lose cross-job mappings
+                          const linkedJob = itemJobLinks[item.id];
+                          if (linkedJob) preFilledJobs[item.id] = linkedJob;
                       }
                   });
               });
+              if (Object.keys(preFilledJobs).length > 0) {
+                  setMappingJobs(prev => ({ ...prev, ...preFilledJobs }));
+              }
               return preFilled;
           });
       }
@@ -355,11 +362,16 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           if (sItem && value && value !== '__NO_MAP__') {
               const [sku, idxStr] = value.split('@@@');
               const idx = parseInt(idxStr);
-              const dItem = decoJob.items[idx];
-              if (dItem) {
-                  const sPattern = getShopifyPattern(sItem);
-                  const dPattern = getDecoPattern(dItem);
-                  learnedPatterns[sPattern] = dPattern;
+              // Only learn patterns for items mapped to the currently displayed job
+              // Cross-job items have indices into a different job's item list
+              const itemJobId = mappingJobs[key];
+              if (!itemJobId || itemJobId === decoJob.jobNumber) {
+                  const dItem = decoJob.items[idx];
+                  if (dItem) {
+                      const sPattern = getShopifyPattern(sItem);
+                      const dPattern = getDecoPattern(dItem);
+                      learnedPatterns[sPattern] = dPattern;
+                  }
               }
           }
 
