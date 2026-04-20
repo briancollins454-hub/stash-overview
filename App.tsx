@@ -2351,7 +2351,7 @@ const App: React.FC = () => {
                   } 
                   return job; 
                 }} 
-                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, undefined, lp)} 
+                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, m[0]?.jobId, lp)} 
                 onManualLink={handleManualJobLink} 
                 onItemJobLink={async (orderNumber, itemId, jobId) => { 
                   setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
@@ -2382,7 +2382,7 @@ const App: React.FC = () => {
                 excludedTags={excludedTags} 
                 onManualLink={handleManualJobLink} 
                 onConfirmMatch={(i, d) => handleBulkConfirmMatch([{itemKey: i, decoId: d}])} 
-                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, undefined, lp)} 
+                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, m[0]?.jobId, lp)} 
                 onSearchJob={async (id) => { 
                   const job = await fetchSingleDecoJob(apiSettings, id); 
                   if(job) { 

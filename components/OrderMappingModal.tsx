@@ -378,7 +378,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           return {
               itemKey: key,
               decoId: value,
-              jobId: mappingJobs[key]
+              jobId: mappingJobs[key] || decoJob.jobNumber
           };
       });
 
