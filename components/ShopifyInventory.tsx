@@ -198,6 +198,7 @@ const ShopifyInventory: React.FC = () => {
       for (let page = 0; page < 50; page++) { // safety limit
         const data = await fetchApi({ action: 'inventory', locationId: locId, cursor: pageCursor });
         const pageItems = data.items || [];
+        if (page === 0 && data.debug) console.log('[Inventory] DEBUG first page:', JSON.stringify(data.debug, null, 2));
         console.log(`[Inventory] Page ${page}: ${pageItems.length} items, hasNext=${data.pageInfo?.hasNextPage}`);
         allItems = [...allItems, ...pageItems];
         if (!data.pageInfo?.hasNextPage) break;
