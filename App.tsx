@@ -574,15 +574,19 @@ const App: React.FC = () => {
             // For jobs present in BOTH API and cloud, API wins (has latest extraction code).
             const jobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
             // Layer cloud data first (lower priority) — includes orders + deco from other devices
+            let cloudFetchOk = false;
             try {
               setSyncStatusMsg('Syncing cloud data...');
               const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
               if (cloudData) {
+                cloudFetchOk = true;
                 // Cloud orders fill gaps (lower priority — API data overwrites)
                 (cloudData.orders || []).forEach((o: ShopifyOrder) => orderMap.set(o.id, o));
-                // Cloud deco jobs fill gaps
+                // Cloud deco jobs fill gaps (only ADD missing jobs — never overwrite local)
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
-                  cloudData.decoJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
+                  cloudData.decoJobs.forEach((j: DecoJob) => {
+                    if (!jobMap.has(j.jobNumber)) jobMap.set(j.jobNumber, j);
+                  });
                 }
               }
             } catch {}
@@ -598,6 +602,9 @@ const App: React.FC = () => {
             const mergedDecoJobs = Array.from(jobMap.values());
             setRawDecoJobs(mergedDecoJobs);
             setLocalItem('stash_raw_deco_jobs', mergedDecoJobs).catch(console.error);
+
+            // Track API-fresh deco jobs — only these get pushed to cloud
+            const apiFreshJobs = [...dRecentJobs];
 
             const unfulfilledShopifyOrders = mergedOrders.filter(o => 
                 o.fulfillmentStatus !== 'fulfilled' && 
@@ -628,6 +635,7 @@ const App: React.FC = () => {
                 const newFetchedJobs = await fetchBulkDecoJobs(apiSettings, missingIds);
 
                 if (newFetchedJobs.length > 0) {
+                    apiFreshJobs.push(...newFetchedJobs);
                     setRawDecoJobs(prev => {
                         const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
                         newFetchedJobs.forEach(j => jobMap.set(j.jobNumber, j));
@@ -638,12 +646,14 @@ const App: React.FC = () => {
                 }
             }
 
-            if (sOrders.length > 0) {
+            if (sOrders.length > 0 && cloudFetchOk) {
                 saveCloudOrders(apiSettings, mergedOrders).catch(console.error);
             }
 
-            // Save Deco jobs to cloud so all devices have the same job data
-            saveCloudDecoJobs(apiSettings, mergedDecoJobs).catch(console.error);
+            // Push only API-fresh deco jobs to cloud — never stale local cache
+            if (apiFreshJobs.length > 0 && cloudFetchOk) {
+                saveCloudDecoJobs(apiSettings, apiFreshJobs).catch(console.error);
+            }
 
             // Background stitch enrichment: fetch detailed decoration/stitch data for jobs missing from cache
             (async () => {
@@ -1002,7 +1012,10 @@ const App: React.FC = () => {
                           if (table === 'stash_deco_jobs' && cloudData.decoJobs?.length) {
                             setRawDecoJobs(prev => {
                               const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                              // Cloud only FILLS GAPS — never overwrites locally-fresh data
+                              cloudData.decoJobs.forEach(j => {
+                                if (!jobMap.has(j.jobNumber)) jobMap.set(j.jobNumber, j);
+                              });
                               const merged = Array.from(jobMap.values());
                               setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                               return merged;
@@ -1068,17 +1081,18 @@ const App: React.FC = () => {
             }
 
             setSyncStatusMsg('Loading Cloud State...');
-            // Push ALL local data to cloud first (catches any that failed to save previously)
+            // Push local MAPPINGS to cloud first (catches any that failed to save previously)
+            // Note: we only push mappings/links/patterns + orders here — NOT deco jobs.
+            // Deco jobs are only pushed when freshly fetched from the API (in loadData),
+            // to prevent stale cached data from overwriting fresh data from other devices.
             const hasLocalMappings = Object.keys(cachedMatches || {}).length > 0 || Object.keys(cachedProductMappings || {}).length > 0 || Object.keys(cachedJobLinks || {}).length > 0;
-            const hasLocalJobs = (cachedJobs || []).length > 0;
             const hasLocalOrders = initialOrders.length > 0;
-            if (hasLocalMappings || hasLocalJobs || hasLocalOrders) {
+            if (hasLocalMappings || hasLocalOrders) {
                 setSyncStatusMsg('Pushing local data to cloud...');
                 await Promise.all([
                     saveCloudMappingBatch(apiSettings, Object.entries(cachedMatches || {}).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
                     saveCloudProductMappingBatch(apiSettings, cachedProductMappings || {}),
                     saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {}),
-                    hasLocalJobs ? saveCloudDecoJobs(apiSettings, cachedJobs!) : Promise.resolve(),
                     hasLocalOrders ? saveCloudOrders(apiSettings, initialOrders) : Promise.resolve()
                 ]).catch(e => console.warn('Local push failed:', e));
             }
