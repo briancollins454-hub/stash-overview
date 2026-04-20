@@ -17,6 +17,6 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     decoDomain: process.env.DECO_DOMAIN || '',
     supabaseUrl: process.env.SUPABASE_URL || '',
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
-    firebaseApiKey: process.env.FIREBASE_API_KEY || '',
+    firebaseApiKey: process.env.FIREBASE_API_KEY || 'AIzaSyBCRGZHAAsD2y4Ns0KoJqIHQOGzJUJH5Y4',
   });
 }
