@@ -1,7 +1,6 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Package, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download, Loader2, RefreshCw } from 'lucide-react';
 import { DecoJob } from '../types';
-import { fetchDecoFinancials } from '../services/apiService';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
 
@@ -15,99 +14,41 @@ interface Props {
 type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'orderTotal' | 'daysSinceShipped';
 type SortDir = 'asc' | 'desc';
 
-const CACHE_ID = 'shipped_not_invoiced';
-
 const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('daysSinceShipped');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [allJobs, setAllJobs] = useState<DecoJob[]>(decoJobs);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadProgress, setLoadProgress] = useState('');
   const [lastSynced, setLastSynced] = useState<string | null>(null);
-  const hasFetched = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
+  const [noCache, setNoCache] = useState(false);
 
-  // Save filtered results to Supabase so team sees them instantly
-  const saveCache = useCallback(async (filteredJobs: DecoJob[]) => {
-    if (!isSupabaseReady()) return;
-    try {
-      const lean = filteredJobs.map(j => ({
-        jobNumber: j.jobNumber, poNumber: j.poNumber, jobName: j.jobName,
-        customerName: j.customerName, status: j.status,
-        dateShipped: j.dateShipped, dateInvoiced: j.dateInvoiced,
-        orderTotal: j.orderTotal, outstandingBalance: j.outstandingBalance,
-        paymentStatus: j.paymentStatus, salesPerson: j.salesPerson,
-      }));
-      const ts = new Date().toISOString();
-      await supabaseFetch('stash_finance_cache', 'POST', {
-        id: CACHE_ID, data: lean, last_synced: ts, updated_at: ts,
-      }, 'resolution=merge-duplicates');
-      setLastSynced(ts);
-    } catch { /* non-critical */ }
-  }, []);
-
-  // Load cached results from Supabase (instant for team)
-  const loadCache = useCallback(async (): Promise<DecoJob[] | null> => {
-    if (!isSupabaseReady()) return null;
+  // Load from the FinancialDashboard's Supabase cache (finance_jobs) — no separate fetch needed
+  const loadFromFinanceCache = useCallback(async () => {
+    if (!isSupabaseReady()) { setNoCache(true); return; }
+    setIsLoading(true);
     try {
       const res = await supabaseFetch(
-        `stash_finance_cache?id=eq.${CACHE_ID}&select=data,last_synced`, 'GET'
+        'stash_finance_cache?id=eq.finance_jobs&select=data,last_synced', 'GET'
       );
       const rows = await res.json();
       if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data) && rows[0].data.length > 0) {
+        setAllJobs(rows[0].data);
         setLastSynced(rows[0].last_synced);
-        return rows[0].data;
+        setNoCache(false);
+      } else {
+        setNoCache(true);
       }
-    } catch {}
-    return null;
+    } catch {
+      setNoCache(true);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const loadFullData = useCallback(async () => {
-    if (!settings.useLiveData) return;
-    setIsLoading(true);
-    setLoadProgress('Fetching all orders...');
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      const jobs = await fetchDecoFinancials(settings, 2020, (cur, total) => {
-        setLoadProgress(`Loading ${cur} / ${total || '?'} orders...`);
-      }, ac.signal);
-      if (!ac.signal.aborted) {
-        setAllJobs(jobs);
-        // Filter and save to Supabase for team access
-        const filtered = jobs.filter(j =>
-          !!j.dateShipped && !j.dateInvoiced &&
-          (j.outstandingBalance || 0) > 0 && j.status !== 'Cancelled'
-        );
-        saveCache(filtered);
-      }
-    } catch (e: any) {
-      if (e.name !== 'AbortError') console.error('ShippedNotInvoiced fetch error:', e);
-    } finally {
-      if (!ac.signal.aborted) { setIsLoading(false); setLoadProgress(''); }
-    }
-  }, [settings, saveCache]);
-
   useEffect(() => {
-    if (hasFetched.current) return;
-    hasFetched.current = true;
-
-    // Try cached data first (instant), then optionally refresh
-    (async () => {
-      const cached = await loadCache();
-      if (cached && cached.length > 0) {
-        // Use cached data immediately — team members see this instantly
-        setAllJobs(cached as DecoJob[]);
-      } else {
-        // No cache — do a full fetch (admin first load)
-        loadFullData();
-      }
-    })();
-
-    return () => { abortRef.current?.abort(); };
-  }, [loadCache, loadFullData]);
+    loadFromFinanceCache();
+  }, [loadFromFinanceCache]);
 
   const jobs = useMemo(() => {
     return allJobs.filter(j =>
@@ -197,13 +138,15 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
             Shipped Not Invoiced
           </h2>
           <p className={`text-sm ${textSecondary} mt-0.5`}>
-            {isLoading ? loadProgress : lastSynced
-              ? `Last updated: ${new Date(lastSynced).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-              : 'Jobs shipped with outstanding balance but no invoice sent'}
+            {isLoading ? 'Loading from cache...' : noCache
+              ? 'No data yet — run a Full Sync from the Finance tab first'
+              : lastSynced
+                ? `Data from Finance sync: ${new Date(lastSynced).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                : 'Jobs shipped with outstanding balance but no invoice sent'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadFullData} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${isLoading ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Refresh from Deco (fetches all orders)">
+          <button onClick={loadFromFinanceCache} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${isLoading ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Reload from Finance cache">
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             {isLoading ? 'Loading...' : 'Refresh'}
           </button>
@@ -241,7 +184,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <div className="flex flex-col items-center justify-center py-16">
             <Package className={`w-12 h-12 ${textSecondary} opacity-40 mb-3`} />
             <p className={`text-sm font-medium ${textSecondary}`}>
-              {search ? 'No results matching your search' : 'No shipped jobs awaiting invoicing'}
+              {search ? 'No results matching your search' : noCache ? 'Run a Full Sync from the Finance tab to populate this report' : 'No shipped jobs awaiting invoicing'}
             </p>
           </div>
         ) : (
