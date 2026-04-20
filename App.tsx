@@ -1433,7 +1433,8 @@ const App: React.FC = () => {
           }
 
           // Segregate fully produced Deco jobs out of the live queue, treating them as effectively fulfilled.
-          const isPhysicallyShipped = currentStatus === 'Shipped' || currentStatus === 'Invoiced';
+          const hasShippingTracking = shipStationData.has(order.orderNumber);
+          const isPhysicallyShipped = currentStatus === 'Shipped' || currentStatus === 'Invoiced' || (currentStatus === 'Completed' && hasShippingTracking);
           const effectiveFulfillmentStatus = isPhysicallyShipped ? 'fulfilled' : order.fulfillmentStatus;
           const effectiveClosedAt = isPhysicallyShipped && !order.closedAt ? (decoJob?.productionDueDate || order.date) : order.closedAt;
 
