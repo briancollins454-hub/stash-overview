@@ -2,7 +2,8 @@
   "functions": {
     "api/deco.ts": { "maxDuration": 60 },
     "api/inventory.ts": { "maxDuration": 60 },
-    "api/stock.ts": { "maxDuration": 60 }
+    "api/stock.ts": { "maxDuration": 60 },
+    "api/shopify.ts": { "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },

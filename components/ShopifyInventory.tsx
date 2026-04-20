@@ -77,7 +77,12 @@ const fetchApi = async (body: any) => {
     const err = await resp.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(err.error || `HTTP ${resp.status}`);
   }
-  return resp.json();
+  const json = await resp.json();
+  if (json.error) {
+    console.warn('[Inventory API] Response contained error:', json.error);
+    throw new Error(json.error);
+  }
+  return json;
 };
 
 const LOCATIONS = [
@@ -191,10 +196,12 @@ const ShopifyInventory: React.FC = () => {
     try {
       for (let page = 0; page < 50; page++) { // safety limit
         const data = await fetchApi({ action: 'inventory', locationId: locId, cursor: pageCursor });
+        console.log(`[Inventory] Page ${page}: ${(data.items||[]).length} items, hasNext=${data.pageInfo?.hasNextPage}`);
         allItems = [...allItems, ...(data.items || [])];
         if (!data.pageInfo?.hasNextPage) break;
         pageCursor = data.pageInfo.endCursor;
       }
+      console.log(`[Inventory] Total loaded: ${allItems.length} items for location ${locId}`);
       setItems(allItems);
       setHasMore(false);
       setCursor(null);
