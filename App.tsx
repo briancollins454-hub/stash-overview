@@ -564,28 +564,35 @@ const App: React.FC = () => {
                 }
             }
 
-            // Merge: base orders + date-window orders + ALL unfulfilled orders (catches old active ones)
+            // Merge: base orders + date-window orders + ALL unfulfilled orders + cloud orders from other devices
             const orderMap = new Map<string, ShopifyOrder>();
             currentBaseOrders.forEach(o => orderMap.set(o.id, o));
-            sOrders.forEach(o => orderMap.set(o.id, o));
-            unfulfilledOrders.forEach(o => orderMap.set(o.id, o));
-            const mergedOrders = Array.from(orderMap.values());
-            setRawShopifyOrders(mergedOrders);
-            setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
             
             // Merge deco jobs: API data (freshly parsed) is authoritative for jobs it returns.
             // Cloud data fills in gaps (jobs outside lookback window, status updates from other devices).
             // For jobs present in BOTH API and cloud, API wins (has latest extraction code).
             const jobMap = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
-            const apiJobSet = new Set(dRecentJobs.map(j => j.jobNumber));
-            // Layer cloud first (lower priority)
+            // Layer cloud data first (lower priority) — includes orders + deco from other devices
             try {
-              const cloudJobs = await fetchCloudData(apiSettings).then(d => d?.decoJobs || []).catch(() => []);
-              if (cloudJobs.length > 0) {
-                cloudJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
+              setSyncStatusMsg('Syncing cloud data...');
+              const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
+              if (cloudData) {
+                // Cloud orders fill gaps (lower priority — API data overwrites)
+                (cloudData.orders || []).forEach((o: ShopifyOrder) => orderMap.set(o.id, o));
+                // Cloud deco jobs fill gaps
+                if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
+                  cloudData.decoJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
+                }
               }
             } catch {}
-            // Then layer API on top (highest priority — freshly parsed with latest code)
+            // Layer fresh API data on top (highest priority)
+            sOrders.forEach(o => orderMap.set(o.id, o));
+            unfulfilledOrders.forEach(o => orderMap.set(o.id, o));
+            const mergedOrders = Array.from(orderMap.values());
+            setRawShopifyOrders(mergedOrders);
+            setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
+
+            // Then layer API deco jobs on top (highest priority — freshly parsed with latest code)
             dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
             const mergedDecoJobs = Array.from(jobMap.values());
             setRawDecoJobs(mergedDecoJobs);
