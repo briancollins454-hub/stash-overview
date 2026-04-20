@@ -2,8 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
 
 // ─── Firebase Firestore Config ──────────────────────────────────────────────
-const FIREBASE_PROJECT_ID = 'stash-shop-bridge';
-const FIREBASE_API_KEY = 'AIzaSyBCRGZHAAsD2y4Ns0KoJqIHQOGzJUJH5Y4';
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'stash-shop-bridge';
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || '';
 const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 const COLLECTION = 'stash_users';
 

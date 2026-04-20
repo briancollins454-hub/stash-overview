@@ -55,7 +55,7 @@ const fetchWithProxy = async (path: string, method: string, body?: any, prefer?:
     }
 };
 
-const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 500, retries = 2): Promise<T[] | null> => {
+const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 1000, retries = 2): Promise<T[] | null> => {
     try {
         const path = `${table}?select=${select}&limit=${limit}&offset=${offset}`;
         const res = await fetchWithProxy(path, 'GET');
@@ -207,7 +207,7 @@ export const saveCloudDecoJobs = async (settings: ApiSettings, jobs: DecoJob[]) 
             const res = await fetchWithProxy('stash_deco_jobs', 'POST', payload, 'resolution=merge-duplicates');
             if (!res.ok) {
                 const error = await res.text();
-                console.error(`Deco Job Batch Save Error: ${error}`);
+                throw new Error(`Deco Job Batch Save Error: ${error}`);
             }
         }
     } catch (e: any) {
@@ -216,6 +216,7 @@ export const saveCloudDecoJobs = async (settings: ApiSettings, jobs: DecoJob[]) 
         } else {
             console.error('Cloud Deco Job Save Failed:', e.message || e);
         }
+        throw e;
     }
 };
 

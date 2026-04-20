@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
-  if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || origin.endsWith('.vercel.app')) {
+  if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Only allow known stash_ table names (no query params in table name)
   const tableName = path.split('?')[0];
-  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes', 'stash_finance_cache', 'stash_deco_stitch_cache'];
+  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes', 'stash_finance_cache', 'stash_deco_stitch_cache', 'stash_qbo_tokens'];
   if (!ALLOWED_TABLES.includes(tableName)) {
     return res.status(403).json({ error: 'Table not allowed' });
   }
@@ -65,8 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.send(data);
   } catch (error: any) {
     if (error.name === 'AbortError') {
-      return res.status(504).json({ error: 'Supabase API timeout' });
+      return res.status(504).json({ error: 'Supabase API timeout', path });
     }
-    return res.status(500).json({ error: 'Supabase API failed', details: error.message });
+    return res.status(500).json({ error: 'Supabase API failed', details: error.message, path });
   }
 }

@@ -4,7 +4,7 @@ export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
   const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
   const corsHeaders: Record<string, string> = {};
-  if (allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+  if (allowed.includes(origin) || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
   corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
