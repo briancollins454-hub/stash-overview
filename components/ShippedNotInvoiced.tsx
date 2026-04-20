@@ -18,9 +18,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrd
 
   const jobs = useMemo(() => {
     return decoJobs.filter(j =>
-      j.status === 'Shipped' &&
+      !!j.dateShipped &&
       !j.dateInvoiced &&
-      (j.outstandingBalance || 0) > 0
+      (j.outstandingBalance || 0) > 0 &&
+      j.status !== 'Cancelled'
     ).map(j => ({
       ...j,
       daysSinceShipped: j.dateShipped
