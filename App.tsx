@@ -740,18 +740,28 @@ const App: React.FC = () => {
                 setSyncStatusMsg('Fetching cloud mappings...');
                 const cloudData = await fetchCloudData(apiSettings);
                 if (cloudData) {
-                    // REPLACE — cloud is the single source of truth after push
+                    // MERGE — cloud fills gaps, but local values win to prevent
+                    // race conditions where local changes haven't propagated yet
                     const cloudMappings = cloudData.mappings || {};
-                    setConfirmedMatches(cloudMappings);
-                    setLocalItem('stash_confirmed_matches', cloudMappings).catch(console.error);
+                    setConfirmedMatches(prev => {
+                        const merged = { ...cloudMappings, ...prev };
+                        setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                        return merged;
+                    });
 
                     const cloudPM = cloudData.productMappings || {};
-                    setProductMappings(cloudPM);
-                    setLocalItem('stash_product_mappings', cloudPM).catch(console.error);
+                    setProductMappings(prev => {
+                        const merged = { ...cloudPM, ...prev };
+                        setLocalItem('stash_product_mappings', merged).catch(console.error);
+                        return merged;
+                    });
 
                     const cloudLinks = cloudData.links || {};
-                    setItemJobLinks(cloudLinks);
-                    setLocalItem('stash_item_job_links', cloudLinks).catch(console.error);
+                    setItemJobLinks(prev => {
+                        const merged = { ...cloudLinks, ...prev };
+                        setLocalItem('stash_item_job_links', merged).catch(console.error);
+                        return merged;
+                    });
                 }
             } catch (e) {
                 console.warn('Cloud mapping sync failed:', e);
@@ -997,18 +1007,28 @@ const App: React.FC = () => {
             setSyncStatusMsg('Fetching cloud data...');
             const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
             if (cloudData) {
-                // REPLACE local with cloud — cloud is the single source of truth after push
+                // MERGE — cloud fills gaps, but local values win to prevent
+                // race conditions where local changes haven't propagated yet
                 const cloudMappings = cloudData.mappings || {};
-                setConfirmedMatches(cloudMappings);
-                setLocalItem('stash_confirmed_matches', cloudMappings).catch(console.error);
+                setConfirmedMatches(prev => {
+                    const merged = { ...cloudMappings, ...prev };
+                    setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                    return merged;
+                });
 
                 const cloudPM = cloudData.productMappings || {};
-                setProductMappings(cloudPM);
-                setLocalItem('stash_product_mappings', cloudPM).catch(console.error);
+                setProductMappings(prev => {
+                    const merged = { ...cloudPM, ...prev };
+                    setLocalItem('stash_product_mappings', merged).catch(console.error);
+                    return merged;
+                });
 
                 const cloudLinks = cloudData.links || {};
-                setItemJobLinks(cloudLinks);
-                setLocalItem('stash_item_job_links', cloudLinks).catch(console.error);
+                setItemJobLinks(prev => {
+                    const merged = { ...cloudLinks, ...prev };
+                    setLocalItem('stash_item_job_links', merged).catch(console.error);
+                    return merged;
+                });
 
                 setPhysicalStock(cloudData.physicalStock || []);
                 setReturnStock(cloudData.returnStock || []);
@@ -2686,6 +2706,7 @@ const App: React.FC = () => {
                       setItemJobLinks((prev: Record<string, string>) => {
                         const next = { ...prev };
                         links.forEach(l => { next[l.itemId] = l.jobId; });
+                        setLocalItem('stash_item_job_links', next).catch(console.error);
                         return next;
                       });
                       links.forEach(l => saveCloudJobLink(apiSettings, l.itemId, l.jobId));
