@@ -582,11 +582,10 @@ const App: React.FC = () => {
                 cloudFetchOk = true;
                 // Cloud orders fill gaps (lower priority — API data overwrites)
                 (cloudData.orders || []).forEach((o: ShopifyOrder) => orderMap.set(o.id, o));
-                // Cloud deco jobs fill gaps (only ADD missing jobs — never overwrite local)
+                // Cloud deco jobs OVERWRITE local cache — cloud is safe because only
+                // API-fresh data gets pushed there (stale cache is never pushed)
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
-                  cloudData.decoJobs.forEach((j: DecoJob) => {
-                    if (!jobMap.has(j.jobNumber)) jobMap.set(j.jobNumber, j);
-                  });
+                  cloudData.decoJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
                 }
               }
             } catch {}
@@ -1012,10 +1011,8 @@ const App: React.FC = () => {
                           if (table === 'stash_deco_jobs' && cloudData.decoJobs?.length) {
                             setRawDecoJobs(prev => {
                               const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              // Cloud only FILLS GAPS — never overwrites locally-fresh data
-                              cloudData.decoJobs.forEach(j => {
-                                if (!jobMap.has(j.jobNumber)) jobMap.set(j.jobNumber, j);
-                              });
+                              // Cloud overwrites local — cloud only contains API-fresh data
+                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
                               const merged = Array.from(jobMap.values());
                               setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                               return merged;
