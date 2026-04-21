@@ -123,6 +123,8 @@ const ShopifyInventory: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editQty, setEditQty] = useState<number>(0);
   const [editPrice, setEditPrice] = useState<string>('');
+  const [editCompare, setEditCompare] = useState<string>('');
+  const [editCost, setEditCost] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
   // Config modal
@@ -330,33 +332,38 @@ const ShopifyInventory: React.FC = () => {
   };
 
   // Inline edit handlers
-  const startEdit = (item: InventoryItem | { inventoryItemId: string; available: number; price: string }) => {
+  const startEdit = (item: InventoryItem | { inventoryItemId: string; variantId: string; available: number; price: string; compareAtPrice?: string; cost?: string }) => {
     setEditingId(item.inventoryItemId);
     setEditQty(item.available);
     setEditPrice(item.price || '');
+    setEditCompare((item as any).compareAtPrice || '');
+    setEditCost((item as any).cost || '');
   };
 
-  const saveEdit = async (item: { inventoryItemId: string; variantId: string; available: number; price: string }, locId: string) => {
+  const saveEdit = async (item: { inventoryItemId: string; variantId: string; available: number; price: string; compareAtPrice?: string; cost?: string }, locId: string) => {
     setSaving(true);
     try {
       const qtyDelta = editQty - item.available;
       if (qtyDelta !== 0) {
         await fetchApi({ action: 'adjust', inventoryItemId: item.inventoryItemId, locationId: locId, quantity: qtyDelta });
       }
-      if (editPrice && editPrice !== item.price) {
-        await fetchApi({ action: 'updatePrice', variantId: item.variantId, price: editPrice });
+      if (editPrice !== item.price || editCompare !== (item.compareAtPrice || '')) {
+        await fetchApi({ action: 'updateVariant', variantId: item.variantId, price: editPrice, compareAtPrice: editCompare });
+      }
+      if (editCost !== (item.cost || '')) {
+        await fetchApi({ action: 'updateCost', inventoryItemId: item.inventoryItemId, cost: editCost });
       }
       // Update local state
       if (locId === localWarehouseId) {
         setItems(prev => prev.map(i => i.inventoryItemId === item.inventoryItemId
-          ? { ...i, available: editQty, price: editPrice || i.price }
+          ? { ...i, available: editQty, price: editPrice || i.price, compareAtPrice: editCompare || i.compareAtPrice, cost: editCost || i.cost }
           : i
         ));
       } else {
         setExtResults(prev => prev.map(p => ({
           ...p,
           variants: p.variants.map(v => v.inventoryItemId === item.inventoryItemId
-            ? { ...v, available: editQty, price: editPrice || v.price }
+            ? { ...v, available: editQty, price: editPrice || v.price, compareAtPrice: editCompare || v.compareAtPrice, cost: editCost || v.cost }
             : v
           ),
         })));
@@ -640,10 +647,18 @@ const ShopifyInventory: React.FC = () => {
                           ) : '—'}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <span className="text-slate-600">{item.cost ? `£${parseFloat(item.cost).toFixed(2)}` : '—'}</span>
+                          {editingId === item.inventoryItemId ? (
+                            <input type="text" value={editCost} onChange={e => setEditCost(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" placeholder="Cost" />
+                          ) : (
+                            <span className="text-slate-600">{item.cost ? `£${parseFloat(item.cost).toFixed(2)}` : '—'}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
-                          <span className="text-slate-400 line-through">{item.compareAtPrice ? `£${parseFloat(item.compareAtPrice).toFixed(2)}` : '—'}</span>
+                          {editingId === item.inventoryItemId ? (
+                            <input type="text" value={editCompare} onChange={e => setEditCompare(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" placeholder="Compare" />
+                          ) : (
+                            <span className="text-slate-400 line-through">{item.compareAtPrice ? `£${parseFloat(item.compareAtPrice).toFixed(2)}` : '—'}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right">
                           {editingId === item.inventoryItemId ? (
@@ -802,10 +817,18 @@ const ShopifyInventory: React.FC = () => {
                           <td className="px-4 py-2 text-center text-slate-500">{v.onHand}</td>
                           <td className="px-4 py-2 text-center text-slate-500">{v.committed}</td>
                           <td className="px-4 py-2 text-right">
-                            <span className="text-slate-600">{v.cost ? `£${parseFloat(v.cost).toFixed(2)}` : '—'}</span>
+                            {editingId === v.inventoryItemId ? (
+                              <input type="text" value={editCost} onChange={e => setEditCost(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" placeholder="Cost" />
+                            ) : (
+                              <span className="text-slate-600">{v.cost ? `£${parseFloat(v.cost).toFixed(2)}` : '—'}</span>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-right">
-                            <span className="text-slate-400 line-through">{v.compareAtPrice ? `£${parseFloat(v.compareAtPrice).toFixed(2)}` : '—'}</span>
+                            {editingId === v.inventoryItemId ? (
+                              <input type="text" value={editCompare} onChange={e => setEditCompare(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" placeholder="Compare" />
+                            ) : (
+                              <span className="text-slate-400 line-through">{v.compareAtPrice ? `£${parseFloat(v.compareAtPrice).toFixed(2)}` : '—'}</span>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-right">
                             {editingId === v.inventoryItemId ? (

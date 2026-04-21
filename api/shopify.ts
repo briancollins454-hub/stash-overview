@@ -161,12 +161,23 @@ async function handleInventory(req: VercelRequest, res: VercelResponse, domain: 
       return res.status(200).json({success:true});
     }
 
-    if (inventoryAction === 'updatePrice' && variantId && price) {
-      const data = await gql(`mutation($input:ProductVariantInput!){productVariantUpdate(input:$input){productVariant{id price}userErrors{field message}}}`,
-        {input:{id:variantId,price:String(price)}});
+    if (inventoryAction === 'updateVariant' && variantId) {
+      const input: any = { id: variantId };
+      if (req.body.price !== undefined) input.price = req.body.price ? String(req.body.price) : null;
+      if (req.body.compareAtPrice !== undefined) input.compareAtPrice = req.body.compareAtPrice ? String(req.body.compareAtPrice) : null;
+      
+      const data = await gql(`mutation($input:ProductVariantInput!){productVariantUpdate(input:$input){productVariant{id price compareAtPrice}userErrors{field message}}}`, {input});
       const errs=data.data?.productVariantUpdate?.userErrors||[];
       if(errs.length)return res.status(400).json({error:errs[0].message,errors:errs});
-      return res.status(200).json({success:true,price:data.data?.productVariantUpdate?.productVariant?.price});
+      return res.status(200).json({success:true});
+    }
+
+    if (inventoryAction === 'updateCost' && inventoryItemId) {
+      const input = { cost: req.body.cost ? String(req.body.cost) : null };
+      const data = await gql(`mutation($id:ID!,$input:InventoryItemInput!){inventoryItemUpdate(id:$id,input:$input){inventoryItem{id unitCost{amount}}userErrors{field message}}}`, {id:inventoryItemId,input});
+      const errs=data.data?.inventoryItemUpdate?.userErrors||[];
+      if(errs.length)return res.status(400).json({error:errs[0].message,errors:errs});
+      return res.status(200).json({success:true});
     }
 
     if (inventoryAction === 'salesVelocity' && locationId) {
