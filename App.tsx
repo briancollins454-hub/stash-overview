@@ -596,11 +596,21 @@ const App: React.FC = () => {
               const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
               if (cloudData) {
                 cloudFetchOk = true;
-                // Cloud orders fill gaps — only unfulfilled/partial, never stale fulfilled
+                // Cloud orders fill gaps — only unfulfilled/partial, never stale fulfilled.
+                // Never downgrade a locally-fulfilled record back to unfulfilled just
+                // because cloud is stale (fulfilled orders are never pushed to cloud,
+                // so cloud's copy is permanently stuck on the pre-fulfillment state).
+                // Also skip if local updatedAt is newer — local data is authoritative.
                 (cloudData.orders || []).forEach((o: ShopifyOrder) => {
-                  if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
-                    orderMap.set(o.id, o);
+                  if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                  const existing = orderMap.get(o.id);
+                  if (existing) {
+                    if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                    const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+                    const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
+                    if (localMs && cloudMs && localMs >= cloudMs) return;
                   }
+                  orderMap.set(o.id, o);
                 });
                 // Cloud deco jobs OVERWRITE local cache — cloud is safe because only
                 // API-fresh data gets pushed there (stale cache is never pushed)
@@ -1113,11 +1123,22 @@ const App: React.FC = () => {
                           if (table === 'stash_orders' && cloudData.orders?.length) {
                             setRawShopifyOrders(prev => {
                               const orderMap = new Map(prev.map(o => [o.id, o]));
-                              // Only merge unfulfilled/partial cloud orders — skip stale fulfilled ones
+                              // Only merge unfulfilled/partial cloud orders — skip stale fulfilled ones.
+                              // Critically: never downgrade a locally-fulfilled record back to
+                              // unfulfilled just because cloud is stale (cloud doesn't receive
+                              // fulfilled orders, so its copy of a reconciled fulfillment is
+                              // permanently out-of-date). Also skip if our local updatedAt is
+                              // newer than cloud's — local reconciliation is authoritative.
                               cloudData.orders.forEach(o => {
-                                if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
-                                  orderMap.set(o.id, o);
+                                if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                                const existing = orderMap.get(o.id);
+                                if (existing) {
+                                  if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                                  const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+                                  const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
+                                  if (localMs && cloudMs && localMs >= cloudMs) return;
                                 }
+                                orderMap.set(o.id, o);
                               });
                               const merged = Array.from(orderMap.values());
                               setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
