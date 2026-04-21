@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown, FileSpreadsheet } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -147,10 +147,27 @@ interface Props {
     enrichMsg?: string;
 }
 
+// All selectable status filter keys excluding the catch-all 'active'.
+const STATUS_FILTER_KEYS: Exclude<StatusFilter, 'active'>[] = [
+    'production', 'awaiting', 'awaitingStock', 'awaitingProcessing', 'partiallyFulfilled', 'awaitingShipping',
+];
+
+// Readable labels, used in UI + report headings.
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+    active: 'Active',
+    production: 'In Production',
+    awaiting: 'Awaiting',
+    awaitingStock: 'Awaiting Stock',
+    awaitingProcessing: 'Awaiting Processing',
+    partiallyFulfilled: 'Partially Fulfilled',
+    awaitingShipping: 'Awaiting Shipping',
+};
+
 export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnrichProduction, isEnriching, enrichMsg }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>('due');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+    // Multi-select status filters. Empty set == "Active" (all not-shipped/completed/cancelled).
+    const [statusFilters, setStatusFilters] = useState<Set<Exclude<StatusFilter, 'active'>>>(new Set());
     const [typeFilter, setTypeFilter] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
@@ -270,13 +287,21 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             list = list.filter(j => j.decoTypes.length > 0);
         }
 
-        // Status filter (shipped/completed already excluded)
-        if (statusFilter === 'production') list = list.filter(j => PRODUCTION_STATUSES.has(j.status));
-        else if (statusFilter === 'awaiting') list = list.filter(j => AWAITING_STATUSES.has(j.status));
-        else if (statusFilter === 'awaitingStock') list = list.filter(j => j.status === 'Awaiting Stock');
-        else if (statusFilter === 'awaitingProcessing') list = list.filter(j => j.status === 'Awaiting Processing');
-        else if (statusFilter === 'partiallyFulfilled') list = list.filter(j => isPartiallyFulfilled(j.items));
-        else if (statusFilter === 'awaitingShipping') list = list.filter(j => j.status === 'Ready for Shipping');
+        // Multi-select status filters (shipped/completed already excluded by enrichedJobs).
+        // Empty selection => show all of enrichedJobs (i.e. "Active"). Otherwise show union.
+        if (statusFilters.size > 0) {
+            list = list.filter(j => {
+                for (const f of statusFilters) {
+                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
+                    if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
+                    if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
+                    if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
+                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                }
+                return false;
+            });
+        }
 
         // Date range filters
         if (dueFrom) { const d = new Date(dueFrom); list = list.filter(j => j.dateDue && new Date(j.dateDue) >= d); }
@@ -318,19 +343,25 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
 
         return list;
-    }, [enrichedJobs, hideIncomplete, statusFilter, typeFilter, searchTerm, sortKey, sortDir, dueFrom, dueTo, orderedFrom, orderedTo]);
+    }, [enrichedJobs, hideIncomplete, statusFilters, typeFilter, searchTerm, sortKey, sortDir, dueFrom, dueTo, orderedFrom, orderedTo]);
 
     const incompleteCount = useMemo(() => {
         let base = enrichedJobs;
-        if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
-        else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
-        else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
-        else if (statusFilter === 'awaitingStock') base = base.filter(j => j.status === 'Awaiting Stock');
-        else if (statusFilter === 'awaitingProcessing') base = base.filter(j => j.status === 'Awaiting Processing');
-        else if (statusFilter === 'partiallyFulfilled') base = base.filter(j => isPartiallyFulfilled(j.items));
-        else if (statusFilter === 'awaitingShipping') base = base.filter(j => j.status === 'Ready for Shipping');
+        if (statusFilters.size > 0) {
+            base = base.filter(j => {
+                for (const f of statusFilters) {
+                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
+                    if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
+                    if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
+                    if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
+                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                }
+                return false;
+            });
+        }
         return base.filter(j => j.decoTypes.length === 0).length;
-    }, [enrichedJobs, statusFilter]);
+    }, [enrichedJobs, statusFilters]);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -370,20 +401,48 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         const counts: Record<string, number> = {};
         // Apply status + search filters but NOT type filter for the counts
         let base = enrichedJobs;
-        if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
-        else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
-        else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
-        else if (statusFilter === 'awaitingStock') base = base.filter(j => j.status === 'Awaiting Stock');
-        else if (statusFilter === 'awaitingProcessing') base = base.filter(j => j.status === 'Awaiting Processing');
-        else if (statusFilter === 'partiallyFulfilled') base = base.filter(j => isPartiallyFulfilled(j.items));
-        else if (statusFilter === 'awaitingShipping') base = base.filter(j => j.status === 'Ready for Shipping');
+        if (statusFilters.size > 0) {
+            base = base.filter(j => {
+                for (const f of statusFilters) {
+                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
+                    if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
+                    if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
+                    if (f === 'partiallyFulfilled' && j.items && isPartiallyFulfilled(j.items)) return true;
+                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                }
+                return false;
+            });
+        }
         if (searchTerm) {
             const s = searchTerm.toLowerCase();
             base = base.filter(j => j.jobNumber.includes(s) || j.customerName.toLowerCase().includes(s) || j.jobName.toLowerCase().includes(s) || j.decoTypes.some(t => t.toLowerCase().includes(s)));
         }
         base.forEach(j => j.decoTypes.forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
         return counts;
-    }, [enrichedJobs, statusFilter, searchTerm]);
+    }, [enrichedJobs, statusFilters, searchTerm]);
+
+    // Jobs included in exported reports (respect selected status filters, ignore search/date/type).
+    const scopedJobs = useMemo(() => {
+        if (statusFilters.size === 0) return enrichedJobs;
+        return enrichedJobs.filter(j => {
+            for (const f of statusFilters) {
+                if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
+                if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
+                if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
+                if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
+                if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+            }
+            return false;
+        });
+    }, [enrichedJobs, statusFilters]);
+
+    const scopeLabel = useMemo(() => {
+        if (statusFilters.size === 0) return 'All Active Jobs';
+        // Preserve the order of STATUS_FILTER_KEYS for consistent display.
+        return STATUS_FILTER_KEYS.filter(k => statusFilters.has(k)).map(k => STATUS_FILTER_LABELS[k]).join(' + ');
+    }, [statusFilters]);
 
     const handleGenerateReport = () => {
         // Basic HTML escaper for content we inject into the report.
@@ -539,7 +598,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             };
 
             const typeRows: TypeRow[] = [];
-            for (const job of enrichedJobs) {
+            for (const job of scopedJobs) {
                 // Items belonging to the active type on this job.
                 const typeItems = job.items.filter(i =>
                     isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType,
@@ -704,6 +763,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     <div class="meta">
                         <strong>${esc(dateStr)}</strong><br>
                         Generated ${esc(timeStr)}<br>
+                        Scope: <strong>${esc(scopeLabel)}</strong><br>
                         ${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'} · ${totals.qty.toLocaleString()} items
                     </div>
                 </div>
@@ -743,7 +803,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             estMinutes: number;
         };
 
-        const rows: JobRow[] = enrichedJobs.map(job => {
+        const rows: JobRow[] = scopedJobs.map(job => {
             const perType: Record<string, number> = {};
             printTypeCols.forEach(t => { perType[t] = 0; });
             let embQty = 0;
@@ -810,14 +870,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             perType: Object.fromEntries(printTypeCols.map(t => [t, 0])) as Record<string, number>,
         });
 
-        // Status breakdown (mutually exclusive definitions match the tabs)
+        // Status breakdown — counts within the selected scope so the report is self-consistent.
         const statusGroups = [
-            { label: 'Awaiting Stock', count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
-            { label: 'Awaiting Processing', count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
-            { label: 'In Production', count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
-            { label: 'Partially Fulfilled', count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
-            { label: 'Awaiting Shipping', count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
-            { label: 'Other / On Hold', count: enrichedJobs.filter(j => j.status === 'On Hold' || j.status === 'Awaiting Artwork' || j.status === 'Awaiting Review' || j.status === 'Awaiting PO' || j.status === 'Not Ordered').length },
+            { label: 'Awaiting Stock', count: scopedJobs.filter(j => j.status === 'Awaiting Stock').length },
+            { label: 'Awaiting Processing', count: scopedJobs.filter(j => j.status === 'Awaiting Processing').length },
+            { label: 'In Production', count: scopedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
+            { label: 'Partially Fulfilled', count: scopedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
+            { label: 'Awaiting Shipping', count: scopedJobs.filter(j => j.status === 'Ready for Shipping').length },
+            { label: 'Other / On Hold', count: scopedJobs.filter(j => j.status === 'On Hold' || j.status === 'Awaiting Artwork' || j.status === 'Awaiting Review' || j.status === 'Awaiting PO' || j.status === 'Not Ordered').length },
         ];
 
         // Decoration summary (Embroidery + per-print-type)
@@ -966,7 +1026,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 <div class="meta">
                     <strong>${esc(dateStr)}</strong><br>
                     Generated ${esc(timeStr)}<br>
-                    ${totals.jobs} active ${totals.jobs === 1 ? 'job' : 'jobs'}
+                    Scope: <strong>${esc(scopeLabel)}</strong><br>
+                    ${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'}
                 </div>
             </div>
 
@@ -988,6 +1049,280 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         `;
 
         openAndPrint(`Production Report — ${dateStr}`, bodyHtml);
+    };
+
+    const handleDownloadCsv = () => {
+        // RFC 4180 CSV field escape
+        const esc = (v: string | number | null | undefined): string => {
+            if (v === null || v === undefined) return '';
+            const s = String(v);
+            if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+            return s;
+        };
+        const formatDate = (d: string | undefined): string =>
+            d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+
+        const isEmbItem = (i: DecoItem): boolean =>
+            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
+        const printTypeCols = ['DTF', 'DTG', 'SCREEN', 'TRANSFER', 'UV', 'FLEX', 'VINYL', 'SUBLIMATION', 'FREEFORM'];
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+        const lines: string[] = [];
+
+        // ── TYPE-SPECIFIC CSV ───────────────────────────────────────────
+        if (typeFilter) {
+            const activeType = typeFilter;
+            const isEmbReport = activeType === 'EMB';
+            const typeLabel = isEmbReport ? 'Embroidery' : activeType;
+
+            type TypeCsvRow = {
+                jobNumber: string;
+                customer: string;
+                jobName: string;
+                status: string;
+                dateOrdered: string;
+                dueDate: string;
+                daysUntilDue: string;
+                typeQty: number;
+                typeStitches: number;
+                typeMinutes: number;
+                jobTotalQty: number;
+                alsoOnJob: string;
+                jobValue: number;
+            };
+            const rows: TypeCsvRow[] = [];
+            for (const job of scopedJobs) {
+                const typeItems = job.items.filter(i =>
+                    isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType,
+                );
+                if (typeItems.length === 0) continue;
+                const typeQty = typeItems.reduce((a, i) => a + (i.quantity || 0), 0);
+                if (typeQty === 0) continue;
+                const typeStitches = isEmbReport
+                    ? typeItems.reduce((a, i) => a + (i.stitchCount ?? 0) * (i.quantity || 0), 0)
+                    : 0;
+                const typeEst = estimateProductionTime(typeItems);
+                const otherTypes = Array.from(new Set(job.items
+                    .filter(i => !(isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType))
+                    .map(i => (isEmbItem(i) ? 'EMB' : (i.decorationType || '').toUpperCase()))
+                    .filter(t => t && t !== 'NONE')
+                ));
+                rows.push({
+                    jobNumber: job.jobNumber,
+                    customer: job.customerName,
+                    jobName: job.jobName,
+                    status: job.status,
+                    dateOrdered: formatDate(job.dateOrdered),
+                    dueDate: formatDate(job.dateDue),
+                    daysUntilDue: job.daysUntilDue !== null && job.daysUntilDue !== undefined ? String(job.daysUntilDue) : '',
+                    typeQty,
+                    typeStitches,
+                    typeMinutes: typeEst.totalMinutes,
+                    jobTotalQty: job.totalQty,
+                    alsoOnJob: otherTypes.join(' + '),
+                    jobValue: job.jobValue,
+                });
+            }
+            rows.sort((a, b) => {
+                const aDue = a.dueDate ? a.dueDate.split('/').reverse().join('-') : '9999';
+                const bDue = b.dueDate ? b.dueDate.split('/').reverse().join('-') : '9999';
+                if (aDue !== bDue) return aDue.localeCompare(bDue);
+                return a.jobNumber.localeCompare(b.jobNumber);
+            });
+
+            const totals = rows.reduce((acc, r) => {
+                acc.jobs += 1;
+                acc.qty += r.typeQty;
+                acc.stitches += r.typeStitches;
+                acc.minutes += r.typeMinutes;
+                acc.value += r.jobValue;
+                acc.mixed += r.alsoOnJob ? 1 : 0;
+                return acc;
+            }, { jobs: 0, qty: 0, stitches: 0, minutes: 0, value: 0, mixed: 0 });
+
+            // Metadata block at top of CSV.
+            lines.push(esc(`STASH ${typeLabel.toUpperCase()} PRODUCTION REPORT`));
+            lines.push(esc(`Generated: ${dateStr} ${timeStr}`));
+            lines.push(esc(`Decoration Type: ${activeType} (${typeLabel})`));
+            lines.push(esc(`Status Filter: ${scopeLabel}`));
+            lines.push(esc(`Total Jobs: ${totals.jobs}`));
+            lines.push(esc(`Total ${typeLabel} Items: ${totals.qty}`));
+            if (isEmbReport) lines.push(esc(`Total Stitches: ${totals.stitches}`));
+            lines.push(esc(`Total Est. Time: ${fmtTime(totals.minutes)}`));
+            lines.push(esc(`Mixed-Decoration Jobs: ${totals.mixed}`));
+            lines.push(esc(`Total Pipeline Value (GBP): ${totals.value.toFixed(2)}`));
+            lines.push(''); // blank spacer
+
+            const headers = [
+                'Job #', 'Customer', 'Job Name', 'Status',
+                'Date Ordered', 'Due Date', 'Days Until Due',
+                `${typeLabel} Items`, 'Job Total Items',
+                ...(isEmbReport ? ['Stitches'] : []),
+                'Est. Time (min)', 'Also on Job', 'Job Value (GBP)',
+            ];
+            lines.push(headers.map(esc).join(','));
+            for (const r of rows) {
+                const row = [
+                    r.jobNumber, r.customer, r.jobName, r.status,
+                    r.dateOrdered, r.dueDate, r.daysUntilDue,
+                    r.typeQty, r.jobTotalQty,
+                    ...(isEmbReport ? [r.typeStitches] : []),
+                    r.typeMinutes, r.alsoOnJob, r.jobValue.toFixed(2),
+                ];
+                lines.push(row.map(esc).join(','));
+            }
+            // Totals row
+            const totalsRow = [
+                'TOTAL', `${totals.jobs} jobs`, '', '',
+                '', '', '',
+                totals.qty, '',
+                ...(isEmbReport ? [totals.stitches] : []),
+                totals.minutes, totals.mixed > 0 ? `${totals.mixed} mixed` : '', totals.value.toFixed(2),
+            ];
+            lines.push(totalsRow.map(esc).join(','));
+
+            const filename = `stash-${activeType.toLowerCase()}-production-${now.toISOString().slice(0, 10)}.csv`;
+            downloadCsv(lines.join('\r\n'), filename);
+            return;
+        }
+
+        // ── FULL CSV (all decoration types broken out) ──────────────────
+        type FullCsvRow = {
+            jobNumber: string;
+            customer: string;
+            jobName: string;
+            status: string;
+            dateOrdered: string;
+            dueDate: string;
+            daysUntilDue: string;
+            totalQty: number;
+            embQty: number;
+            embStitches: number;
+            printQty: number;
+            perType: Record<string, number>;
+            otherPrint: number;
+            untyped: number;
+            estMinutes: number;
+            jobValue: number;
+        };
+
+        const rows: FullCsvRow[] = scopedJobs.map(job => {
+            const perType: Record<string, number> = {};
+            printTypeCols.forEach(t => { perType[t] = 0; });
+            let embQty = 0;
+            let embStitches = 0;
+            let printQty = 0;
+            let otherPrint = 0;
+            let untyped = 0;
+            for (const item of job.items) {
+                const qty = item.quantity || 0;
+                if (isEmbItem(item)) { embQty += qty; embStitches += (item.stitchCount ?? 0) * qty; continue; }
+                const dt = (item.decorationType || '').toUpperCase();
+                if (!dt || dt === 'NONE') { untyped += qty; continue; }
+                if (Object.prototype.hasOwnProperty.call(perType, dt)) { perType[dt] += qty; printQty += qty; }
+                else { otherPrint += qty; printQty += qty; }
+            }
+            return {
+                jobNumber: job.jobNumber,
+                customer: job.customerName,
+                jobName: job.jobName,
+                status: job.status,
+                dateOrdered: formatDate(job.dateOrdered),
+                dueDate: formatDate(job.dateDue),
+                daysUntilDue: job.daysUntilDue !== null && job.daysUntilDue !== undefined ? String(job.daysUntilDue) : '',
+                totalQty: job.totalQty,
+                embQty, embStitches, printQty, perType, otherPrint, untyped,
+                estMinutes: job.est.totalMinutes,
+                jobValue: job.jobValue,
+            };
+        });
+
+        rows.sort((a, b) => {
+            const aDue = a.dueDate ? a.dueDate.split('/').reverse().join('-') : '9999';
+            const bDue = b.dueDate ? b.dueDate.split('/').reverse().join('-') : '9999';
+            if (aDue !== bDue) return aDue.localeCompare(bDue);
+            return a.jobNumber.localeCompare(b.jobNumber);
+        });
+
+        const totals = rows.reduce((acc, r) => {
+            acc.jobs += 1;
+            acc.totalQty += r.totalQty;
+            acc.embQty += r.embQty;
+            acc.embStitches += r.embStitches;
+            acc.printQty += r.printQty;
+            acc.otherPrint += r.otherPrint;
+            acc.untyped += r.untyped;
+            acc.estMinutes += r.estMinutes;
+            acc.jobValue += r.jobValue;
+            for (const t of printTypeCols) acc.perType[t] += r.perType[t];
+            return acc;
+        }, {
+            jobs: 0, totalQty: 0, embQty: 0, embStitches: 0, printQty: 0, otherPrint: 0, untyped: 0, estMinutes: 0, jobValue: 0,
+            perType: Object.fromEntries(printTypeCols.map(t => [t, 0])) as Record<string, number>,
+        });
+
+        // Metadata block
+        lines.push(esc('STASH PRODUCTION REPORT'));
+        lines.push(esc(`Generated: ${dateStr} ${timeStr}`));
+        lines.push(esc(`Status Filter: ${scopeLabel}`));
+        lines.push(esc(`Total Jobs: ${totals.jobs}`));
+        lines.push(esc(`Total Items: ${totals.totalQty}`));
+        lines.push(esc(`Total Embroidery Items: ${totals.embQty}  (${totals.embStitches} stitches)`));
+        lines.push(esc(`Total Print Items: ${totals.printQty}`));
+        lines.push(esc(`Total Est. Production Time: ${fmtTime(totals.estMinutes)}`));
+        lines.push(esc(`Total Pipeline Value (GBP): ${totals.jobValue.toFixed(2)}`));
+        lines.push('');
+
+        const headers = [
+            'Job #', 'Customer', 'Job Name', 'Status',
+            'Date Ordered', 'Due Date', 'Days Until Due',
+            'Total Items', 'Embroidery Items', 'Embroidery Stitches',
+            'Print Items (Total)',
+            ...printTypeCols.map(t => `${t} Qty`),
+            'Other Print Qty', 'Untyped Qty',
+            'Est. Time (min)', 'Job Value (GBP)',
+        ];
+        lines.push(headers.map(esc).join(','));
+        for (const r of rows) {
+            lines.push([
+                r.jobNumber, r.customer, r.jobName, r.status,
+                r.dateOrdered, r.dueDate, r.daysUntilDue,
+                r.totalQty, r.embQty, r.embStitches,
+                r.printQty,
+                ...printTypeCols.map(t => r.perType[t]),
+                r.otherPrint, r.untyped,
+                r.estMinutes, r.jobValue.toFixed(2),
+            ].map(esc).join(','));
+        }
+        // Totals row
+        lines.push([
+            'TOTAL', `${totals.jobs} jobs`, '', '',
+            '', '', '',
+            totals.totalQty, totals.embQty, totals.embStitches,
+            totals.printQty,
+            ...printTypeCols.map(t => totals.perType[t]),
+            totals.otherPrint, totals.untyped,
+            totals.estMinutes, totals.jobValue.toFixed(2),
+        ].map(esc).join(','));
+
+        const filename = `stash-production-${now.toISOString().slice(0, 10)}.csv`;
+        downloadCsv(lines.join('\r\n'), filename);
+    };
+
+    // Trigger a browser download of the CSV content. UTF-8 BOM for Excel compatibility.
+    const downloadCsv = (csv: string, filename: string) => {
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
 
     const handlePrint = () => {
@@ -1031,16 +1366,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         </style></head><body>`);
         printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
         printWindow.document.write(`<div class="subtitle">${filtered.length} jobs · ${fmtK(totalValue)} pipeline · ${fmtTime(totalMinutes)} est. · Printed ${new Date().toLocaleString('en-GB')}</div>`);
-        const statusFilterLabel: Record<StatusFilter, string> = {
-            active: '',
-            production: 'IN PRODUCTION',
-            awaiting: 'AWAITING',
-            awaitingStock: 'AWAITING STOCK',
-            awaitingProcessing: 'AWAITING PROCESSING',
-            partiallyFulfilled: 'PARTIALLY FULFILLED',
-            awaitingShipping: 'AWAITING SHIPPING',
-        };
-        const filters = [statusFilterLabel[statusFilter] || '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
+        const selectedStatusLabels = Array.from(statusFilters).map(k => STATUS_FILTER_LABELS[k].toUpperCase());
+        const filters = [selectedStatusLabels.join(' + '), typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
         if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${filters.join(' · ')}</div>`);
         printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>EMB</th><th>Print</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
         filtered.forEach(job => {
@@ -1132,11 +1459,21 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             onClick={handleGenerateReport}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
                             title={typeFilter
-                                ? `Generate ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production report — only ${typeFilter} work for the department`
-                                : 'Generate full production report — all decoration types, status breakdown, and per-job detail'}
+                                ? `Generate ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production report — only ${typeFilter} work for the department. Covers: ${scopeLabel}.`
+                                : `Generate full production PDF report. Covers: ${scopeLabel}.`}
                         >
                             <FileDown className="w-3.5 h-3.5" />
                             {typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} Report (PDF)` : 'Report (PDF)'}
+                        </button>
+                        <button
+                            onClick={handleDownloadCsv}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:text-blue-200 hover:bg-blue-500/20 transition-all"
+                            title={typeFilter
+                                ? `Download ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`
+                                : `Download full production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`}
+                        >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            {typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} CSV` : 'CSV'}
                         </button>
                         <button
                             onClick={handlePrint}
@@ -1157,29 +1494,49 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         </div>
                     </div>
                 </div>
-                {/* Status filters */}
+                {/* Status filters — multi-select. Click Active to clear all. */}
                 <div className="flex flex-wrap gap-2 mt-3">
-                    {[
-                        { label: 'Active', key: 'active' as StatusFilter, count: enrichedJobs.length },
-                        { label: 'In Production', key: 'production' as StatusFilter, count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
-                        { label: 'Awaiting', key: 'awaiting' as StatusFilter, count: enrichedJobs.filter(j => AWAITING_STATUSES.has(j.status)).length },
-                        { label: 'Awaiting Stock', key: 'awaitingStock' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
-                        { label: 'Awaiting Processing', key: 'awaitingProcessing' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
-                        { label: 'Partially Fulfilled', key: 'partiallyFulfilled' as StatusFilter, count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
-                        { label: 'Awaiting Shipping', key: 'awaitingShipping' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
-                    ].map(f => (
-                        <button
-                            key={f.key}
-                            onClick={() => setStatusFilter(f.key)}
-                            className={`px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all ${
-                                statusFilter === f.key
-                                    ? 'bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40'
-                                    : 'text-white/30 hover:text-white/60 hover:bg-white/5'
-                            }`}
-                        >
-                            {f.label} ({f.count})
-                        </button>
-                    ))}
+                    {(() => {
+                        const activeIsSelected = statusFilters.size === 0;
+                        const toggleFilter = (key: Exclude<StatusFilter, 'active'>) => {
+                            setStatusFilters(prev => {
+                                const next = new Set(prev);
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                            });
+                        };
+                        const tabs: { label: string; key: StatusFilter; count: number }[] = [
+                            { label: 'Active', key: 'active', count: enrichedJobs.length },
+                            { label: 'In Production', key: 'production', count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
+                            { label: 'Awaiting', key: 'awaiting', count: enrichedJobs.filter(j => AWAITING_STATUSES.has(j.status)).length },
+                            { label: 'Awaiting Stock', key: 'awaitingStock', count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
+                            { label: 'Awaiting Processing', key: 'awaitingProcessing', count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
+                            { label: 'Partially Fulfilled', key: 'partiallyFulfilled', count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
+                            { label: 'Awaiting Shipping', key: 'awaitingShipping', count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
+                        ];
+                        return tabs.map(f => {
+                            const isSelected = f.key === 'active' ? activeIsSelected : statusFilters.has(f.key as Exclude<StatusFilter, 'active'>);
+                            return (
+                                <button
+                                    key={f.key}
+                                    onClick={() => {
+                                        if (f.key === 'active') setStatusFilters(new Set());
+                                        else toggleFilter(f.key as Exclude<StatusFilter, 'active'>);
+                                    }}
+                                    title={f.key === 'active' ? 'Clear all status filters' : `Toggle ${f.label}`}
+                                    className={`px-2.5 py-1 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all ${
+                                        isSelected
+                                            ? 'bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40'
+                                            : 'text-white/30 hover:text-white/60 hover:bg-white/5'
+                                    }`}
+                                >
+                                    {isSelected && f.key !== 'active' && <span className="mr-1 text-indigo-400">✓</span>}
+                                    {f.label} ({f.count})
+                                </button>
+                            );
+                        });
+                    })()}
                     {incompleteCount > 0 && (
                         <button
                             onClick={() => setHideIncomplete(h => !h)}
