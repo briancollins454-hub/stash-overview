@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { DecoJob, DecoItem } from '../types';
 import { AlertTriangle, ShieldAlert, Zap, TrendingDown, CheckCircle2, XCircle, Clock, Package, Palette, FileWarning, DollarSign, RefreshCw, Hash } from 'lucide-react';
+import { isEmbItem } from './DecoProductionTable';
 
 /* ================================================================
    PRODUCTION INTELLIGENCE DASHBOARD
@@ -69,10 +70,10 @@ function enrichJob(job: DecoJob, now: Date): EnrichedJob {
     const orderedDate = job.dateOrdered ? new Date(job.dateOrdered) : null;
     const daysInProd = orderedDate ? daysBetween(orderedDate, now) : null;
 
-    const embItems = items.filter(i => i.decorationType === 'EMB');
+    const embItems = items.filter(isEmbItem);
     const embTotal = embItems.reduce((a, i) => a + i.quantity, 0);
     const embDone = embItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-    const printItems = items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType));
+    const printItems = items.filter(i => !isEmbItem(i) && i.decorationType && PRINT_TYPES.has(i.decorationType));
     const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
     const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
 

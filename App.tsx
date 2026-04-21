@@ -2066,7 +2066,13 @@ const App: React.FC = () => {
           productionAfterDispatch: active.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000).length,
           fulfilled7d: fulfilled7d.length,
           mappingGap: active.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100).length,
-          partiallyFulfilled7d: baseSet.filter(o => o.shopify.fulfillmentStatus === 'partial').length
+          // Partial fulfillments whose latest fulfillment landed in the last 7
+          // days, so this matches the "FULFILLED (7D)" parent card.
+          partiallyFulfilled7d: baseSet.filter(o =>
+              o.shopify.fulfillmentStatus === 'partial'
+              && o.fulfillmentDate
+              && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000)
+          ).length
       };
   }, [unifiedOrders, includeMto, partialThreshold]);
 

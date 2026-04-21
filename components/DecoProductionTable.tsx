@@ -20,6 +20,14 @@ interface ProductionEstimate {
     isEmbroidery: boolean;
 }
 
+// Single source of truth for "is this row embroidery work?".
+// An item counts as embroidery if it's explicitly EMB, OR has a non-zero
+// stitchCount (some DecoNetwork jobs come through with a stitchCount but no
+// decorationType set).
+export function isEmbItem(i: DecoItem): boolean {
+    return i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
+}
+
 function estimateProductionTime(items: DecoItem[]): ProductionEstimate {
     let totalStitches = 0;
     let totalQty = 0;
@@ -326,7 +334,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         return 'Custom';
     }, [fieldConfig]);
 
-    const now = useMemo(() => new Date(), []);
+    // Ticking "now" — updates every 60s so days-until-due / overdue badges
+    // don't go stale for users who leave the tab open all day.
+    const [nowTick, setNowTick] = useState(() => Date.now());
+    useEffect(() => {
+        const id = setInterval(() => setNowTick(Date.now()), 60_000);
+        return () => clearInterval(id);
+    }, []);
+    const now = useMemo(() => new Date(nowTick), [nowTick]);
 
     const EXCLUDED_STATUSES = new Set(['Shipped', 'Completed', 'Cancelled']);
     const PRODUCTION_STATUSES = new Set(['In Production', 'Production', 'Order']);
@@ -346,11 +361,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const daysUntilDue = dueDate ? daysBetween(now, dueDate) : null;
             const orderedDate = job.dateOrdered ? new Date(job.dateOrdered) : null;
             const daysInProd = orderedDate ? daysBetween(orderedDate, now) : null;
-            // Per-job EMB/Print completion
-            const embItems = job.items.filter(i => i.decorationType === 'EMB');
+            // Per-job EMB/Print completion. Use the shared isEmbItem helper so
+            // stitch-only items (no decorationType) still count as embroidery.
+            const embItems = job.items.filter(isEmbItem);
             const embTotal = embItems.reduce((a, i) => a + i.quantity, 0);
             const embDone = embItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-            const printItems = job.items.filter(i => i.decorationType && PRINT_TYPES.has(i.decorationType));
+            const printItems = job.items.filter(i => !isEmbItem(i) && i.decorationType && PRINT_TYPES.has(i.decorationType));
             const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
             const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
             // ---- RISK SCORE (0-100) + REASONS + NEXT STEPS ----
@@ -607,9 +623,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
 
         // Columns we break print items into (everything not EMB, NONE, or untyped)
         const printTypeCols = ['DTF', 'DTG', 'SCREEN', 'TRANSFER', 'UV', 'FLEX', 'VINYL', 'SUBLIMATION', 'FREEFORM'];
-
-        const isEmbItem = (i: DecoItem): boolean =>
-            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
 
         const now = new Date();
         const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1323,8 +1336,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         const formatDate = (d: string | undefined): string =>
             d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 
-        const isEmbItem = (i: DecoItem): boolean =>
-            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
         const printTypeCols = ['DTF', 'DTG', 'SCREEN', 'TRANSFER', 'UV', 'FLEX', 'VINYL', 'SUBLIMATION', 'FREEFORM'];
 
         const now = new Date();
@@ -1616,34 +1627,48 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             .filter-info { font-size: 8px; color: #888; margin-bottom: 8px; }
             @media print { body { padding: 0; } }
         </style></head><body>`);
+        // HTML-escape anything that came from Shopify/Deco (customer names,
+        // job names, statuses, search terms) so hostile strings can't execute
+        // in the print window context.
+        const escHtml = (v: string | number | null | undefined): string => {
+            if (v === null || v === undefined) return '';
+            return String(v)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+        // A conservative allowlist for any value we inject into `class="..."`.
+        const escCls = (v: string): string => (v || '').replace(/[^a-z0-9_-]/gi, '');
+
         printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
-        printWindow.document.write(`<div class="subtitle">${filtered.length} jobs · ${fmtK(totalValue)} pipeline · ${fmtTime(totalMinutes)} est. · Printed ${new Date().toLocaleString('en-GB')}</div>`);
+        printWindow.document.write(`<div class="subtitle">${escHtml(filtered.length)} jobs · ${escHtml(fmtK(totalValue))} pipeline · ${escHtml(fmtTime(totalMinutes))} est. · Printed ${escHtml(new Date().toLocaleString('en-GB'))}</div>`);
         const selectedStatusLabels = Array.from(statusFilters).map(k => STATUS_FILTER_LABELS[k].toUpperCase());
         const filters = [selectedStatusLabels.join(' + '), typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
-        if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${filters.join(' · ')}</div>`);
+        if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${escHtml(filters.join(' · '))}</div>`);
         printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>EMB</th><th>Print</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
         filtered.forEach(job => {
-            const typeClass = (job.decoTypes[0] || 'none').toLowerCase();
             const statusClass = job.status.toLowerCase().includes('production') ? 'status-production' : job.status.toLowerCase().includes('await') ? 'status-awaiting' : job.status.toLowerCase().includes('ready') ? 'status-ready' : job.status.toLowerCase().includes('order') ? 'status-order' : 'status-hold';
             const dueClass = job.daysUntilDue !== null ? (job.daysUntilDue < 0 ? 'overdue' : job.daysUntilDue <= 3 ? 'due-soon' : '') : '';
             const pphClass = job.poundPerHour >= 50 ? 'pph-good' : job.poundPerHour >= 25 ? 'pph-ok' : job.poundPerHour > 0 ? 'pph-low' : '';
             const dueText = job.daysUntilDue !== null ? (job.daysUntilDue < 0 ? `${Math.abs(job.daysUntilDue)}d over` : job.daysUntilDue === 0 ? 'Today' : `${job.daysUntilDue}d`) : '—';
             printWindow.document.write(`<tr>`);
-            printWindow.document.write(`<td>#${job.jobNumber}</td>`);
-            printWindow.document.write(`<td>${job.customerName}</td>`);
-            printWindow.document.write(`<td>${job.jobName}</td>`);
-            printWindow.document.write(`<td><span class="badge ${statusClass}">${job.status}</span></td>`);
-            printWindow.document.write(`<td>${job.decoTypes.map(t => `<span class="badge ${t.toLowerCase()}">${t}</span>`).join(' ') || '—'}</td>`);
-            printWindow.document.write(`<td>${job.totalQty}</td>`);
-            printWindow.document.write(`<td>${job.embTotal > 0 ? `${job.embDone}/${job.embTotal}` : '—'}</td>`);
-            printWindow.document.write(`<td>${job.printTotal > 0 ? `${job.printDone}/${job.printTotal}` : '—'}</td>`);
-            printWindow.document.write(`<td>${job.est.totalStitches > 0 ? fmtStitches(job.est.totalStitches) : '—'}</td>`);
-            printWindow.document.write(`<td>${job.est.totalMinutes > 0 ? fmtTime(job.est.totalMinutes) : '—'}</td>`);
-            printWindow.document.write(`<td>${job.est.isEmbroidery ? job.est.machineType : '—'}</td>`);
-            printWindow.document.write(`<td>${job.daysInProd !== null ? `${job.daysInProd}d` : '—'}</td>`);
-            printWindow.document.write(`<td class="${dueClass}">${dueText}</td>`);
-            printWindow.document.write(`<td>${job.jobValue > 0 ? fmtK(job.jobValue) : '—'}</td>`);
-            printWindow.document.write(`<td class="${pphClass}">${job.poundPerHour > 0 ? '£' + job.poundPerHour.toFixed(0) : '—'}</td>`);
+            printWindow.document.write(`<td>#${escHtml(job.jobNumber)}</td>`);
+            printWindow.document.write(`<td>${escHtml(job.customerName)}</td>`);
+            printWindow.document.write(`<td>${escHtml(job.jobName)}</td>`);
+            printWindow.document.write(`<td><span class="badge ${escCls(statusClass)}">${escHtml(job.status)}</span></td>`);
+            printWindow.document.write(`<td>${job.decoTypes.map(t => `<span class="badge ${escCls(t.toLowerCase())}">${escHtml(t)}</span>`).join(' ') || '—'}</td>`);
+            printWindow.document.write(`<td>${escHtml(job.totalQty)}</td>`);
+            printWindow.document.write(`<td>${job.embTotal > 0 ? `${escHtml(job.embDone)}/${escHtml(job.embTotal)}` : '—'}</td>`);
+            printWindow.document.write(`<td>${job.printTotal > 0 ? `${escHtml(job.printDone)}/${escHtml(job.printTotal)}` : '—'}</td>`);
+            printWindow.document.write(`<td>${job.est.totalStitches > 0 ? escHtml(fmtStitches(job.est.totalStitches)) : '—'}</td>`);
+            printWindow.document.write(`<td>${job.est.totalMinutes > 0 ? escHtml(fmtTime(job.est.totalMinutes)) : '—'}</td>`);
+            printWindow.document.write(`<td>${job.est.isEmbroidery ? escHtml(job.est.machineType) : '—'}</td>`);
+            printWindow.document.write(`<td>${job.daysInProd !== null ? `${escHtml(job.daysInProd)}d` : '—'}</td>`);
+            printWindow.document.write(`<td class="${escCls(dueClass)}">${escHtml(dueText)}</td>`);
+            printWindow.document.write(`<td>${job.jobValue > 0 ? escHtml(fmtK(job.jobValue)) : '—'}</td>`);
+            printWindow.document.write(`<td class="${escCls(pphClass)}">${job.poundPerHour > 0 ? '£' + escHtml(job.poundPerHour.toFixed(0)) : '—'}</td>`);
             printWindow.document.write(`</tr>`);
         });
         printWindow.document.write(`</tbody></table></body></html>`);
