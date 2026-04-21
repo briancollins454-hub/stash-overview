@@ -34,48 +34,92 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '2mb' }));
-  
-  // Health check
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
-
   // --- Webhook Ingestion ---
-  // Stores recent webhook events in memory for the frontend to poll
+  // Stores recent webhook events in memory for the frontend to poll.
+  // Declared up here because the webhook POST handler is mounted BEFORE
+  // the global express.json() parser (Shopify HMAC is computed against
+  // the raw request bytes, so we cannot let json() consume the body first).
   const webhookEvents: { id: string; topic: string; payload: any; receivedAt: string }[] = [];
   const MAX_WEBHOOK_EVENTS = 200;
 
-  // Shopify sends webhooks as POST with HMAC verification
-  app.post("/api/webhooks/shopify", (req, res) => {
-    const topic = req.headers['x-shopify-topic'] as string || 'unknown';
-    const shopDomain = req.headers['x-shopify-shop-domain'] as string || '';
+  // Shopify sends webhooks as POST with HMAC verification.
+  // IMPORTANT: this route uses express.raw() to preserve the exact bytes
+  // Shopify signed. Running express.json() first would re-stringify the
+  // body with different whitespace / key ordering and the HMAC would
+  // never match.
+  app.post(
+    "/api/webhooks/shopify",
+    express.raw({ type: 'application/json', limit: '2mb' }),
+    (req, res) => {
+      const topic = req.headers['x-shopify-topic'] as string || 'unknown';
+      const shopDomain = req.headers['x-shopify-shop-domain'] as string || '';
+      const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? '');
 
-    // Verify HMAC signature if secret is configured
-    const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      const hmac = req.headers['x-shopify-hmac-sha256'] as string;
+      // Fail closed: if no secret is configured we refuse to accept
+      // webhooks at all, rather than silently rubber-stamping every
+      // request that hits this endpoint. Operators must set
+      // SHOPIFY_WEBHOOK_SECRET to enable ingestion.
+      const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET;
+      if (!webhookSecret) {
+        log.warn('Webhook rejected: SHOPIFY_WEBHOOK_SECRET is not configured', { topic, shop: shopDomain });
+        return res.status(503).send('Webhook receiver not configured');
+      }
+
+      const hmacHeader = req.headers['x-shopify-hmac-sha256'] as string | undefined;
       const computedHmac = crypto.createHmac('sha256', webhookSecret)
-        .update(JSON.stringify(req.body))
+        .update(rawBody)
         .digest('base64');
-      if (!hmac || hmac !== computedHmac) {
+
+      // Constant-time compare.
+      let signaturesMatch = false;
+      if (hmacHeader) {
+        try {
+          const a = Buffer.from(hmacHeader, 'base64');
+          const b = Buffer.from(computedHmac, 'base64');
+          signaturesMatch = a.length === b.length && a.length > 0 && crypto.timingSafeEqual(a, b);
+        } catch {
+          signaturesMatch = false;
+        }
+      }
+
+      if (!signaturesMatch) {
         log.warn('Webhook HMAC verification failed', { topic, shop: shopDomain });
         return res.status(401).send('Unauthorized');
       }
+
+      // Parse the raw body now that we've verified it. If parsing fails
+      // we still 200 (Shopify will retry otherwise, and the signature was
+      // valid — so it's our bug if we can't parse), but log loudly.
+      let payload: any = null;
+      try {
+        payload = rawBody.length > 0 ? JSON.parse(rawBody.toString('utf8')) : {};
+      } catch (e) {
+        log.error('Webhook body JSON parse failed after HMAC passed', { topic, shop: shopDomain, err: (e as Error).message });
+        payload = { _rawParseFailed: true };
+      }
+
+      const event = {
+        id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        topic,
+        payload,
+        receivedAt: new Date().toISOString(),
+      };
+
+      webhookEvents.unshift(event);
+      if (webhookEvents.length > MAX_WEBHOOK_EVENTS) webhookEvents.length = MAX_WEBHOOK_EVENTS;
+
+      log.info('Webhook received', { topic, shop: shopDomain, eventId: event.id });
+      res.status(200).json({ received: true });
     }
+  );
 
-    const event = {
-      id: `wh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      topic,
-      payload: req.body,
-      receivedAt: new Date().toISOString(),
-    };
+  // Global JSON parser for every OTHER route. Mounted AFTER the webhook
+  // route above so the raw-body parser wins for Shopify webhooks.
+  app.use(express.json({ limit: '2mb' }));
 
-    webhookEvents.unshift(event);
-    if (webhookEvents.length > MAX_WEBHOOK_EVENTS) webhookEvents.length = MAX_WEBHOOK_EVENTS;
-
-    log.info('Webhook received', { topic, shop: shopDomain, eventId: event.id });
-    res.status(200).json({ received: true });
+  // Health check
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok" });
   });
 
   // Frontend polls this endpoint for recent webhook events
