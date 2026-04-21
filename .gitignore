@@ -7,3 +7,9 @@ dist
 migrated_prompt_history/
 analysis_output.txt
 analyze.py
+
+# Local developer scripts (personal Supabase tooling — not for CI or prod)
+check_db.mjs
+diag.mjs
+wipe.mjs
+wipe_orders.ts
