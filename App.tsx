@@ -256,6 +256,18 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
   return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
 };
 
+/**
+ * An order is "ready to ship" when either:
+ *   - all of its Deco-produced items are at 100% completion, OR
+ *   - it is a pure-stock order whose stock items are ready to dispatch.
+ *
+ * This is its own bucket, distinct from "Unfulfilled" — otherwise ready-to-ship
+ * orders show up in BOTH the Ready to Ship card and the Unfulfilled card and
+ * the dashboard double-counts.
+ */
+const isReadyToShip = (o: UnifiedOrder): boolean =>
+    !!((o.decoJobId && (o.eligibleCount ?? 0) > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
+
 const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
@@ -2042,13 +2054,15 @@ const App: React.FC = () => {
           notOnDeco: active.filter(o => !o.decoJobId).length,
           notOnDeco5Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 5).length,
           notOnDeco10Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 10).length,
-          orderComplete: active.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100).length,
+          orderComplete: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100).length,
           stockReady: active.filter(o => o.isStockDispatchReady).length,
-          partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
+          partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
           late: active.filter(o => o.daysRemaining < 0).length,
           dueSoon: active.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5).length,
-          readyForShipping: active.filter(o => (o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady).length,
-          unfulfilled: active.length,
+          readyForShipping: active.filter(isReadyToShip).length,
+          // "Unfulfilled" excludes ready-to-ship orders so the two cards are
+          // mutually exclusive. Ready orders now live only in the Ready card.
+          unfulfilled: active.filter(o => !isReadyToShip(o)).length,
           productionAfterDispatch: active.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000).length,
           fulfilled7d: fulfilled7d.length,
           mappingGap: active.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100).length,
@@ -2072,16 +2086,19 @@ const App: React.FC = () => {
       else {
           filtered = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
           if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
-          else if (activeQuickFilter === 'ready') filtered = filtered.filter(o => (o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
-          else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage === 100);
+          else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
+          else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
           else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
-          else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
+          else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
           else if (activeQuickFilter === 'late') filtered = filtered.filter(o => o.daysRemaining < 0);
           else if (activeQuickFilter === 'mapping_gap') filtered = filtered.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100);
           else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
           else if (activeQuickFilter === 'overdue10') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 10);
           else if (activeQuickFilter === 'production_after_dispatch') filtered = filtered.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000);
           else if (activeQuickFilter === 'due_soon') filtered = filtered.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5);
+          // No quick filter = default "Unfulfilled" view — hide ready-to-ship
+          // orders so they live only in the Ready to Ship card.
+          else filtered = filtered.filter(o => !isReadyToShip(o));
       }
       if (startDate && endDate) {
           const s = new Date(startDate); const e = new Date(endDate); e.setHours(23, 59, 59, 999);
