@@ -230,14 +230,17 @@ export const flushPending = async (): Promise<FlushResult> => {
             let skip = false;
 
             try {
-                if (op.op === 'upsert') {
-                    // Conflict check — don't stomp on newer cloud state
-                    let cloudTs: string | null = null;
-                    if (op.kind === 'mapping') cloudTs = await getCloudMappingUpdatedAt(op.item_id);
-                    else if (op.kind === 'joblink') cloudTs = await getCloudJobLinkUpdatedAt(op.order_id);
-                    else if (op.kind === 'pattern') cloudTs = await getCloudPatternUpdatedAt(op.shopify_pattern);
+                // Look up the current cloud `updated_at` for this row once, so
+                // both upserts AND deletes can refuse to stomp newer state.
+                let cloudTs: string | null = null;
+                if (op.kind === 'mapping') cloudTs = await getCloudMappingUpdatedAt(op.item_id);
+                else if (op.kind === 'joblink') cloudTs = await getCloudJobLinkUpdatedAt(op.order_id);
+                else if (op.kind === 'pattern') cloudTs = await getCloudPatternUpdatedAt(op.shopify_pattern);
 
-                    if (cloudTs && new Date(cloudTs).getTime() > new Date(op.updated_at).getTime()) {
+                const cloudIsNewer = !!cloudTs && new Date(cloudTs).getTime() > new Date(op.updated_at).getTime();
+
+                if (op.op === 'upsert') {
+                    if (cloudIsNewer) {
                         skip = true;
                     } else {
                         if (op.kind === 'mapping') success = await saveCloudMappingStrict(op.item_id, op.deco_id, op.updated_at);
@@ -245,9 +248,21 @@ export const flushPending = async (): Promise<FlushResult> => {
                         else if (op.kind === 'pattern') success = await saveCloudProductPatternStrict(op.shopify_pattern, op.deco_pattern, op.updated_at);
                     }
                 } else if (op.op === 'delete') {
-                    if (op.kind === 'mapping') success = await deleteCloudMapping(op.item_id);
-                    else if (op.kind === 'joblink') success = await deleteCloudJobLink(op.order_id);
-                    else if (op.kind === 'pattern') success = await deleteCloudProductPattern(op.shopify_pattern);
+                    // Same conflict rule as upserts: if the cloud row was
+                    // touched AFTER we queued this delete, another user/tab
+                    // re-created or re-mapped it. Skip rather than silently
+                    // wiping their newer work. The next realtime pull will
+                    // converge us to the cloud state.
+                    if (cloudIsNewer) {
+                        skip = true;
+                    } else if (cloudTs === null) {
+                        // Row is already gone from the cloud — treat as success.
+                        success = true;
+                    } else {
+                        if (op.kind === 'mapping') success = await deleteCloudMapping(op.item_id);
+                        else if (op.kind === 'joblink') success = await deleteCloudJobLink(op.order_id);
+                        else if (op.kind === 'pattern') success = await deleteCloudProductPattern(op.shopify_pattern);
+                    }
                 }
             } catch (e) {
                 console.error('[pending-sync] flush op errored:', op, e);

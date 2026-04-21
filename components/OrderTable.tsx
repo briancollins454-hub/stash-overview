@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { UnifiedOrder, DecoJob, ApiSettings } from '../types';
 import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
 import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
@@ -9,7 +9,10 @@ import {
     HelpCircle, RefreshCw, Scissors, Filter, ArrowUp, ArrowDown, Check, Pencil, ClipboardList, Shirt, Hash, ShieldOff,
     Download, Unlink, Calendar, Printer, MessageSquare, Barcode
 } from 'lucide-react';
-import OrderMappingModal from './OrderMappingModal';
+// Lazy-loaded to keep the Google GenAI SDK (pulled in by OrderMappingModal ->
+// geminiService) out of the initial bundle. The modal only opens when staff
+// click "map order", so there's no reason to pay for the SDK at first paint.
+const OrderMappingModal = lazy(() => import('./OrderMappingModal'));
 import JobIdBadge from './JobIdBadge';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
 
@@ -657,18 +660,20 @@ const OrderTable: React.FC<OrderTableProps> = ({
   return (
     <div className="space-y-8 pb-16 relative" onClick={() => setActiveHeaderMenu(null)}>
       {ordersForMapping.length > 0 && onSearchJob && onBulkMatch && (
-          <OrderMappingModal 
-              isOpen={mappingModalOpen}
-              onClose={() => { setMappingModalOpen(false); setOrdersForMapping([]); }}
-              orders={ordersForMapping.map(o => o.shopify)}
-              currentDecoJobId={ordersForMapping.length === 1 ? ordersForMapping[0].decoJobId : undefined}
-              onSearchJob={onSearchJob}
-              onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
-              productMappings={productMappings || {}}
-              confirmedMatches={confirmedMatches || {}}
-              itemJobLinks={itemJobLinks || {}}
-              eanIndex={eanIndex}
-          />
+          <Suspense fallback={null}>
+              <OrderMappingModal 
+                  isOpen={mappingModalOpen}
+                  onClose={() => { setMappingModalOpen(false); setOrdersForMapping([]); }}
+                  orders={ordersForMapping.map(o => o.shopify)}
+                  currentDecoJobId={ordersForMapping.length === 1 ? ordersForMapping[0].decoJobId : undefined}
+                  onSearchJob={onSearchJob}
+                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
+                  productMappings={productMappings || {}}
+                  confirmedMatches={confirmedMatches || {}}
+                  itemJobLinks={itemJobLinks || {}}
+                  eanIndex={eanIndex}
+              />
+          </Suspense>
       )}
       <ManualMatchModal />
       <ManualJobLinkModal />

@@ -1,8 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import { ApiSettings } from './SettingsModal';
 import { DecoJob, UnifiedOrder } from '../types';
 import { fetchSingleDecoJob, standardizeSize } from '../services/apiService';
-import OrderMappingModal from './OrderMappingModal';
+// Lazy-loaded so the Google GenAI SDK (pulled in via geminiService) is not
+// bundled into the initial chunk. Only loads when staff open the mapping modal.
+const OrderMappingModal = lazy(() => import('./OrderMappingModal'));
 import MultiSelectFilter from './MultiSelectFilter';
 import OrderTable from './OrderTable';
 import { 
@@ -343,18 +345,20 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
     return (
         <div className="w-full max-w-[1400px] mx-auto min-h-[80vh] flex flex-col items-center p-4">
             {manualMapOpen && onSearchJob && onBulkMatch && (
-                <OrderMappingModal 
-                  isOpen={manualMapOpen} 
-                  onClose={() => setManualMapOpen(false)} 
-                  orders={bulkMapOrders} 
-                  currentDecoJobId={bulkMapJobId} 
-                  onSearchJob={onSearchJob} 
-                  onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
-                  productMappings={productMappings || {}}
-                  confirmedMatches={confirmedMatches || {}}
-                  itemJobLinks={itemJobLinks || {}}
-                  eanIndex={eanIndex}
-                />
+                <Suspense fallback={null}>
+                    <OrderMappingModal 
+                      isOpen={manualMapOpen} 
+                      onClose={() => setManualMapOpen(false)} 
+                      orders={bulkMapOrders} 
+                      currentDecoJobId={bulkMapJobId} 
+                      onSearchJob={onSearchJob} 
+                      onSaveMappings={(mappings, jobId, learnedPatterns) => onBulkMatch(mappings.map(m => ({ ...m, jobId: m.jobId || jobId })), learnedPatterns)}
+                      productMappings={productMappings || {}}
+                      confirmedMatches={confirmedMatches || {}}
+                      itemJobLinks={itemJobLinks || {}}
+                      eanIndex={eanIndex}
+                    />
+                </Suspense>
             )}
             <div className={`transition-all duration-500 w-full max-w-4xl flex flex-col md:flex-row gap-3 mb-6 ${jobData || viewMode === 'list' ? 'mt-0' : 'mt-32'}`}>
                 <div className="flex-1 bg-white p-2 rounded-xl shadow-md flex items-center border border-gray-200">
