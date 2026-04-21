@@ -1210,10 +1210,20 @@ const App: React.FC = () => {
                           if (cloudData.orders?.length) {
                             setRawShopifyOrders(prev => {
                               const orderMap = new Map(prev.map(o => [o.id, o]));
+                              // Never downgrade a locally-fulfilled order back to unfulfilled —
+                              // cloud's copy of any fulfilled order is permanently stale because
+                              // saveCloudOrders excludes fulfilled records. Also skip when our
+                              // local copy is newer than cloud's (updatedAt comparison).
                               cloudData.orders.forEach(o => {
-                                if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
-                                  orderMap.set(o.id, o);
+                                if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                                const existing = orderMap.get(o.id);
+                                if (existing) {
+                                  if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                                  const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+                                  const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
+                                  if (localMs && cloudMs && localMs >= cloudMs) return;
                                 }
+                                orderMap.set(o.id, o);
                               });
                               const merged = Array.from(orderMap.values());
                               setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
