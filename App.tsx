@@ -624,7 +624,12 @@ const App: React.FC = () => {
                 const currentUnfulfilledIds = new Set(unfulfilledOrders.map(o => o.id));
                 const nowMs = Date.now();
                 const STALE_AGE_MS = 24 * 60 * 60 * 1000;
-                const RECONCILE_CAP = 500;
+                // High cap to drain legacy backlog in one sync. Empty dashboards
+                // see near-zero stale candidates ongoing, so this only bites on
+                // first run after this fix ships. Shopify GraphQL cost budget
+                // (2000 bucket + 100/s restore) + fetchServerRoute 429 retries
+                // absorbs the burst safely.
+                const RECONCILE_CAP = 2000;
                 // Collect ALL candidates, then prioritise oldest updatedAt first —
                 // those are most likely to be truly fulfilled and least likely to
                 // collide with in-flight webhooks. Guarantees any given stale order
