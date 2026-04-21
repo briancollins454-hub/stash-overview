@@ -15,7 +15,7 @@ interface OrderMappingModalProps {
   itemJobLinks: Record<string, string>;
   eanIndex?: Map<string, string>;
   onSearchJob: (jobId: string) => Promise<DecoJob | null>;
-  onSaveMappings: (mappings: { itemKey: string, decoId: string, jobId?: string }[], jobId: string, learnedPatterns?: Record<string, string>) => void;
+  onSaveMappings: (mappings: { itemKey: string, decoId: string, jobId?: string }[], jobId: string, learnedPatterns?: Record<string, string>) => void | boolean | Promise<void | boolean>;
 }
 
 const getShopifyPattern = (item: any) => {
@@ -344,26 +344,22 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
       setMappingJobs(nextJobs);
   };
 
-  const handleSave = () => {
-      if (!decoJob) return;
-      
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+      if (!decoJob || isSaving) return;
+
       const learnedPatterns: Record<string, string> = {};
       const results = Object.entries(mappings).map(([key, value]) => {
-          // Identify the shopify item and deco item to learn the pattern
           let sItem: any = null;
           for (const o of targetOrders) {
               const match = o.items.find(i => i.id === key);
-              if (match) {
-                  sItem = match;
-                  break;
-              }
+              if (match) { sItem = match; break; }
           }
 
           if (sItem && value && value !== '__NO_MAP__') {
               const [sku, idxStr] = value.split('@@@');
               const idx = parseInt(idxStr);
-              // Only learn patterns for items mapped to the currently displayed job
-              // Cross-job items have indices into a different job's item list
               const itemJobId = mappingJobs[key];
               if (!itemJobId || itemJobId === decoJob.jobNumber) {
                   const dItem = decoJob.items[idx];
@@ -382,8 +378,22 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           };
       });
 
-      onSaveMappings(results, decoJob.jobNumber, learnedPatterns);
-      onClose();
+      setIsSaving(true);
+      try {
+          // Wait for the save to actually complete. The parent's handler shows
+          // a success/failure toast and routes the write through the pending
+          // queue so it survives network/cloud failures — so the modal can
+          // safely close in either case.
+          const maybe = onSaveMappings(results, decoJob.jobNumber, learnedPatterns);
+          if (maybe && typeof (maybe as any).then === 'function') {
+              await (maybe as Promise<void | boolean>);
+          }
+          onClose();
+      } catch (e) {
+          console.error('[OrderMappingModal] save failed:', e);
+      } finally {
+          setIsSaving(false);
+      }
   };
 
   const StatusGrid = ({ item }: { item: DecoItem }) => (
@@ -662,8 +672,10 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                 <Info className="w-4 h-4" /> Tip: Already mapped items are preserved even if they belong to a different Batch ID.
             </div>
             <div className="flex gap-3">
-                <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 uppercase tracking-widest">Cancel</button>
-                <button onClick={handleSave} disabled={!decoJob} className="px-6 py-2 text-sm font-bold bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm uppercase tracking-widest"><Save className="w-4 h-4" /> Save Batch</button>
+                <button onClick={onClose} disabled={isSaving} className="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 uppercase tracking-widest disabled:opacity-40">Cancel</button>
+                <button onClick={handleSave} disabled={!decoJob || isSaving} className="px-6 py-2 text-sm font-bold bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm uppercase tracking-widest">
+                    {isSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : <><Save className="w-4 h-4" /> Save Batch</>}
+                </button>
             </div>
         </div>
       </div>

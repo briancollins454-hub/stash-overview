@@ -10,7 +10,8 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudJobLink, saveCloudOrders, saveCloudDecoJobs, saveCloudMappingBatch, saveCloudJobLinkBatch, saveCloudProductMappingBatch, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, saveProductMapping, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
 import { startRealtime, stopRealtime } from './services/realtimeService';
 import { db } from './firebase';
@@ -746,46 +747,43 @@ const App: React.FC = () => {
                 }
             })();
 
-            // Two-way cloud sync: push local → fetch cloud → replace local (cloud = single source of truth)
-            setSyncStatusMsg('Pushing local mappings to cloud...');
+            // Two-way cloud sync: retry any queued local writes, then pull cloud as source of truth.
+            // We no longer re-push the ENTIRE local mappings dict here — that is what used to
+            // let stale tabs overwrite fresh cloud values authored by other users. Only genuinely
+            // pending (not-yet-confirmed) writes from this device go out, via the pending queue.
+            setSyncStatusMsg('Flushing pending local writes...');
             try {
-                // Push local mappings to cloud so any local-only entries survive the replace
-                const [currentMatches, currentPM, currentLinks] = await Promise.all([
-                    new Promise<Record<string,string>>(r => setConfirmedMatches(p => { r(p); return p; })),
-                    new Promise<Record<string,string>>(r => setProductMappings(p => { r(p); return p; })),
-                    new Promise<Record<string,string>>(r => setItemJobLinks(p => { r(p); return p; }))
-                ]);
-                await Promise.all([
-                    saveCloudMappingBatch(apiSettings, Object.entries(currentMatches).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
-                    saveCloudProductMappingBatch(apiSettings, currentPM),
-                    saveCloudJobLinkBatch(apiSettings, currentLinks)
-                ]);
-
+                const pc = await getPendingCount();
+                if (pc > 0) await flushPending();
+            } catch (e) {
+                console.warn('Pending-sync flush mid-load failed:', e);
+            }
+            try {
                 setSyncStatusMsg('Fetching cloud mappings...');
                 const cloudData = await fetchCloudData(apiSettings);
                 if (cloudData) {
-                    // MERGE — cloud fills gaps, but local values win to prevent
-                    // race conditions where local changes haven't propagated yet
+                    // Cloud-wins merge with pending queue as overlay. See the startup
+                    // merge block for the rationale — the short version is: cloud is
+                    // authoritative except where we have locally-queued writes that
+                    // haven't confirmed yet.
+                    const overlay = await getPendingOverlay();
                     const cloudMappings = cloudData.mappings || {};
-                    setConfirmedMatches(prev => {
-                        const merged = { ...cloudMappings, ...prev };
-                        setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                        return merged;
-                    });
+                    const mergedMappings: Record<string, string> = { ...cloudMappings, ...overlay.mappings };
+                    overlay.mappingDeletes.forEach(k => { delete mergedMappings[k]; });
+                    setConfirmedMatches(mergedMappings);
+                    setLocalItem('stash_confirmed_matches', mergedMappings).catch(console.error);
 
                     const cloudPM = cloudData.productMappings || {};
-                    setProductMappings(prev => {
-                        const merged = { ...cloudPM, ...prev };
-                        setLocalItem('stash_product_mappings', merged).catch(console.error);
-                        return merged;
-                    });
+                    const mergedPM: Record<string, string> = { ...cloudPM, ...overlay.patterns };
+                    overlay.patternDeletes.forEach(k => { delete mergedPM[k]; });
+                    setProductMappings(mergedPM);
+                    setLocalItem('stash_product_mappings', mergedPM).catch(console.error);
 
                     const cloudLinks = cloudData.links || {};
-                    setItemJobLinks(prev => {
-                        const merged = { ...cloudLinks, ...prev };
-                        setLocalItem('stash_item_job_links', merged).catch(console.error);
-                        return merged;
-                    });
+                    const mergedLinks: Record<string, string> = { ...cloudLinks, ...overlay.jobLinks };
+                    overlay.jobLinkDeletes.forEach(k => { delete mergedLinks[k]; });
+                    setItemJobLinks(mergedLinks);
+                    setLocalItem('stash_item_job_links', mergedLinks).catch(console.error);
                 }
             } catch (e) {
                 console.warn('Cloud mapping sync failed:', e);
@@ -1030,23 +1028,83 @@ const App: React.FC = () => {
                               return merged;
                             });
                           }
-                          // Also pick up any new mappings/links from the same cloud pull
+                          // Also pick up any new mappings/links from the same cloud pull,
+                          // with the pending-overlay respected so our own unconfirmed
+                          // writes aren't stomped by this intermediate fetch.
+                          const overlay = await getPendingOverlay();
                           if (cloudData.mappings) {
-                            setConfirmedMatches(prev => {
-                              const merged = { ...cloudData.mappings, ...prev };
-                              setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                              return merged;
-                            });
+                            const merged: Record<string, string> = { ...cloudData.mappings, ...overlay.mappings };
+                            overlay.mappingDeletes.forEach(k => { delete merged[k]; });
+                            setConfirmedMatches(merged);
+                            setLocalItem('stash_confirmed_matches', merged).catch(console.error);
                           }
                           if (cloudData.links) {
-                            setItemJobLinks(prev => {
-                              const merged = { ...cloudData.links, ...prev };
-                              setLocalItem('stash_item_job_links', merged).catch(console.error);
-                              return merged;
-                            });
+                            const merged: Record<string, string> = { ...cloudData.links, ...overlay.jobLinks };
+                            overlay.jobLinkDeletes.forEach(k => { delete merged[k]; });
+                            setItemJobLinks(merged);
+                            setLocalItem('stash_item_job_links', merged).catch(console.error);
                           }
                         } catch (e) {
                           console.warn('[Realtime] Cloud pull failed:', e);
+                        }
+                      },
+                      onReconnect: async () => {
+                        // The websocket came back after being disconnected — our local
+                        // state may have missed any number of writes from other devices.
+                        // Flush our own queued writes first, then pull cloud as the
+                        // source of truth (with pending overlay still protecting our
+                        // unconfirmed mutations).
+                        console.log('[Realtime] Reconnected — resyncing state');
+                        try { await flushPending(); } catch (e) { console.warn('[Realtime] reconnect flush failed:', e); }
+                        try {
+                          const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
+                          if (!cloudData) return;
+                          const overlay = await getPendingOverlay();
+
+                          if (cloudData.mappings) {
+                            const merged: Record<string, string> = { ...cloudData.mappings, ...overlay.mappings };
+                            overlay.mappingDeletes.forEach(k => { delete merged[k]; });
+                            setConfirmedMatches(merged);
+                            setLocalItem('stash_confirmed_matches', merged).catch(console.error);
+                          }
+                          if (cloudData.links) {
+                            const merged: Record<string, string> = { ...cloudData.links, ...overlay.jobLinks };
+                            overlay.jobLinkDeletes.forEach(k => { delete merged[k]; });
+                            setItemJobLinks(merged);
+                            setLocalItem('stash_item_job_links', merged).catch(console.error);
+                          }
+                          if (cloudData.productMappings) {
+                            const merged: Record<string, string> = { ...cloudData.productMappings, ...overlay.patterns };
+                            overlay.patternDeletes.forEach(k => { delete merged[k]; });
+                            setProductMappings(merged);
+                            setLocalItem('stash_product_mappings', merged).catch(console.error);
+                          }
+
+                          if (cloudData.orders?.length) {
+                            setRawShopifyOrders(prev => {
+                              const orderMap = new Map(prev.map(o => [o.id, o]));
+                              cloudData.orders.forEach(o => {
+                                if (o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked') {
+                                  orderMap.set(o.id, o);
+                                }
+                              });
+                              const merged = Array.from(orderMap.values());
+                              setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                          if (cloudData.decoJobs?.length) {
+                            setRawDecoJobs(prev => {
+                              const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                              const merged = Array.from(jobMap.values());
+                              setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
+                              return merged;
+                            });
+                          }
+                          setToastMsg({ text: 'Reconnected to live sync', type: 'success' });
+                        } catch (e) {
+                          console.warn('[Realtime] reconnect resync failed:', e);
                         }
                       },
                     });
@@ -1090,47 +1148,62 @@ const App: React.FC = () => {
             }
 
             setSyncStatusMsg('Loading Cloud State...');
-            // Push local MAPPINGS to cloud first (catches any that failed to save previously)
-            // Note: we only push mappings/links/patterns + orders here — NOT deco jobs.
-            // Deco jobs are only pushed when freshly fetched from the API (in loadData),
-            // to prevent stale cached data from overwriting fresh data from other devices.
-            const hasLocalMappings = Object.keys(cachedMatches || {}).length > 0 || Object.keys(cachedProductMappings || {}).length > 0 || Object.keys(cachedJobLinks || {}).length > 0;
+            // Retry any previously-failed local writes (only ops that were actually
+            // made on THIS device — we never blindly re-push the whole local cache,
+            // which used to cause stale tabs to overwrite other users' work).
+            try {
+                const pendingCount = await getPendingCount();
+                if (pendingCount > 0) {
+                    setSyncStatusMsg(`Retrying ${pendingCount} pending changes...`);
+                    const result = await flushPending();
+                    if (result.failed > 0) {
+                        console.warn('[startup] pending-sync flush: some ops still failing', result);
+                    } else if (result.sent > 0) {
+                        console.log('[startup] pending-sync flush: recovered', result);
+                    }
+                }
+            } catch (e) {
+                console.warn('Pending-sync flush on startup failed:', e);
+            }
+            // Orders cache is still pushed on startup (this is how other devices
+            // bootstrap mid-flight sync data that isn't user-authored).
             const hasLocalOrders = initialOrders.length > 0;
-            if (hasLocalMappings || hasLocalOrders) {
-                setSyncStatusMsg('Pushing local data to cloud...');
-                await Promise.all([
-                    saveCloudMappingBatch(apiSettings, Object.entries(cachedMatches || {}).map(([item_id, deco_id]) => ({ item_id, deco_id }))),
-                    saveCloudProductMappingBatch(apiSettings, cachedProductMappings || {}),
-                    saveCloudJobLinkBatch(apiSettings, cachedJobLinks || {}),
-                    hasLocalOrders ? saveCloudOrders(apiSettings, initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked')) : Promise.resolve()
-                ]).catch(e => console.warn('Local push failed:', e));
+            if (hasLocalOrders) {
+                saveCloudOrders(apiSettings, initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked')).catch(e => console.warn('Order cache push failed:', e));
             }
 
             setSyncStatusMsg('Fetching cloud data...');
             const cloudData = await fetchCloudData(apiSettings, { includeOrders: true });
             if (cloudData) {
-                // MERGE — cloud fills gaps, but local values win to prevent
-                // race conditions where local changes haven't propagated yet
+                // Cloud is authoritative for mappings/links/patterns EXCEPT for rows
+                // we still have queued-but-unconfirmed writes for (the overlay).
+                // This is the opposite of the old "local wins" merge, which caused
+                // stale tabs to retain their out-of-date view of other users' work.
+                const overlay = await getPendingOverlay();
+                const mergeWithOverlay = (
+                    cloud: Record<string, string>,
+                    upserts: Record<string, string>,
+                    deletes: Set<string>
+                ): Record<string, string> => {
+                    const out: Record<string, string> = { ...cloud, ...upserts };
+                    deletes.forEach(k => { delete out[k]; });
+                    return out;
+                };
+
                 const cloudMappings = cloudData.mappings || {};
-                setConfirmedMatches(prev => {
-                    const merged = { ...cloudMappings, ...prev };
-                    setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                    return merged;
-                });
+                const mergedMappings = mergeWithOverlay(cloudMappings, overlay.mappings, overlay.mappingDeletes);
+                setConfirmedMatches(mergedMappings);
+                setLocalItem('stash_confirmed_matches', mergedMappings).catch(console.error);
 
                 const cloudPM = cloudData.productMappings || {};
-                setProductMappings(prev => {
-                    const merged = { ...cloudPM, ...prev };
-                    setLocalItem('stash_product_mappings', merged).catch(console.error);
-                    return merged;
-                });
+                const mergedPM = mergeWithOverlay(cloudPM, overlay.patterns, overlay.patternDeletes);
+                setProductMappings(mergedPM);
+                setLocalItem('stash_product_mappings', mergedPM).catch(console.error);
 
                 const cloudLinks = cloudData.links || {};
-                setItemJobLinks(prev => {
-                    const merged = { ...cloudLinks, ...prev };
-                    setLocalItem('stash_item_job_links', merged).catch(console.error);
-                    return merged;
-                });
+                const mergedLinks = mergeWithOverlay(cloudLinks, overlay.jobLinks, overlay.jobLinkDeletes);
+                setItemJobLinks(mergedLinks);
+                setLocalItem('stash_item_job_links', mergedLinks).catch(console.error);
 
                 setPhysicalStock(cloudData.physicalStock || []);
                 setReturnStock(cloudData.returnStock || []);
@@ -1684,11 +1757,43 @@ const App: React.FC = () => {
           setLocalItem('stash_item_job_links', next).catch(console.error);
           return next;
       });
-      ids.forEach((id: string) => saveCloudJobLink(apiSettings, id, jobId).catch(console.error));
+      await persistJobLinks(ids.map(id => ({ itemId: id, jobId })));
       handleRefreshJob(jobId);
   };
 
-  const handleBulkConfirmMatch = (mappings: { itemKey: string, decoId: string, jobId?: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => {
+  /**
+   * Shared helper — queues one or more item→job link writes and kicks off a
+   * flush. Every job-link persistence path in the app routes through this so
+   * that silent network failures are impossible.
+   */
+  const persistJobLinks = async (links: { itemId: string; jobId: string }[]) => {
+      const now = new Date().toISOString();
+      for (const l of links) {
+          try { await enqueueJobLinkUpsert(l.itemId, l.jobId, now); }
+          catch (e) { console.error('[job link] enqueue failed:', e); }
+      }
+      flushPending().catch(e => console.warn('[job link] flush failed:', e));
+  };
+
+  /**
+   * Confirm a batch of Shopify-to-Deco item mappings.
+   *
+   * Durability model: every write is enqueued in the pending-sync queue
+   * BEFORE we attempt the cloud POST. That queue is what guarantees the
+   * mapping eventually reaches Supabase even if the current network call
+   * fails — it's retried on next load, realtime reconnect, or manual flush.
+   *
+   * Returns { ok, failed } so the caller (modal) can show the user a real
+   * success / failure toast instead of the previous silent-fail pattern.
+   */
+  const handleBulkConfirmMatch = async (
+      mappings: { itemKey: string, decoId: string, jobId?: string }[],
+      jobId?: string,
+      learnedPatterns?: Record<string, string>
+  ): Promise<{ ok: boolean; failed: number; total: number }> => {
+      const now = new Date().toISOString();
+
+      // 1. Optimistic local state update (instant UI) + IndexedDB persistence.
       setConfirmedMatches((prev: Record<string, string>) => {
           const next: Record<string, string> = { ...prev };
           mappings.forEach(m => { next[m.itemKey] = m.decoId; });
@@ -1703,10 +1808,8 @@ const App: React.FC = () => {
               setLocalItem('stash_product_mappings', next).catch(console.error);
               return next;
           });
-          Object.entries(learnedPatterns).forEach(([sPattern, dPattern]) => saveProductMapping(apiSettings, sPattern, dPattern).catch(console.error));
       }
 
-      // Save job links per-item — each mapping can carry its own jobId
       const jobsToRefresh = new Set<string>();
       const itemsWithJobs = mappings.filter(m => m.jobId || jobId);
       if (itemsWithJobs.length > 0) {
@@ -1719,18 +1822,43 @@ const App: React.FC = () => {
               setLocalItem('stash_item_job_links', next).catch(console.error);
               return next;
           });
-          itemsWithJobs.forEach(m => {
-              const j = m.jobId || jobId;
-              if (j) {
-                  saveCloudJobLink(apiSettings, m.itemKey, j).catch(console.error);
-                  jobsToRefresh.add(j);
+          itemsWithJobs.forEach(m => { const j = m.jobId || jobId; if (j) jobsToRefresh.add(j); });
+      }
+
+      // 2. Enqueue cloud writes. If any enqueue throws, we DO NOT continue —
+      // better to fail loudly than silently.
+      try {
+          for (const m of mappings) {
+              await enqueueMappingUpsert(m.itemKey, m.decoId, now);
+          }
+          if (learnedPatterns) {
+              for (const [sP, dP] of Object.entries(learnedPatterns)) {
+                  await enqueuePatternUpsert(sP, dP, now);
               }
-          });
-          jobsToRefresh.forEach(j => handleRefreshJob(j));
+          }
+          for (const m of itemsWithJobs) {
+              const j = m.jobId || jobId;
+              if (j) await enqueueJobLinkUpsert(m.itemKey, j, now);
+          }
+      } catch (e) {
+          console.error('[mapping save] enqueue failed:', e);
+          return { ok: false, failed: mappings.length, total: mappings.length };
       }
-      if (mappings.length > 0) {
-          saveCloudMappingBatch(apiSettings, mappings.map(m => ({ item_id: m.itemKey, deco_id: m.decoId }))).catch(console.error);
+
+      // 3. Attempt to flush the queue now. Anything that fails stays queued
+      // for the next retry cycle — the user's work is never lost.
+      let result = { total: 0, sent: 0, failed: 0, skipped: 0, remaining: 0 };
+      try {
+          result = await flushPending();
+      } catch (e) {
+          console.error('[mapping save] flush errored:', e);
       }
+
+      // 4. Refresh affected Deco jobs so the UI reflects the mapped state.
+      jobsToRefresh.forEach(j => handleRefreshJob(j));
+
+      const ok = result.failed === 0 && result.remaining === 0;
+      return { ok, failed: result.failed + result.remaining, total: result.total };
   };
 
   const handleBulkScan = async (orderIds: string[]) => {
@@ -2104,7 +2232,7 @@ const App: React.FC = () => {
             }}
             onItemJobLink={async (orderNumber, itemId, jobId) => { 
               setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-              saveCloudJobLink(apiSettings, itemId, jobId); 
+              await persistJobLinks([{ itemId, jobId }]);
               handleRefreshJob(jobId); 
             }}
         />
@@ -2459,7 +2587,10 @@ const App: React.FC = () => {
                 settings={apiSettings}
                 onOpenNotes={openNotes}
                 noteCounts={noteCounts} 
-                onConfirmMatch={(i, d) => handleBulkConfirmMatch([{itemKey: i, decoId: d}])} 
+                onConfirmMatch={async (i, d) => {
+                  const r = await handleBulkConfirmMatch([{itemKey: i, decoId: d}]);
+                  if (!r.ok) setToastMsg({ text: `Mapping save queued — cloud retry pending (${r.failed} failed)`, type: 'error' });
+                }}
                 onRefreshJob={async (id) => { await handleRefreshJob(id); }} 
                 onSearchJob={async (id) => { 
                   const job = await fetchSingleDecoJob(apiSettings, id); 
@@ -2472,11 +2603,16 @@ const App: React.FC = () => {
                   } 
                   return job; 
                 }} 
-                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, m[0]?.jobId, lp)} 
+                onBulkMatch={async (m, lp) => {
+                  const r = await handleBulkConfirmMatch(m, m[0]?.jobId, lp);
+                  if (r.ok) setToastMsg({ text: `Saved ${m.length} mapping${m.length === 1 ? '' : 's'} to cloud`, type: 'success' });
+                  else setToastMsg({ text: `Save partially failed — ${r.failed} of ${r.total} queued for retry. Changes will re-send automatically.`, type: 'error' });
+                  return r.ok;
+                }}
                 onManualLink={handleManualJobLink} 
                 onItemJobLink={async (orderNumber, itemId, jobId) => { 
                   setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-                  saveCloudJobLink(apiSettings, itemId, jobId); 
+                  await persistJobLinks([{ itemId, jobId }]);
                   handleRefreshJob(jobId); 
                 }} 
                 onNavigateToJob={(id) => {setSearchTerm(id); setActiveTab('deco');}} 
@@ -2494,7 +2630,7 @@ const App: React.FC = () => {
             {activeTab === 'stock' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Stock Manager Error"><StockManager physicalStock={physicalStock} setPhysicalStock={updatePhysicalStock} returnStock={returnStock} setReturnStock={updateReturnStock} referenceProducts={referenceProducts} setReferenceProducts={updateReferenceProducts} orders={unifiedOrders} availableTags={allAvailableTags} /></ErrorBoundary></Suspense>}
             {activeTab === 'inventory' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Inventory Error"><ShopifyInventory /></ErrorBoundary></Suspense>}
             {activeTab === 'efficiency' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Dashboard Error"><EfficiencyDashboard orders={unifiedOrders} excludedTags={excludedTags} /></ErrorBoundary></Suspense>}
-            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); saveCloudJobLink(apiSettings, itemId, jobId); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
+            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); await persistJobLinks([{ itemId, jobId }]); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
             {activeTab === 'deco' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
               <DecoDashboard 
@@ -2502,8 +2638,16 @@ const App: React.FC = () => {
                 orders={unifiedOrders} 
                 excludedTags={excludedTags} 
                 onManualLink={handleManualJobLink} 
-                onConfirmMatch={(i, d) => handleBulkConfirmMatch([{itemKey: i, decoId: d}])} 
-                onBulkMatch={(m, lp) => handleBulkConfirmMatch(m, m[0]?.jobId, lp)} 
+                onConfirmMatch={async (i, d) => {
+                  const r = await handleBulkConfirmMatch([{itemKey: i, decoId: d}]);
+                  if (!r.ok) setToastMsg({ text: `Mapping save queued — cloud retry pending (${r.failed} failed)`, type: 'error' });
+                }}
+                onBulkMatch={async (m, lp) => {
+                  const r = await handleBulkConfirmMatch(m, m[0]?.jobId, lp);
+                  if (r.ok) setToastMsg({ text: `Saved ${m.length} mapping${m.length === 1 ? '' : 's'} to cloud`, type: 'success' });
+                  else setToastMsg({ text: `Save partially failed — ${r.failed} of ${r.total} queued for retry. Changes will re-send automatically.`, type: 'error' });
+                  return r.ok;
+                }}
                 onSearchJob={async (id) => { 
                   const job = await fetchSingleDecoJob(apiSettings, id); 
                   if(job) { 
@@ -2569,7 +2713,11 @@ const App: React.FC = () => {
                       productMappings={productMappings}
                       physicalStock={physicalStock}
                       referenceProducts={referenceProducts}
-                      onApplyMatches={(m, jobId, lp) => handleBulkConfirmMatch(m, jobId, lp)}
+                      onApplyMatches={async (m, jobId, lp) => {
+                        const r = await handleBulkConfirmMatch(m, jobId, lp);
+                        if (r.ok) setToastMsg({ text: `Saved ${m.length} mapping${m.length === 1 ? '' : 's'} to cloud`, type: 'success' });
+                        else setToastMsg({ text: `Save partially failed — ${r.failed} of ${r.total} queued for retry.`, type: 'error' });
+                      }}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                     />
                   </ErrorBoundary>
@@ -2820,19 +2968,19 @@ const App: React.FC = () => {
                     decoJobs={rawDecoJobs}
                     settings={apiSettings}
                     itemJobLinks={itemJobLinks}
-                    onLink={(orderNumber, itemId, jobId) => {
+                    onLink={async (orderNumber, itemId, jobId) => {
                       setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId }));
-                      saveCloudJobLink(apiSettings, itemId, jobId);
+                      await persistJobLinks([{ itemId, jobId }]);
                       handleRefreshJob(jobId);
                     }}
-                    onBulkLink={(links) => {
+                    onBulkLink={async (links) => {
                       setItemJobLinks((prev: Record<string, string>) => {
                         const next = { ...prev };
                         links.forEach(l => { next[l.itemId] = l.jobId; });
                         setLocalItem('stash_item_job_links', next).catch(console.error);
                         return next;
                       });
-                      links.forEach(l => saveCloudJobLink(apiSettings, l.itemId, l.jobId));
+                      await persistJobLinks(links);
                     }}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                   />

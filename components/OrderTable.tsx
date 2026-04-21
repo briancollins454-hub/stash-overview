@@ -32,10 +32,10 @@ export interface OrderTableProps {
     onTimelineScan?: (id: string) => void;
     onBulkScan?: (ids: string[]) => void;
     onPabblySync?: (decoJobId: string, orderNumber: string) => void;
-    onConfirmMatch?: (itemKey: string, decoId: string) => void;
+    onConfirmMatch?: (itemKey: string, decoId: string) => void | Promise<void>;
     onRefreshJob?: (jobId: string) => Promise<void>;
     onSearchJob?: (jobId: string) => Promise<DecoJob | null>;
-    onBulkMatch?: (mappings: { itemKey: string, decoId: string, jobId?: string }[], learnedPatterns?: Record<string, string>) => void;
+    onBulkMatch?: (mappings: { itemKey: string, decoId: string, jobId?: string }[], learnedPatterns?: Record<string, string>) => void | boolean | Promise<void | boolean>;
     onManualLink?: (orderIds: string[], jobId: string) => Promise<void>;
     onNavigateToJob?: (jobId: string) => void;
     onItemJobLink?: (orderNumber: string, itemId: string, jobId: string) => Promise<void>;

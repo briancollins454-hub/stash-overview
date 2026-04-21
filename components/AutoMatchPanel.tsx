@@ -8,7 +8,7 @@ interface Props {
   productMappings: Record<string, string>;
   physicalStock?: PhysicalStockItem[];
   referenceProducts?: ReferenceProduct[];
-  onApplyMatches: (matches: { itemKey: string; decoId: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => void;
+  onApplyMatches: (matches: { itemKey: string; decoId: string }[], jobId?: string, learnedPatterns?: Record<string, string>) => void | Promise<void>;
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 

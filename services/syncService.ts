@@ -274,6 +274,115 @@ export const saveCloudJobLink = async (settings: ApiSettings, order_id: string, 
     }
 };
 
+/**
+ * Strict single-row writes that RETURN success/failure so callers (and the
+ * pending-sync queue) can react to real errors instead of silently swallowing
+ * them. Each of these accepts an explicit updated_at so the caller decides
+ * timestamp ordering.
+ */
+export const saveCloudMappingStrict = async (item_id: string, deco_id: string, updated_at: string): Promise<boolean> => {
+    try {
+        const res = await fetchWithProxy('stash_mappings', 'POST', [{ item_id, deco_id, updated_at }], 'resolution=merge-duplicates');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] mapping upsert failed:', e.message || e);
+        return false;
+    }
+};
+
+export const saveCloudJobLinkStrict = async (order_id: string, job_id: string, updated_at: string): Promise<boolean> => {
+    try {
+        const res = await fetchWithProxy('stash_job_links', 'POST', [{ order_id, job_id, updated_at }], 'resolution=merge-duplicates');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] job link upsert failed:', e.message || e);
+        return false;
+    }
+};
+
+export const saveCloudProductPatternStrict = async (shopify_pattern: string, deco_pattern: string, updated_at: string): Promise<boolean> => {
+    try {
+        const res = await fetchWithProxy('stash_product_patterns', 'POST', [{ shopify_pattern, deco_pattern, updated_at }], 'resolution=merge-duplicates');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] pattern upsert failed:', e.message || e);
+        return false;
+    }
+};
+
+export const deleteCloudMapping = async (item_id: string): Promise<boolean> => {
+    try {
+        const encoded = encodeURIComponent(item_id);
+        const res = await fetchWithProxy(`stash_mappings?item_id=eq.${encoded}`, 'DELETE');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] mapping delete failed:', e.message || e);
+        return false;
+    }
+};
+
+export const deleteCloudJobLink = async (order_id: string): Promise<boolean> => {
+    try {
+        const encoded = encodeURIComponent(order_id);
+        const res = await fetchWithProxy(`stash_job_links?order_id=eq.${encoded}`, 'DELETE');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] job link delete failed:', e.message || e);
+        return false;
+    }
+};
+
+export const deleteCloudProductPattern = async (shopify_pattern: string): Promise<boolean> => {
+    try {
+        const encoded = encodeURIComponent(shopify_pattern);
+        const res = await fetchWithProxy(`stash_product_patterns?shopify_pattern=eq.${encoded}`, 'DELETE');
+        return res.ok;
+    } catch (e: any) {
+        console.error('[pending-sync] pattern delete failed:', e.message || e);
+        return false;
+    }
+};
+
+/**
+ * Fetch the latest updated_at for a single mapping row. Used by the
+ * pending-sync queue to skip pushes that would stomp on newer cloud state.
+ */
+export const getCloudMappingUpdatedAt = async (item_id: string): Promise<string | null> => {
+    try {
+        const encoded = encodeURIComponent(item_id);
+        const res = await fetchWithProxy(`stash_mappings?select=updated_at&item_id=eq.${encoded}`, 'GET');
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].updated_at) return String(rows[0].updated_at);
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+export const getCloudJobLinkUpdatedAt = async (order_id: string): Promise<string | null> => {
+    try {
+        const encoded = encodeURIComponent(order_id);
+        const res = await fetchWithProxy(`stash_job_links?select=updated_at&order_id=eq.${encoded}`, 'GET');
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].updated_at) return String(rows[0].updated_at);
+        return null;
+    } catch {
+        return null;
+    }
+};
+
+export const getCloudPatternUpdatedAt = async (shopify_pattern: string): Promise<string | null> => {
+    try {
+        const encoded = encodeURIComponent(shopify_pattern);
+        const res = await fetchWithProxy(`stash_product_patterns?select=updated_at&shopify_pattern=eq.${encoded}`, 'GET');
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && rows[0].updated_at) return String(rows[0].updated_at);
+        return null;
+    } catch {
+        return null;
+    }
+};
+
 export const saveCloudJobLinkBatch = async (settings: ApiSettings, links: Record<string, string>) => {
     const entries = Object.entries(links);
     if (entries.length === 0) return;

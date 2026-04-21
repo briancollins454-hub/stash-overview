@@ -20,11 +20,23 @@ export interface RealtimeCallbacks {
   onPatternChange: (shopifyPattern: string, decoPattern: string) => void;
   /** Orders or deco jobs changed — do a lightweight cloud pull */
   onDataChange: (table: 'stash_orders' | 'stash_deco_jobs') => void;
+  /**
+   * The websocket came back after being disconnected. The tab's local state
+   * may be stale (it missed every change while offline), so the consumer
+   * should pull fresh cloud data and flush any pending queued writes.
+   */
+  onReconnect?: () => void;
 }
 
 let client: SupabaseClient | null = null;
 let channel: RealtimeChannel | null = null;
 let isSubscribed = false;
+// Tracks whether we have EVER been connected on this channel. Flipping from
+// true → false → true indicates a reconnect (as opposed to the initial
+// connect, where the consumer already primed state from cloud).
+let hasEverConnected = false;
+let wasDisconnected = false;
+let onlineListenerInstalled = false;
 
 /**
  * Initialise the Supabase Realtime subscription. Safe to call multiple times —
@@ -100,12 +112,34 @@ export function startRealtime(
       isSubscribed = status === 'SUBSCRIBED';
       if (status === 'SUBSCRIBED') {
         console.log('[Realtime] Connected — live sync active');
+        // If we previously had a live connection and lost it, this is a
+        // RECONNECT — fire the callback so the consumer resyncs state that
+        // was changed while we were offline.
+        if (hasEverConnected && wasDisconnected) {
+          wasDisconnected = false;
+          try { callbacks.onReconnect?.(); } catch (e) { console.warn('[Realtime] onReconnect threw:', e); }
+        }
+        hasEverConnected = true;
       } else if (status === 'CHANNEL_ERROR') {
         console.warn('[Realtime] Channel error — will auto-reconnect');
+        if (hasEverConnected) wasDisconnected = true;
       } else if (status === 'TIMED_OUT') {
         console.warn('[Realtime] Subscription timed out — will retry');
+        if (hasEverConnected) wasDisconnected = true;
+      } else if (status === 'CLOSED') {
+        if (hasEverConnected) wasDisconnected = true;
       }
     });
+
+  // The browser-level online event is a reliable signal that connectivity
+  // came back (sleep/wake, wifi blip) even if Supabase's own status callback
+  // hasn't fired yet. We piggy-back on it so reconnect recovery is snappy.
+  if (typeof window !== 'undefined' && !onlineListenerInstalled) {
+    window.addEventListener('online', () => {
+      if (hasEverConnected && !isSubscribed) wasDisconnected = true;
+    });
+    onlineListenerInstalled = true;
+  }
 }
 
 // Debounce bulk data changes — multiple rows in quick succession (e.g. batch
@@ -135,6 +169,8 @@ export function stopRealtime(): void {
   channel = null;
   client = null;
   isSubscribed = false;
+  hasEverConnected = false;
+  wasDisconnected = false;
   // Clear any pending debounce timers
   Object.values(pendingTimers).forEach(clearTimeout);
   Object.keys(pendingTimers).forEach(k => delete pendingTimers[k]);

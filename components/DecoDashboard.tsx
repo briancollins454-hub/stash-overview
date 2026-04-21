@@ -19,10 +19,10 @@ interface DecoDashboardProps {
     orders: UnifiedOrder[];
     excludedTags: string[];
     onManualLink?: (orderId: string | string[], jobId: string) => Promise<void>;
-    onConfirmMatch?: (itemKey: string, decoId: string) => void;
+    onConfirmMatch?: (itemKey: string, decoId: string) => void | Promise<void>;
     onRefreshJob?: (jobId: string) => Promise<void>;
     onSearchJob?: (jobId: string) => Promise<DecoJob | null>;
-    onBulkMatch?: (mappings: { itemKey: string, decoId: string, jobId?: string }[], learnedPatterns?: Record<string, string>) => void;
+    onBulkMatch?: (mappings: { itemKey: string, decoId: string, jobId?: string }[], learnedPatterns?: Record<string, string>) => void | boolean | Promise<void | boolean>;
     initialSearchId?: string | null;
     onClearInitialSearch?: () => void;
     onTimelineScan?: (id: string) => void;
