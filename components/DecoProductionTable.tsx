@@ -385,40 +385,43 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         return counts;
     }, [enrichedJobs, statusFilter, searchTerm]);
 
-    const handleDownloadReport = () => {
-        // Escape a CSV field per RFC 4180 (wrap in quotes, double-up inner quotes)
+    const handleGenerateReport = () => {
+        // Basic HTML escaper for content we inject into the report.
         const esc = (v: string | number | null | undefined): string => {
             if (v === null || v === undefined) return '';
-            const s = String(v);
-            if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-            return s;
+            return String(v)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         };
 
-        // Per-type columns we break print items into (everything not EMB)
+        // Columns we break print items into (everything not EMB, NONE, or untyped)
         const printTypeCols = ['DTF', 'DTG', 'SCREEN', 'TRANSFER', 'UV', 'FLEX', 'VINYL', 'SUBLIMATION', 'FREEFORM'];
 
-        type Row = {
+        const isEmbItem = (i: DecoItem): boolean =>
+            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
+
+        type JobRow = {
             jobNumber: string;
             customer: string;
             jobName: string;
             status: string;
-            dateOrdered: string;
             dueDate: string;
-            daysUntilDue: string;
+            dueClass: '' | 'overdue' | 'due-soon';
             totalQty: number;
             embQty: number;
             embStitches: number;
             printQty: number;
             perType: Record<string, number>;
-            otherPrintQty: number; // print items with an unrecognised type
-            untypedQty: number;    // items with no decorationType at all
+            otherPrintQty: number;
+            untypedQty: number;
             jobValue: number;
+            estMinutes: number;
         };
 
-        const isEmbItem = (i: DecoItem) =>
-            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
-
-        const rows: Row[] = enrichedJobs.map(job => {
+        const rows: JobRow[] = enrichedJobs.map(job => {
             const perType: Record<string, number> = {};
             printTypeCols.forEach(t => { perType[t] = 0; });
             let embQty = 0;
@@ -426,7 +429,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             let printQty = 0;
             let otherPrintQty = 0;
             let untypedQty = 0;
-
             for (const item of job.items) {
                 const qty = item.quantity || 0;
                 if (isEmbItem(item)) {
@@ -439,24 +441,23 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 if (Object.prototype.hasOwnProperty.call(perType, dt)) {
                     perType[dt] += qty;
                     printQty += qty;
-                } else if (PRINT_TYPES.has(dt)) {
-                    // Recognised print type we don't have a column for — bucket into Other
-                    otherPrintQty += qty;
-                    printQty += qty;
                 } else {
                     otherPrintQty += qty;
                     printQty += qty;
                 }
             }
-
+            const dueClass: '' | 'overdue' | 'due-soon' =
+                job.daysUntilDue === null || job.daysUntilDue === undefined ? ''
+                    : job.daysUntilDue < 0 ? 'overdue'
+                    : job.daysUntilDue <= 3 ? 'due-soon'
+                    : '';
             return {
                 jobNumber: job.jobNumber,
                 customer: job.customerName,
                 jobName: job.jobName,
                 status: job.status,
-                dateOrdered: job.dateOrdered ? new Date(job.dateOrdered).toLocaleDateString('en-GB') : '',
-                dueDate: job.dateDue ? new Date(job.dateDue).toLocaleDateString('en-GB') : '',
-                daysUntilDue: job.daysUntilDue !== null && job.daysUntilDue !== undefined ? String(job.daysUntilDue) : '',
+                dueDate: job.dateDue ? new Date(job.dateDue).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
+                dueClass,
                 totalQty: job.totalQty,
                 embQty,
                 embStitches,
@@ -465,11 +466,13 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 otherPrintQty,
                 untypedQty,
                 jobValue: job.jobValue,
+                estMinutes: job.est.totalMinutes,
             };
         });
 
-        // Totals
+        // Grand totals
         const totals = rows.reduce((acc, r) => {
+            acc.jobs += 1;
             acc.totalQty += r.totalQty;
             acc.embQty += r.embQty;
             acc.embStitches += r.embStitches;
@@ -477,61 +480,276 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             acc.otherPrintQty += r.otherPrintQty;
             acc.untypedQty += r.untypedQty;
             acc.jobValue += r.jobValue;
+            acc.estMinutes += r.estMinutes;
             for (const t of printTypeCols) acc.perType[t] += r.perType[t];
             return acc;
         }, {
-            totalQty: 0, embQty: 0, embStitches: 0, printQty: 0, otherPrintQty: 0, untypedQty: 0, jobValue: 0,
+            jobs: 0, totalQty: 0, embQty: 0, embStitches: 0, printQty: 0, otherPrintQty: 0, untypedQty: 0, jobValue: 0, estMinutes: 0,
             perType: Object.fromEntries(printTypeCols.map(t => [t, 0])) as Record<string, number>,
         });
 
-        const headers = [
-            'Job #', 'Customer', 'Job Name', 'Status',
-            'Date Ordered', 'Due Date', 'Days Until Due',
-            'Total Qty',
-            'Embroidery Qty', 'Embroidery Stitches',
-            'Print Qty (Total)',
-            ...printTypeCols.map(t => `${t} Qty`),
-            'Other Print Qty', 'Untyped Qty',
-            'Job Value (GBP)',
+        // Status breakdown (mutually exclusive definitions match the tabs)
+        const statusGroups = [
+            { label: 'Awaiting Stock', count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
+            { label: 'Awaiting Processing', count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
+            { label: 'In Production', count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
+            { label: 'Partially Fulfilled', count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
+            { label: 'Awaiting Shipping', count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
+            { label: 'Other / On Hold', count: enrichedJobs.filter(j => j.status === 'On Hold' || j.status === 'Awaiting Artwork' || j.status === 'Awaiting Review' || j.status === 'Awaiting PO' || j.status === 'Not Ordered').length },
         ];
 
-        const lines: string[] = [];
-        lines.push(headers.map(esc).join(','));
-        for (const r of rows) {
-            lines.push([
-                r.jobNumber, r.customer, r.jobName, r.status,
-                r.dateOrdered, r.dueDate, r.daysUntilDue,
-                r.totalQty,
-                r.embQty, r.embStitches,
-                r.printQty,
-                ...printTypeCols.map(t => r.perType[t]),
-                r.otherPrintQty, r.untypedQty,
-                r.jobValue.toFixed(2),
-            ].map(esc).join(','));
+        // Decoration summary (Embroidery + per-print-type)
+        const embJobCount = rows.filter(r => r.embQty > 0).length;
+        const decorationRows = [
+            { label: 'Embroidery', jobs: embJobCount, qty: totals.embQty, extra: `${fmtStitches(totals.embStitches)} stitches`, highlight: true },
+            ...printTypeCols.map(t => ({
+                label: t,
+                jobs: rows.filter(r => r.perType[t] > 0).length,
+                qty: totals.perType[t],
+                extra: '',
+                highlight: false,
+            })),
+        ];
+        if (totals.otherPrintQty > 0) {
+            decorationRows.push({ label: 'Other Print', jobs: rows.filter(r => r.otherPrintQty > 0).length, qty: totals.otherPrintQty, extra: '', highlight: false });
         }
-        // Totals row
-        lines.push([
-            'TOTAL', `${rows.length} jobs`, '', '',
-            '', '', '',
-            totals.totalQty,
-            totals.embQty, totals.embStitches,
-            totals.printQty,
-            ...printTypeCols.map(t => totals.perType[t]),
-            totals.otherPrintQty, totals.untypedQty,
-            totals.jobValue.toFixed(2),
-        ].map(esc).join(','));
+        if (totals.untypedQty > 0) {
+            decorationRows.push({ label: 'Untyped', jobs: rows.filter(r => r.untypedQty > 0).length, qty: totals.untypedQty, extra: '', highlight: false });
+        }
 
-        const csv = lines.join('\r\n');
-        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        const today = new Date().toISOString().slice(0, 10);
-        a.href = url;
-        a.download = `production-report-${today}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+        const w = window.open('', '_blank');
+        if (!w) {
+            alert('Please allow pop-ups for this site to generate the report.');
+            return;
+        }
+
+        const styles = `
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            @page { size: A4; margin: 14mm 12mm; }
+            html, body { background: #fff; color: #1a1a2e; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 10px; line-height: 1.4; }
+            body { padding: 8px; }
+            .report-header { border-bottom: 2px solid #1a1a2e; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end; }
+            .brand { font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; color: #666; margin-bottom: 2px; }
+            h1 { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; color: #1a1a2e; }
+            .meta { text-align: right; font-size: 9px; color: #666; line-height: 1.5; }
+            .meta strong { color: #1a1a2e; font-size: 10px; }
+            h2 { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; color: #4f46e5; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+            h2:first-of-type { margin-top: 0; }
+            .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 4px; }
+            .kpi { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; background: #fafafc; page-break-inside: avoid; }
+            .kpi .label { font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; margin-bottom: 4px; }
+            .kpi .value { font-size: 18px; font-weight: 900; color: #1a1a2e; line-height: 1.1; }
+            .kpi .sub { font-size: 8px; color: #6b7280; margin-top: 2px; }
+            .kpi.accent-emb { background: #faf5ff; border-color: #d8b4fe; }
+            .kpi.accent-emb .label { color: #7e22ce; }
+            .kpi.accent-emb .value { color: #6b21a8; }
+            .kpi.accent-print { background: #ecfeff; border-color: #a5f3fc; }
+            .kpi.accent-print .label { color: #0e7490; }
+            .kpi.accent-print .value { color: #155e75; }
+            .kpi.accent-value { background: #f0fdf4; border-color: #bbf7d0; }
+            .kpi.accent-value .label { color: #15803d; }
+            .kpi.accent-value .value { color: #166534; }
+            .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+            .status-item { border: 1px solid #e5e7eb; border-radius: 5px; padding: 8px 10px; background: #fafafc; display: flex; justify-content: space-between; align-items: center; page-break-inside: avoid; }
+            .status-item .label { font-size: 9px; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.5px; }
+            .status-item .count { font-size: 16px; font-weight: 900; color: #1a1a2e; }
+            .status-item.zero { opacity: 0.4; }
+            table { width: 100%; border-collapse: collapse; font-size: 9px; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; }
+            th { background: #1a1a2e; color: #fff; text-align: left; padding: 6px 8px; font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; border: 1px solid #1a1a2e; }
+            th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+            td { padding: 5px 8px; border: 1px solid #e5e7eb; vertical-align: middle; }
+            tbody tr:nth-child(even) td { background: #fafafc; }
+            tr.total-row td { background: #1a1a2e !important; color: #fff; font-weight: 900; border-color: #1a1a2e; }
+            tr.highlight td { background: #faf5ff !important; font-weight: 700; }
+            tr.highlight.total-row td { background: #1a1a2e !important; }
+            td.overdue { color: #b91c1c; font-weight: 800; }
+            td.due-soon { color: #c2410c; font-weight: 700; }
+            .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid; }
+            .badge-status-stock { background: #fffbeb; color: #b45309; border-color: #fcd34d; }
+            .badge-status-processing { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+            .badge-status-production { background: #eef2ff; color: #4338ca; border-color: #a5b4fc; }
+            .badge-status-partial { background: #fff7ed; color: #c2410c; border-color: #fdba74; }
+            .badge-status-ready { background: #ecfdf5; color: #047857; border-color: #6ee7b7; }
+            .badge-status-other { background: #f9fafb; color: #6b7280; border-color: #d1d5db; }
+            .print-footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 8px; color: #9ca3af; text-align: center; letter-spacing: 0.5px; }
+            .empty { padding: 30px; text-align: center; color: #9ca3af; font-size: 11px; }
+            @media print {
+                body { padding: 0; }
+                .no-print { display: none !important; }
+            }
+            .actions { margin-bottom: 14px; padding: 8px 12px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
+            .actions span { font-size: 10px; color: #3730a3; }
+            .actions button { background: #4f46e5; color: #fff; border: none; padding: 6px 14px; border-radius: 5px; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; cursor: pointer; }
+            .actions button:hover { background: #4338ca; }
+        `;
+
+        const statusBadgeClass = (status: string): string => {
+            if (status === 'Awaiting Stock') return 'badge-status-stock';
+            if (status === 'Awaiting Processing') return 'badge-status-processing';
+            if (PRODUCTION_STATUSES.has(status)) return 'badge-status-production';
+            if (status === 'Ready for Shipping') return 'badge-status-ready';
+            return 'badge-status-other';
+        };
+
+        const kpiHtml = `
+            <div class="kpi-grid">
+                <div class="kpi">
+                    <div class="label">Active Jobs</div>
+                    <div class="value">${totals.jobs}</div>
+                    <div class="sub">${totals.totalQty.toLocaleString()} items total</div>
+                </div>
+                <div class="kpi accent-emb">
+                    <div class="label">Embroidery</div>
+                    <div class="value">${totals.embQty.toLocaleString()}</div>
+                    <div class="sub">${fmtStitches(totals.embStitches)} stitches · ${embJobCount} jobs</div>
+                </div>
+                <div class="kpi accent-print">
+                    <div class="label">Print</div>
+                    <div class="value">${totals.printQty.toLocaleString()}</div>
+                    <div class="sub">${rows.filter(r => r.printQty > 0).length} jobs</div>
+                </div>
+                <div class="kpi">
+                    <div class="label">Est. Time</div>
+                    <div class="value">${fmtTime(totals.estMinutes)}</div>
+                    <div class="sub">production hours</div>
+                </div>
+                <div class="kpi accent-value">
+                    <div class="label">Pipeline Value</div>
+                    <div class="value">${fmtK(totals.jobValue)}</div>
+                    <div class="sub">across all active jobs</div>
+                </div>
+            </div>
+        `;
+
+        const statusHtml = `
+            <div class="status-grid">
+                ${statusGroups.map(g => `
+                    <div class="status-item${g.count === 0 ? ' zero' : ''}">
+                        <span class="label">${esc(g.label)}</span>
+                        <span class="count">${g.count}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        const decorationTableHtml = `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Decoration Type</th>
+                        <th class="num">Jobs</th>
+                        <th class="num">Items</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${decorationRows.map(r => `
+                        <tr class="${r.highlight ? 'highlight' : ''}">
+                            <td><strong>${esc(r.label)}</strong></td>
+                            <td class="num">${r.jobs}</td>
+                            <td class="num">${r.qty.toLocaleString()}</td>
+                            <td>${esc(r.extra)}</td>
+                        </tr>
+                    `).join('')}
+                    <tr class="total-row">
+                        <td>TOTAL</td>
+                        <td class="num">—</td>
+                        <td class="num">${(totals.embQty + totals.printQty + totals.otherPrintQty + totals.untypedQty).toLocaleString()}</td>
+                        <td>${fmtStitches(totals.embStitches)} stitches (embroidery)</td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
+
+        const jobsTableHtml = rows.length === 0 ? '<div class="empty">No active jobs to report on.</div>' : `
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job #</th>
+                        <th>Customer</th>
+                        <th>Status</th>
+                        <th>Due</th>
+                        <th class="num">Items</th>
+                        <th class="num">Embroidery</th>
+                        <th class="num">Stitches</th>
+                        <th class="num">Print</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows.map(r => `
+                        <tr>
+                            <td><strong>#${esc(r.jobNumber)}</strong></td>
+                            <td>${esc(r.customer)}</td>
+                            <td><span class="badge ${statusBadgeClass(r.status)}">${esc(r.status)}</span></td>
+                            <td class="${r.dueClass}">${esc(r.dueDate)}</td>
+                            <td class="num">${r.totalQty}</td>
+                            <td class="num">${r.embQty > 0 ? r.embQty.toLocaleString() : '—'}</td>
+                            <td class="num">${r.embStitches > 0 ? fmtStitches(r.embStitches) : '—'}</td>
+                            <td class="num">${r.printQty > 0 ? r.printQty.toLocaleString() : '—'}</td>
+                            <td class="num">${r.jobValue > 0 ? fmtK(r.jobValue) : '—'}</td>
+                        </tr>
+                    `).join('')}
+                    <tr class="total-row">
+                        <td colspan="4">TOTAL · ${totals.jobs} jobs</td>
+                        <td class="num">${totals.totalQty.toLocaleString()}</td>
+                        <td class="num">${totals.embQty.toLocaleString()}</td>
+                        <td class="num">${fmtStitches(totals.embStitches)}</td>
+                        <td class="num">${totals.printQty.toLocaleString()}</td>
+                        <td class="num">${fmtK(totals.jobValue)}</td>
+                    </tr>
+                </tbody>
+            </table>
+        `;
+
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Production Report — ${esc(dateStr)}</title><style>${styles}</style></head><body>
+            <div class="actions no-print">
+                <span>Use your browser's print dialog to save as PDF or send to the printer.</span>
+                <button onclick="window.print()">Print / Save as PDF</button>
+            </div>
+            <div class="report-header">
+                <div>
+                    <div class="brand">Stash Production</div>
+                    <h1>Production Report</h1>
+                </div>
+                <div class="meta">
+                    <strong>${esc(dateStr)}</strong><br>
+                    Generated ${esc(timeStr)}<br>
+                    ${totals.jobs} active ${totals.jobs === 1 ? 'job' : 'jobs'}
+                </div>
+            </div>
+
+            <h2>Executive Summary</h2>
+            ${kpiHtml}
+
+            <h2>Status Breakdown</h2>
+            ${statusHtml}
+
+            <h2>Decoration Summary</h2>
+            ${decorationTableHtml}
+
+            <h2>Job Detail</h2>
+            ${jobsTableHtml}
+
+            <div class="print-footer">
+                Stash Production Report · ${esc(dateStr)} · ${esc(timeStr)} · ${totals.jobs} jobs · ${fmtK(totals.jobValue)} pipeline
+            </div>
+        </body></html>`;
+
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        // Auto-trigger the print dialog once the document has laid out.
+        setTimeout(() => {
+            try { w.print(); } catch { /* user can click the button */ }
+        }, 250);
     };
 
     const handlePrint = () => {
@@ -673,11 +891,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             </button>
                         )}
                         <button
-                            onClick={handleDownloadReport}
+                            onClick={handleGenerateReport}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
-                            title="Download CSV report of all active jobs with embroidery & print totals"
+                            title="Generate production report — opens a PDF-ready page with embroidery & print totals, status breakdown, and per-job detail"
                         >
-                            <FileDown className="w-3.5 h-3.5" /> Report
+                            <FileDown className="w-3.5 h-3.5" /> Report (PDF)
                         </button>
                         <button
                             onClick={handlePrint}
