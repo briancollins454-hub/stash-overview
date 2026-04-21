@@ -22,6 +22,8 @@ interface InventoryItem {
   variantTitle: string;
   displayName: string;
   price: string;
+  compareAtPrice?: string;
+  cost?: string;
   productId: string;
   productTitle: string;
   vendor: string;
@@ -48,6 +50,8 @@ interface SearchProduct {
     variantId: string;
     title: string;
     price: string;
+    compareAtPrice?: string;
+    cost?: string;
     displayName: string;
     barcode: string;
     sku: string;
@@ -595,8 +599,10 @@ const ShopifyInventory: React.FC = () => {
                       <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-center cursor-pointer hover:text-slate-700" onClick={() => toggleSort('daysLeft')}>
                         Days Left {sortField === 'daysLeft' && (sortDir === 'asc' ? '↑' : '↓')}
                       </th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Cost</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Compare</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Price</th>
                       <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-center">Status</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-center">Price</th>
                       <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 w-16"></th>
                     </tr>
                   </thead>
@@ -633,14 +639,20 @@ const ShopifyInventory: React.FC = () => {
                             <span className={`font-medium ${item.daysOfStock <= 7 ? 'text-red-600' : item.daysOfStock <= 14 ? 'text-orange-600' : item.daysOfStock <= 30 ? 'text-amber-600' : 'text-slate-600'}`}>{item.daysOfStock}d</span>
                           ) : '—'}
                         </td>
-                        <td className="px-3 py-2 text-center">{getStockBadge(item.available, item.daysOfStock)}</td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-2 text-right">
+                          <span className="text-slate-600">{item.cost ? `£${parseFloat(item.cost).toFixed(2)}` : '—'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <span className="text-slate-400 line-through">{item.compareAtPrice ? `£${parseFloat(item.compareAtPrice).toFixed(2)}` : '—'}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
                           {editingId === item.inventoryItemId ? (
                             <input type="text" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" />
                           ) : (
-                            <span className="text-slate-600">£{parseFloat(item.price || '0').toFixed(2)}</span>
+                            <span className="text-slate-800 font-medium">£{parseFloat(item.price || '0').toFixed(2)}</span>
                           )}
                         </td>
+                        <td className="px-3 py-2 text-center">{getStockBadge(item.available, item.daysOfStock)}</td>
                         <td className="px-3 py-2 text-center">
                           {editingId === item.inventoryItemId ? (
                             <div className="flex gap-1">
@@ -768,8 +780,10 @@ const ShopifyInventory: React.FC = () => {
                         <th className="px-4 py-2 text-center">Available</th>
                         <th className="px-4 py-2 text-center">On Hand</th>
                         <th className="px-4 py-2 text-center">Committed</th>
+                        <th className="px-4 py-2 text-right">Cost</th>
+                        <th className="px-4 py-2 text-right">Compare</th>
+                        <th className="px-4 py-2 text-right">Price</th>
                         <th className="px-4 py-2 text-center">Status</th>
-                        <th className="px-4 py-2 text-center">Price</th>
                         <th className="px-4 py-2 w-16"></th>
                       </tr>
                     </thead>
@@ -787,14 +801,20 @@ const ShopifyInventory: React.FC = () => {
                           </td>
                           <td className="px-4 py-2 text-center text-slate-500">{v.onHand}</td>
                           <td className="px-4 py-2 text-center text-slate-500">{v.committed}</td>
-                          <td className="px-4 py-2 text-center">{getStockBadge(v.available)}</td>
-                          <td className="px-4 py-2 text-center">
+                          <td className="px-4 py-2 text-right">
+                            <span className="text-slate-600">{v.cost ? `£${parseFloat(v.cost).toFixed(2)}` : '—'}</span>
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <span className="text-slate-400 line-through">{v.compareAtPrice ? `£${parseFloat(v.compareAtPrice).toFixed(2)}` : '—'}</span>
+                          </td>
+                          <td className="px-4 py-2 text-right">
                             {editingId === v.inventoryItemId ? (
                               <input type="text" value={editPrice} onChange={e => setEditPrice(e.target.value)} className="w-16 border rounded px-2 py-1 text-center text-sm" />
                             ) : (
-                              <span className="text-slate-600">£{parseFloat(v.price || '0').toFixed(2)}</span>
+                              <span className="text-slate-800 font-medium">£{parseFloat(v.price || '0').toFixed(2)}</span>
                             )}
                           </td>
+                          <td className="px-4 py-2 text-center">{getStockBadge(v.available)}</td>
                           <td className="px-4 py-2 text-center">
                             {editingId === v.inventoryItemId ? (
                               <div className="flex gap-1">
