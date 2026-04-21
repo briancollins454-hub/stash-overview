@@ -625,21 +625,25 @@ const App: React.FC = () => {
                 const nowMs = Date.now();
                 const STALE_AGE_MS = 24 * 60 * 60 * 1000;
                 const RECONCILE_CAP = 500;
-                const staleCandidates: ShopifyOrder[] = [];
-                let totalStale = 0;
+                // Collect ALL candidates, then prioritise oldest updatedAt first —
+                // those are most likely to be truly fulfilled and least likely to
+                // collide with in-flight webhooks. Guarantees any given stale order
+                // is processed within a bounded number of syncs regardless of where
+                // it sits in cache insertion order.
+                const allStale: ShopifyOrder[] = [];
                 for (const o of orderMap.values()) {
                     const isLocallyOpen = o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked';
                     if (!isLocallyOpen) continue;
                     if (currentUnfulfilledIds.has(o.id)) continue;
                     const updatedMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
                     if (!updatedMs || nowMs - updatedMs < STALE_AGE_MS) continue;
-                    totalStale++;
-                    if (staleCandidates.length < RECONCILE_CAP) {
-                        staleCandidates.push(o);
-                    }
+                    allStale.push(o);
                 }
+                allStale.sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+                const totalStale = allStale.length;
+                const staleCandidates = allStale.slice(0, RECONCILE_CAP);
 
-                console.log(`[sync] stale-unfulfilled: ${totalStale} found, ${staleCandidates.length} scheduled for reconcile (cap ${RECONCILE_CAP})`);
+                console.log(`[sync] stale-unfulfilled: ${totalStale} found, ${staleCandidates.length} scheduled for reconcile (cap ${RECONCILE_CAP}, oldest-first)`);
 
                 if (staleCandidates.length > 0) {
                     setSyncStatusMsg(`Reconciling ${staleCandidates.length} stale order${staleCandidates.length === 1 ? '' : 's'}...`);
