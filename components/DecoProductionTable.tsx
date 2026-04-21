@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown, FileSpreadsheet } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown, FileSpreadsheet, Settings2, Eye, EyeOff, Lock } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -163,6 +163,127 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
     awaitingShipping: 'Awaiting Shipping',
 };
 
+// ─── Report field visibility config ─────────────────────────────────────
+// Controls which sections / columns appear on exported PDFs and CSVs.
+// Persisted to localStorage per-browser so each user keeps their preference.
+interface ReportFieldConfig {
+    // PDF-only summary sections
+    showExecutiveSummary: boolean;   // KPI tiles at the top
+    showStatusBreakdown: boolean;    // status count grid
+    showDecorationSummary: boolean;  // emb + per-print-type table
+    // Column / field visibility (both PDF and CSV)
+    showFinancials: boolean;         // pipeline value, per-job value
+    showCustomer: boolean;           // customer name column
+    showJobName: boolean;            // job name column (CSV only; PDF doesn't show it currently)
+    showStatus: boolean;             // status column
+    showDateOrdered: boolean;        // CSV column only
+    showDueDate: boolean;            // due date column
+    showDaysUntilDue: boolean;       // CSV column only
+    showTotalItems: boolean;         // total items column (full report job detail)
+    showDecoBreakdown: boolean;      // embroidery qty / print qty / per-type columns
+    showEstTime: boolean;            // estimated production time
+    showStitches: boolean;           // stitch counts
+    showAlsoOnJob: boolean;          // mixed-decoration indicator (type-specific reports)
+}
+
+const FULL_FIELD_CONFIG: ReportFieldConfig = {
+    showExecutiveSummary: true,
+    showStatusBreakdown: true,
+    showDecorationSummary: true,
+    showFinancials: true,
+    showCustomer: true,
+    showJobName: true,
+    showStatus: true,
+    showDateOrdered: true,
+    showDueDate: true,
+    showDaysUntilDue: true,
+    showTotalItems: true,
+    showDecoBreakdown: true,
+    showEstTime: true,
+    showStitches: true,
+    showAlsoOnJob: true,
+};
+
+// Department-safe preset: no financials, no pipeline KPIs, no status/deco summaries.
+// Keeps what shop-floor staff actually need: who, when, how much of their work.
+const DEPARTMENT_FIELD_CONFIG: ReportFieldConfig = {
+    showExecutiveSummary: false,
+    showStatusBreakdown: false,
+    showDecorationSummary: false,
+    showFinancials: false,
+    showCustomer: true,
+    showJobName: true,
+    showStatus: true,
+    showDateOrdered: false,
+    showDueDate: true,
+    showDaysUntilDue: false,
+    showTotalItems: false,
+    showDecoBreakdown: true,
+    showEstTime: true,
+    showStitches: true,
+    showAlsoOnJob: true,
+};
+
+// Very minimal: barcode-ready sheet — Job #, Due, Items only.
+const MINIMAL_FIELD_CONFIG: ReportFieldConfig = {
+    showExecutiveSummary: false,
+    showStatusBreakdown: false,
+    showDecorationSummary: false,
+    showFinancials: false,
+    showCustomer: true,
+    showJobName: false,
+    showStatus: false,
+    showDateOrdered: false,
+    showDueDate: true,
+    showDaysUntilDue: false,
+    showTotalItems: false,
+    showDecoBreakdown: true,
+    showEstTime: false,
+    showStitches: false,
+    showAlsoOnJob: true,
+};
+
+const FIELD_CONFIG_STORAGE_KEY = 'stash_production_report_fields';
+
+const loadFieldConfig = (): ReportFieldConfig => {
+    try {
+        const raw = typeof window !== 'undefined' ? window.localStorage.getItem(FIELD_CONFIG_STORAGE_KEY) : null;
+        if (!raw) return FULL_FIELD_CONFIG;
+        const parsed = JSON.parse(raw);
+        return { ...FULL_FIELD_CONFIG, ...parsed };
+    } catch { return FULL_FIELD_CONFIG; }
+};
+
+const saveFieldConfig = (cfg: ReportFieldConfig) => {
+    try {
+        if (typeof window !== 'undefined') window.localStorage.setItem(FIELD_CONFIG_STORAGE_KEY, JSON.stringify(cfg));
+    } catch { /* storage may be unavailable */ }
+};
+
+// Readable labels for the field filter UI.
+const FIELD_LABELS: { key: keyof ReportFieldConfig; label: string; group: 'sections' | 'columns' | 'sensitive' }[] = [
+    { key: 'showFinancials',         label: 'Financial info (pipeline + job value)', group: 'sensitive' },
+    { key: 'showExecutiveSummary',   label: 'Executive summary (KPI tiles)',         group: 'sections' },
+    { key: 'showStatusBreakdown',    label: 'Status breakdown grid',                 group: 'sections' },
+    { key: 'showDecorationSummary',  label: 'Decoration type summary table',         group: 'sections' },
+    { key: 'showCustomer',           label: 'Customer name',                         group: 'columns' },
+    { key: 'showJobName',            label: 'Job name',                              group: 'columns' },
+    { key: 'showStatus',             label: 'Status',                                group: 'columns' },
+    { key: 'showDueDate',            label: 'Due date',                              group: 'columns' },
+    { key: 'showDateOrdered',        label: 'Date ordered (CSV)',                    group: 'columns' },
+    { key: 'showDaysUntilDue',       label: 'Days until due (CSV)',                  group: 'columns' },
+    { key: 'showTotalItems',         label: 'Total items per job',                   group: 'columns' },
+    { key: 'showDecoBreakdown',      label: 'Decoration breakdown (EMB / Print / per-type)', group: 'columns' },
+    { key: 'showStitches',           label: 'Stitch counts',                         group: 'columns' },
+    { key: 'showEstTime',            label: 'Estimated production time',             group: 'columns' },
+    { key: 'showAlsoOnJob',          label: 'Mixed-decoration indicator',            group: 'columns' },
+];
+
+const configsEqual = (a: ReportFieldConfig, b: ReportFieldConfig): boolean => {
+    for (const f of FIELD_LABELS) if (a[f.key] !== b[f.key]) return false;
+    return true;
+};
+
 export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnrichProduction, isEnriching, enrichMsg }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>('due');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -177,6 +298,33 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const [orderedFrom, setOrderedFrom] = useState('');
     const [orderedTo, setOrderedTo] = useState('');
     const tableRef = useRef<HTMLDivElement>(null);
+
+    // Report field visibility — persisted per-browser.
+    const [fieldConfig, setFieldConfig] = useState<ReportFieldConfig>(() => loadFieldConfig());
+    const [showFieldPanel, setShowFieldPanel] = useState(false);
+    const fieldPanelRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => { saveFieldConfig(fieldConfig); }, [fieldConfig]);
+
+    // Close the field panel when the user clicks outside of it.
+    useEffect(() => {
+        if (!showFieldPanel) return;
+        const handler = (e: MouseEvent) => {
+            if (fieldPanelRef.current && !fieldPanelRef.current.contains(e.target as Node)) {
+                setShowFieldPanel(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [showFieldPanel]);
+
+    // Active preset name for display (or "Custom").
+    const activePresetName = useMemo(() => {
+        if (configsEqual(fieldConfig, FULL_FIELD_CONFIG)) return 'Full';
+        if (configsEqual(fieldConfig, DEPARTMENT_FIELD_CONFIG)) return 'Department';
+        if (configsEqual(fieldConfig, MINIMAL_FIELD_CONFIG)) return 'Minimal';
+        return 'Custom';
+    }, [fieldConfig]);
 
     const now = useMemo(() => new Date(), []);
 
@@ -445,6 +593,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     }, [statusFilters]);
 
     const handleGenerateReport = () => {
+        const cfg = fieldConfig; // snapshot so helpers below see a stable reference
         // Basic HTML escaper for content we inject into the report.
         const esc = (v: string | number | null | undefined): string => {
             if (v === null || v === undefined) return '';
@@ -657,88 +806,132 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 return acc;
             }, { jobs: 0, qty: 0, stitches: 0, minutes: 0, value: 0, mixedJobs: 0 });
 
-            const kpiHtml = isEmbReport ? `
-                <div class="kpi-grid cols-4">
-                    <div class="kpi accent-emb">
-                        <div class="label">Jobs</div>
-                        <div class="value">${totals.jobs}</div>
-                        <div class="sub">with embroidery work</div>
-                    </div>
-                    <div class="kpi accent-emb">
-                        <div class="label">Items to Embroider</div>
-                        <div class="value">${totals.qty.toLocaleString()}</div>
-                        <div class="sub">total pieces</div>
-                    </div>
-                    <div class="kpi accent-emb">
-                        <div class="label">Total Stitches</div>
-                        <div class="value">${fmtStitches(totals.stitches)}</div>
-                        <div class="sub">across all items</div>
-                    </div>
-                    <div class="kpi">
-                        <div class="label">Est. Time</div>
-                        <div class="value">${fmtTime(totals.minutes)}</div>
-                        <div class="sub">embroidery only</div>
-                    </div>
+            // KPI tiles — conditional on cfg.
+            type KpiTile = { label: string; value: string; sub: string; cls: string };
+            const kpiTiles: KpiTile[] = [];
+            kpiTiles.push({
+                label: 'Jobs',
+                value: String(totals.jobs),
+                sub: isEmbReport ? 'with embroidery work' : `with ${typeLabel} work`,
+                cls: isEmbReport ? 'accent-emb' : 'accent-print',
+            });
+            kpiTiles.push({
+                label: isEmbReport ? 'Items to Embroider' : 'Items',
+                value: totals.qty.toLocaleString(),
+                sub: 'total pieces',
+                cls: isEmbReport ? 'accent-emb' : 'accent-print',
+            });
+            if (isEmbReport && cfg.showStitches) {
+                kpiTiles.push({
+                    label: 'Total Stitches',
+                    value: fmtStitches(totals.stitches),
+                    sub: 'across all items',
+                    cls: 'accent-emb',
+                });
+            }
+            if (cfg.showEstTime) {
+                kpiTiles.push({
+                    label: 'Est. Time',
+                    value: fmtTime(totals.minutes),
+                    sub: isEmbReport ? 'embroidery only' : `${typeLabel} only`,
+                    cls: '',
+                });
+            }
+            if (cfg.showFinancials) {
+                kpiTiles.push({
+                    label: 'Pipeline Value',
+                    value: fmtK(totals.value),
+                    sub: `${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'} total`,
+                    cls: 'accent-value',
+                });
+            }
+
+            const kpiHtml = (cfg.showExecutiveSummary && kpiTiles.length > 0) ? `
+                <div class="kpi-grid cols-${Math.min(kpiTiles.length, 5)}">
+                    ${kpiTiles.map(t => `
+                        <div class="kpi ${t.cls}">
+                            <div class="label">${esc(t.label)}</div>
+                            <div class="value">${esc(t.value)}</div>
+                            <div class="sub">${esc(t.sub)}</div>
+                        </div>
+                    `).join('')}
                 </div>
-            ` : `
-                <div class="kpi-grid cols-4">
-                    <div class="kpi accent-print">
-                        <div class="label">Jobs</div>
-                        <div class="value">${totals.jobs}</div>
-                        <div class="sub">with ${esc(typeLabel)} work</div>
-                    </div>
-                    <div class="kpi accent-print">
-                        <div class="label">Items</div>
-                        <div class="value">${totals.qty.toLocaleString()}</div>
-                        <div class="sub">total pieces</div>
-                    </div>
-                    <div class="kpi">
-                        <div class="label">Est. Time</div>
-                        <div class="value">${fmtTime(totals.minutes)}</div>
-                        <div class="sub">${esc(typeLabel)} only</div>
-                    </div>
-                    <div class="kpi accent-value">
-                        <div class="label">Pipeline Value</div>
-                        <div class="value">${fmtK(totals.value)}</div>
-                        <div class="sub">${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'} total</div>
-                    </div>
-                </div>
-            `;
+            ` : '';
+
+            // Build job-detail columns dynamically so everything stays aligned.
+            type ColDef = {
+                header: string;
+                numeric?: boolean;
+                renderCell: (r: TypeRow) => string;
+                renderTotal: () => string;
+                cellClass?: (r: TypeRow) => string;
+            };
+            const cols: ColDef[] = [
+                {
+                    header: 'Job #',
+                    renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>`,
+                    renderTotal: () => `TOTAL · ${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'}`,
+                },
+            ];
+            if (cfg.showCustomer) cols.push({
+                header: 'Customer',
+                renderCell: r => esc(r.customer),
+                renderTotal: () => '',
+            });
+            if (cfg.showJobName) cols.push({
+                header: 'Job Name',
+                renderCell: r => esc(r.jobName),
+                renderTotal: () => '',
+            });
+            if (cfg.showStatus) cols.push({
+                header: 'Status',
+                renderCell: r => `<span class="badge ${statusBadgeClass(r.status)}">${esc(r.status)}</span>`,
+                renderTotal: () => '',
+            });
+            if (cfg.showDueDate) cols.push({
+                header: 'Due',
+                renderCell: r => esc(r.dueDate),
+                renderTotal: () => '',
+                cellClass: r => r.dueClass,
+            });
+            cols.push({
+                header: `${typeLabel} Items`,
+                numeric: true,
+                renderCell: r => `${r.typeQty.toLocaleString()}${cfg.showTotalItems && r.jobTotalQty > r.typeQty ? ` <span style="color:#9ca3af;font-weight:400;">/ ${r.jobTotalQty}</span>` : ''}`,
+                renderTotal: () => totals.qty.toLocaleString(),
+            });
+            if (isEmbReport && cfg.showStitches) cols.push({
+                header: 'Stitches',
+                numeric: true,
+                renderCell: r => r.typeStitches > 0 ? fmtStitches(r.typeStitches) : '—',
+                renderTotal: () => fmtStitches(totals.stitches),
+            });
+            if (cfg.showEstTime) cols.push({
+                header: 'Est. Time',
+                numeric: true,
+                renderCell: r => r.typeMinutes > 0 ? fmtTime(r.typeMinutes) : '—',
+                renderTotal: () => fmtTime(totals.minutes),
+            });
+            if (cfg.showAlsoOnJob) cols.push({
+                header: 'Also on Job',
+                renderCell: r => r.otherTypes.length === 0 ? '—' : `<strong>Mixed:</strong> ${r.otherTypes.map(t => esc(t)).join(', ')}`,
+                renderTotal: () => totals.mixedJobs > 0 ? `${totals.mixedJobs} mixed` : '—',
+                cellClass: () => 'mixed-job',
+            });
 
             const tableHtml = typeRows.length === 0 ? `<div class="empty">No active ${esc(typeLabel)} jobs to report on.</div>` : `
                 <table>
                     <thead>
-                        <tr>
-                            <th>Job #</th>
-                            <th>Customer</th>
-                            <th>Status</th>
-                            <th>Due</th>
-                            <th class="num">${esc(typeLabel)} Items</th>
-                            ${isEmbReport ? '<th class="num">Stitches</th>' : ''}
-                            <th class="num">Est. Time</th>
-                            <th>Also on Job</th>
-                        </tr>
+                        <tr>${cols.map(c => `<th${c.numeric ? ' class="num"' : ''}>${esc(c.header)}</th>`).join('')}</tr>
                     </thead>
                     <tbody>
                         ${typeRows.map(r => `
-                            <tr>
-                                <td><strong>#${esc(r.jobNumber)}</strong></td>
-                                <td>${esc(r.customer)}</td>
-                                <td><span class="badge ${statusBadgeClass(r.status)}">${esc(r.status)}</span></td>
-                                <td class="${r.dueClass}">${esc(r.dueDate)}</td>
-                                <td class="num">${r.typeQty.toLocaleString()}${r.jobTotalQty > r.typeQty ? ` <span style="color:#9ca3af;font-weight:400;">/ ${r.jobTotalQty}</span>` : ''}</td>
-                                ${isEmbReport ? `<td class="num">${r.typeStitches > 0 ? fmtStitches(r.typeStitches) : '—'}</td>` : ''}
-                                <td class="num">${r.typeMinutes > 0 ? fmtTime(r.typeMinutes) : '—'}</td>
-                                <td class="mixed-job">${r.otherTypes.length === 0 ? '—' : `<strong>Mixed:</strong> ${r.otherTypes.map(t => esc(t)).join(', ')}`}</td>
-                            </tr>
+                            <tr>${cols.map(c => {
+                                const classes = [c.numeric ? 'num' : '', c.cellClass ? c.cellClass(r) : ''].filter(Boolean).join(' ');
+                                return `<td${classes ? ` class="${classes}"` : ''}>${c.renderCell(r)}</td>`;
+                            }).join('')}</tr>
                         `).join('')}
-                        <tr class="total-row">
-                            <td colspan="4">TOTAL · ${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'}</td>
-                            <td class="num">${totals.qty.toLocaleString()}</td>
-                            ${isEmbReport ? `<td class="num">${fmtStitches(totals.stitches)}</td>` : ''}
-                            <td class="num">${fmtTime(totals.minutes)}</td>
-                            <td>${totals.mixedJobs > 0 ? `${totals.mixedJobs} mixed` : '—'}</td>
-                        </tr>
+                        <tr class="total-row">${cols.map((c, i) => `<td${c.numeric ? ' class="num"' : ''}>${i === 0 ? c.renderTotal() : c.renderTotal()}</td>`).join('')}</tr>
                     </tbody>
                 </table>
             `;
@@ -768,10 +961,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     </div>
                 </div>
 
-                ${mixedNote}
+                ${cfg.showAlsoOnJob ? mixedNote : ''}
 
-                <h2>Summary</h2>
-                ${kpiHtml}
+                ${kpiHtml ? `<h2>Summary</h2>${kpiHtml}` : ''}
 
                 <h2>Job Detail</h2>
                 ${tableHtml}
@@ -902,33 +1094,55 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         // ──────────────────────────────────────────────────────────────────
         // FULL REPORT (no type filter)
         // ──────────────────────────────────────────────────────────────────
-        const kpiHtml = `
-            <div class="kpi-grid cols-5">
-                <div class="kpi">
-                    <div class="label">Active Jobs</div>
-                    <div class="value">${totals.jobs}</div>
-                    <div class="sub">${totals.totalQty.toLocaleString()} items total</div>
-                </div>
-                <div class="kpi accent-emb">
-                    <div class="label">Embroidery</div>
-                    <div class="value">${totals.embQty.toLocaleString()}</div>
-                    <div class="sub">${fmtStitches(totals.embStitches)} stitches · ${embJobCount} jobs</div>
-                </div>
-                <div class="kpi accent-print">
-                    <div class="label">Print</div>
-                    <div class="value">${totals.printQty.toLocaleString()}</div>
-                    <div class="sub">${rows.filter(r => r.printQty > 0).length} jobs</div>
-                </div>
-                <div class="kpi">
-                    <div class="label">Est. Time</div>
-                    <div class="value">${fmtTime(totals.estMinutes)}</div>
-                    <div class="sub">production hours</div>
-                </div>
-                <div class="kpi accent-value">
-                    <div class="label">Pipeline Value</div>
-                    <div class="value">${fmtK(totals.jobValue)}</div>
-                    <div class="sub">across all active jobs</div>
-                </div>
+
+        // Executive Summary KPI tiles — conditional on cfg.
+        type KpiTile = { label: string; value: string; sub: string; cls: string };
+        const summaryTiles: KpiTile[] = [];
+        summaryTiles.push({
+            label: 'Active Jobs',
+            value: String(totals.jobs),
+            sub: `${totals.totalQty.toLocaleString()} items total`,
+            cls: '',
+        });
+        if (cfg.showDecoBreakdown) {
+            summaryTiles.push({
+                label: 'Embroidery',
+                value: totals.embQty.toLocaleString(),
+                sub: `${cfg.showStitches ? fmtStitches(totals.embStitches) + ' stitches · ' : ''}${embJobCount} jobs`,
+                cls: 'accent-emb',
+            });
+            summaryTiles.push({
+                label: 'Print',
+                value: totals.printQty.toLocaleString(),
+                sub: `${rows.filter(r => r.printQty > 0).length} jobs`,
+                cls: 'accent-print',
+            });
+        }
+        if (cfg.showEstTime) {
+            summaryTiles.push({
+                label: 'Est. Time',
+                value: fmtTime(totals.estMinutes),
+                sub: 'production hours',
+                cls: '',
+            });
+        }
+        if (cfg.showFinancials) {
+            summaryTiles.push({
+                label: 'Pipeline Value',
+                value: fmtK(totals.jobValue),
+                sub: 'across all active jobs',
+                cls: 'accent-value',
+            });
+        }
+        const kpiHtml = summaryTiles.length === 0 ? '' : `
+            <div class="kpi-grid cols-${Math.min(summaryTiles.length, 5)}">
+                ${summaryTiles.map(t => `
+                    <div class="kpi ${t.cls}">
+                        <div class="label">${esc(t.label)}</div>
+                        <div class="value">${esc(t.value)}</div>
+                        <div class="sub">${esc(t.sub)}</div>
+                    </div>
+                `).join('')}
             </div>
         `;
 
@@ -972,46 +1186,95 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             </table>
         `;
 
+        // Job detail columns — build dynamically from cfg so everything aligns.
+        type FullColDef = {
+            header: string;
+            numeric?: boolean;
+            renderCell: (r: JobRow) => string;
+            renderTotal: () => string;
+            cellClass?: (r: JobRow) => string;
+        };
+        const fullCols: FullColDef[] = [
+            {
+                header: 'Job #',
+                renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>`,
+                renderTotal: () => `TOTAL · ${totals.jobs} jobs`,
+            },
+        ];
+        if (cfg.showCustomer) fullCols.push({
+            header: 'Customer',
+            renderCell: r => esc(r.customer),
+            renderTotal: () => '',
+        });
+        if (cfg.showStatus) fullCols.push({
+            header: 'Status',
+            renderCell: r => `<span class="badge ${statusBadgeClass(r.status)}">${esc(r.status)}</span>`,
+            renderTotal: () => '',
+        });
+        if (cfg.showDueDate) fullCols.push({
+            header: 'Due',
+            renderCell: r => esc(r.dueDate),
+            renderTotal: () => '',
+            cellClass: r => r.dueClass,
+        });
+        if (cfg.showTotalItems) fullCols.push({
+            header: 'Items',
+            numeric: true,
+            renderCell: r => String(r.totalQty),
+            renderTotal: () => totals.totalQty.toLocaleString(),
+        });
+        if (cfg.showDecoBreakdown) {
+            fullCols.push({
+                header: 'Embroidery',
+                numeric: true,
+                renderCell: r => r.embQty > 0 ? r.embQty.toLocaleString() : '—',
+                renderTotal: () => totals.embQty.toLocaleString(),
+            });
+            if (cfg.showStitches) fullCols.push({
+                header: 'Stitches',
+                numeric: true,
+                renderCell: r => r.embStitches > 0 ? fmtStitches(r.embStitches) : '—',
+                renderTotal: () => fmtStitches(totals.embStitches),
+            });
+            fullCols.push({
+                header: 'Print',
+                numeric: true,
+                renderCell: r => r.printQty > 0 ? r.printQty.toLocaleString() : '—',
+                renderTotal: () => totals.printQty.toLocaleString(),
+            });
+        }
+        if (cfg.showEstTime) fullCols.push({
+            header: 'Est. Time',
+            numeric: true,
+            renderCell: r => r.estMinutes > 0 ? fmtTime(r.estMinutes) : '—',
+            renderTotal: () => fmtTime(totals.estMinutes),
+        });
+        if (cfg.showFinancials) fullCols.push({
+            header: 'Value',
+            numeric: true,
+            renderCell: r => r.jobValue > 0 ? fmtK(r.jobValue) : '—',
+            renderTotal: () => fmtK(totals.jobValue),
+        });
+
         const jobsTableHtml = rows.length === 0 ? '<div class="empty">No active jobs to report on.</div>' : `
             <table>
                 <thead>
-                    <tr>
-                        <th>Job #</th>
-                        <th>Customer</th>
-                        <th>Status</th>
-                        <th>Due</th>
-                        <th class="num">Items</th>
-                        <th class="num">Embroidery</th>
-                        <th class="num">Stitches</th>
-                        <th class="num">Print</th>
-                        <th class="num">Value</th>
-                    </tr>
+                    <tr>${fullCols.map(c => `<th${c.numeric ? ' class="num"' : ''}>${esc(c.header)}</th>`).join('')}</tr>
                 </thead>
                 <tbody>
                     ${rows.map(r => `
-                        <tr>
-                            <td><strong>#${esc(r.jobNumber)}</strong></td>
-                            <td>${esc(r.customer)}</td>
-                            <td><span class="badge ${statusBadgeClass(r.status)}">${esc(r.status)}</span></td>
-                            <td class="${r.dueClass}">${esc(r.dueDate)}</td>
-                            <td class="num">${r.totalQty}</td>
-                            <td class="num">${r.embQty > 0 ? r.embQty.toLocaleString() : '—'}</td>
-                            <td class="num">${r.embStitches > 0 ? fmtStitches(r.embStitches) : '—'}</td>
-                            <td class="num">${r.printQty > 0 ? r.printQty.toLocaleString() : '—'}</td>
-                            <td class="num">${r.jobValue > 0 ? fmtK(r.jobValue) : '—'}</td>
-                        </tr>
+                        <tr>${fullCols.map(c => {
+                            const classes = [c.numeric ? 'num' : '', c.cellClass ? c.cellClass(r) : ''].filter(Boolean).join(' ');
+                            return `<td${classes ? ` class="${classes}"` : ''}>${c.renderCell(r)}</td>`;
+                        }).join('')}</tr>
                     `).join('')}
-                    <tr class="total-row">
-                        <td colspan="4">TOTAL · ${totals.jobs} jobs</td>
-                        <td class="num">${totals.totalQty.toLocaleString()}</td>
-                        <td class="num">${totals.embQty.toLocaleString()}</td>
-                        <td class="num">${fmtStitches(totals.embStitches)}</td>
-                        <td class="num">${totals.printQty.toLocaleString()}</td>
-                        <td class="num">${fmtK(totals.jobValue)}</td>
-                    </tr>
+                    <tr class="total-row">${fullCols.map(c => `<td${c.numeric ? ' class="num"' : ''}>${c.renderTotal()}</td>`).join('')}</tr>
                 </tbody>
             </table>
         `;
+
+        const footerBits: string[] = [`${totals.jobs} jobs`];
+        if (cfg.showFinancials) footerBits.push(`${fmtK(totals.jobValue)} pipeline`);
 
         const bodyHtml = `
             <div class="actions no-print">
@@ -1031,20 +1294,17 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 </div>
             </div>
 
-            <h2>Executive Summary</h2>
-            ${kpiHtml}
+            ${cfg.showExecutiveSummary ? `<h2>Executive Summary</h2>${kpiHtml}` : ''}
 
-            <h2>Status Breakdown</h2>
-            ${statusHtml}
+            ${cfg.showStatusBreakdown ? `<h2>Status Breakdown</h2>${statusHtml}` : ''}
 
-            <h2>Decoration Summary</h2>
-            ${decorationTableHtml}
+            ${cfg.showDecorationSummary ? `<h2>Decoration Summary</h2>${decorationTableHtml}` : ''}
 
             <h2>Job Detail</h2>
             ${jobsTableHtml}
 
             <div class="print-footer">
-                Stash Production Report · ${esc(dateStr)} · ${esc(timeStr)} · ${totals.jobs} jobs · ${fmtK(totals.jobValue)} pipeline
+                Stash Production Report · ${esc(dateStr)} · ${esc(timeStr)} · ${footerBits.join(' · ')}
             </div>
         `;
 
@@ -1052,6 +1312,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     };
 
     const handleDownloadCsv = () => {
+        const cfg = fieldConfig;
         // RFC 4180 CSV field escape
         const esc = (v: string | number | null | undefined): string => {
             if (v === null || v === undefined) return '';
@@ -1143,46 +1404,40 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 return acc;
             }, { jobs: 0, qty: 0, stitches: 0, minutes: 0, value: 0, mixed: 0 });
 
-            // Metadata block at top of CSV.
+            // Metadata block at top of CSV — only include fields the user has enabled.
             lines.push(esc(`STASH ${typeLabel.toUpperCase()} PRODUCTION REPORT`));
             lines.push(esc(`Generated: ${dateStr} ${timeStr}`));
             lines.push(esc(`Decoration Type: ${activeType} (${typeLabel})`));
             lines.push(esc(`Status Filter: ${scopeLabel}`));
             lines.push(esc(`Total Jobs: ${totals.jobs}`));
             lines.push(esc(`Total ${typeLabel} Items: ${totals.qty}`));
-            if (isEmbReport) lines.push(esc(`Total Stitches: ${totals.stitches}`));
-            lines.push(esc(`Total Est. Time: ${fmtTime(totals.minutes)}`));
-            lines.push(esc(`Mixed-Decoration Jobs: ${totals.mixed}`));
-            lines.push(esc(`Total Pipeline Value (GBP): ${totals.value.toFixed(2)}`));
+            if (isEmbReport && cfg.showStitches) lines.push(esc(`Total Stitches: ${totals.stitches}`));
+            if (cfg.showEstTime) lines.push(esc(`Total Est. Time: ${fmtTime(totals.minutes)}`));
+            if (cfg.showAlsoOnJob) lines.push(esc(`Mixed-Decoration Jobs: ${totals.mixed}`));
+            if (cfg.showFinancials) lines.push(esc(`Total Pipeline Value (GBP): ${totals.value.toFixed(2)}`));
             lines.push(''); // blank spacer
 
-            const headers = [
-                'Job #', 'Customer', 'Job Name', 'Status',
-                'Date Ordered', 'Due Date', 'Days Until Due',
-                `${typeLabel} Items`, 'Job Total Items',
-                ...(isEmbReport ? ['Stitches'] : []),
-                'Est. Time (min)', 'Also on Job', 'Job Value (GBP)',
+            // Column defs: header, row extractor, totals cell.
+            type CsvCol = { header: string; row: (r: TypeCsvRow) => string | number; total: string | number };
+            const csvCols: CsvCol[] = [
+                { header: 'Job #', row: r => r.jobNumber, total: 'TOTAL' },
             ];
-            lines.push(headers.map(esc).join(','));
-            for (const r of rows) {
-                const row = [
-                    r.jobNumber, r.customer, r.jobName, r.status,
-                    r.dateOrdered, r.dueDate, r.daysUntilDue,
-                    r.typeQty, r.jobTotalQty,
-                    ...(isEmbReport ? [r.typeStitches] : []),
-                    r.typeMinutes, r.alsoOnJob, r.jobValue.toFixed(2),
-                ];
-                lines.push(row.map(esc).join(','));
-            }
-            // Totals row
-            const totalsRow = [
-                'TOTAL', `${totals.jobs} jobs`, '', '',
-                '', '', '',
-                totals.qty, '',
-                ...(isEmbReport ? [totals.stitches] : []),
-                totals.minutes, totals.mixed > 0 ? `${totals.mixed} mixed` : '', totals.value.toFixed(2),
-            ];
-            lines.push(totalsRow.map(esc).join(','));
+            if (cfg.showCustomer) csvCols.push({ header: 'Customer', row: r => r.customer, total: `${totals.jobs} jobs` });
+            if (cfg.showJobName) csvCols.push({ header: 'Job Name', row: r => r.jobName, total: '' });
+            if (cfg.showStatus) csvCols.push({ header: 'Status', row: r => r.status, total: '' });
+            if (cfg.showDateOrdered) csvCols.push({ header: 'Date Ordered', row: r => r.dateOrdered, total: '' });
+            if (cfg.showDueDate) csvCols.push({ header: 'Due Date', row: r => r.dueDate, total: '' });
+            if (cfg.showDaysUntilDue) csvCols.push({ header: 'Days Until Due', row: r => r.daysUntilDue, total: '' });
+            csvCols.push({ header: `${typeLabel} Items`, row: r => r.typeQty, total: totals.qty });
+            if (cfg.showTotalItems) csvCols.push({ header: 'Job Total Items', row: r => r.jobTotalQty, total: '' });
+            if (isEmbReport && cfg.showStitches) csvCols.push({ header: 'Stitches', row: r => r.typeStitches, total: totals.stitches });
+            if (cfg.showEstTime) csvCols.push({ header: 'Est. Time (min)', row: r => r.typeMinutes, total: totals.minutes });
+            if (cfg.showAlsoOnJob) csvCols.push({ header: 'Also on Job', row: r => r.alsoOnJob, total: totals.mixed > 0 ? `${totals.mixed} mixed` : '' });
+            if (cfg.showFinancials) csvCols.push({ header: 'Job Value (GBP)', row: r => r.jobValue.toFixed(2), total: totals.value.toFixed(2) });
+
+            lines.push(csvCols.map(c => esc(c.header)).join(','));
+            for (const r of rows) lines.push(csvCols.map(c => esc(c.row(r))).join(','));
+            lines.push(csvCols.map(c => esc(c.total)).join(','));
 
             const filename = `stash-${activeType.toLowerCase()}-production-${now.toISOString().slice(0, 10)}.csv`;
             downloadCsv(lines.join('\r\n'), filename);
@@ -1264,49 +1519,46 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             perType: Object.fromEntries(printTypeCols.map(t => [t, 0])) as Record<string, number>,
         });
 
-        // Metadata block
+        // Metadata block — only include fields the user has enabled.
         lines.push(esc('STASH PRODUCTION REPORT'));
         lines.push(esc(`Generated: ${dateStr} ${timeStr}`));
         lines.push(esc(`Status Filter: ${scopeLabel}`));
         lines.push(esc(`Total Jobs: ${totals.jobs}`));
-        lines.push(esc(`Total Items: ${totals.totalQty}`));
-        lines.push(esc(`Total Embroidery Items: ${totals.embQty}  (${totals.embStitches} stitches)`));
-        lines.push(esc(`Total Print Items: ${totals.printQty}`));
-        lines.push(esc(`Total Est. Production Time: ${fmtTime(totals.estMinutes)}`));
-        lines.push(esc(`Total Pipeline Value (GBP): ${totals.jobValue.toFixed(2)}`));
+        if (cfg.showTotalItems) lines.push(esc(`Total Items: ${totals.totalQty}`));
+        if (cfg.showDecoBreakdown) {
+            lines.push(esc(`Total Embroidery Items: ${totals.embQty}${cfg.showStitches ? `  (${totals.embStitches} stitches)` : ''}`));
+            lines.push(esc(`Total Print Items: ${totals.printQty}`));
+        }
+        if (cfg.showEstTime) lines.push(esc(`Total Est. Production Time: ${fmtTime(totals.estMinutes)}`));
+        if (cfg.showFinancials) lines.push(esc(`Total Pipeline Value (GBP): ${totals.jobValue.toFixed(2)}`));
         lines.push('');
 
-        const headers = [
-            'Job #', 'Customer', 'Job Name', 'Status',
-            'Date Ordered', 'Due Date', 'Days Until Due',
-            'Total Items', 'Embroidery Items', 'Embroidery Stitches',
-            'Print Items (Total)',
-            ...printTypeCols.map(t => `${t} Qty`),
-            'Other Print Qty', 'Untyped Qty',
-            'Est. Time (min)', 'Job Value (GBP)',
+        // Column defs for the full CSV.
+        type FullCsvCol = { header: string; row: (r: FullCsvRow) => string | number; total: string | number };
+        const fullCsvCols: FullCsvCol[] = [
+            { header: 'Job #', row: r => r.jobNumber, total: 'TOTAL' },
         ];
-        lines.push(headers.map(esc).join(','));
-        for (const r of rows) {
-            lines.push([
-                r.jobNumber, r.customer, r.jobName, r.status,
-                r.dateOrdered, r.dueDate, r.daysUntilDue,
-                r.totalQty, r.embQty, r.embStitches,
-                r.printQty,
-                ...printTypeCols.map(t => r.perType[t]),
-                r.otherPrint, r.untyped,
-                r.estMinutes, r.jobValue.toFixed(2),
-            ].map(esc).join(','));
+        if (cfg.showCustomer) fullCsvCols.push({ header: 'Customer', row: r => r.customer, total: `${totals.jobs} jobs` });
+        if (cfg.showJobName) fullCsvCols.push({ header: 'Job Name', row: r => r.jobName, total: '' });
+        if (cfg.showStatus) fullCsvCols.push({ header: 'Status', row: r => r.status, total: '' });
+        if (cfg.showDateOrdered) fullCsvCols.push({ header: 'Date Ordered', row: r => r.dateOrdered, total: '' });
+        if (cfg.showDueDate) fullCsvCols.push({ header: 'Due Date', row: r => r.dueDate, total: '' });
+        if (cfg.showDaysUntilDue) fullCsvCols.push({ header: 'Days Until Due', row: r => r.daysUntilDue, total: '' });
+        if (cfg.showTotalItems) fullCsvCols.push({ header: 'Total Items', row: r => r.totalQty, total: totals.totalQty });
+        if (cfg.showDecoBreakdown) {
+            fullCsvCols.push({ header: 'Embroidery Items', row: r => r.embQty, total: totals.embQty });
+            if (cfg.showStitches) fullCsvCols.push({ header: 'Embroidery Stitches', row: r => r.embStitches, total: totals.embStitches });
+            fullCsvCols.push({ header: 'Print Items (Total)', row: r => r.printQty, total: totals.printQty });
+            for (const t of printTypeCols) fullCsvCols.push({ header: `${t} Qty`, row: r => r.perType[t], total: totals.perType[t] });
+            fullCsvCols.push({ header: 'Other Print Qty', row: r => r.otherPrint, total: totals.otherPrint });
+            fullCsvCols.push({ header: 'Untyped Qty', row: r => r.untyped, total: totals.untyped });
         }
-        // Totals row
-        lines.push([
-            'TOTAL', `${totals.jobs} jobs`, '', '',
-            '', '', '',
-            totals.totalQty, totals.embQty, totals.embStitches,
-            totals.printQty,
-            ...printTypeCols.map(t => totals.perType[t]),
-            totals.otherPrint, totals.untyped,
-            totals.estMinutes, totals.jobValue.toFixed(2),
-        ].map(esc).join(','));
+        if (cfg.showEstTime) fullCsvCols.push({ header: 'Est. Time (min)', row: r => r.estMinutes, total: totals.estMinutes });
+        if (cfg.showFinancials) fullCsvCols.push({ header: 'Job Value (GBP)', row: r => r.jobValue.toFixed(2), total: totals.jobValue.toFixed(2) });
+
+        lines.push(fullCsvCols.map(c => esc(c.header)).join(','));
+        for (const r of rows) lines.push(fullCsvCols.map(c => esc(c.row(r))).join(','));
+        lines.push(fullCsvCols.map(c => esc(c.total)).join(','));
 
         const filename = `stash-production-${now.toISOString().slice(0, 10)}.csv`;
         downloadCsv(lines.join('\r\n'), filename);
@@ -1455,12 +1707,108 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 {isEnriching ? (enrichMsg || 'Syncing...') : 'Sync Types'}
                             </button>
                         )}
+                        <div className="relative" ref={fieldPanelRef}>
+                            <button
+                                onClick={() => setShowFieldPanel(v => !v)}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase border transition-all ${
+                                    activePresetName === 'Full'
+                                        ? 'bg-white/5 border-white/10 text-white/50 hover:text-white hover:bg-white/10'
+                                        : 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:text-amber-200 hover:bg-amber-500/20'
+                                }`}
+                                title={`Choose which fields appear on printed reports. Current preset: ${activePresetName}. Affects both PDF and CSV.`}
+                            >
+                                <Settings2 className="w-3.5 h-3.5" />
+                                Fields: {activePresetName}
+                                {!fieldConfig.showFinancials && <Lock className="w-3 h-3 ml-0.5" />}
+                            </button>
+                            {showFieldPanel && (
+                                <div className="absolute right-0 top-full mt-1.5 z-30 w-[340px] bg-[#14142b] border border-white/10 rounded-lg shadow-2xl p-3 text-white">
+                                    <div className="flex items-center justify-between mb-2.5">
+                                        <div className="text-[10px] font-bold tracking-wider uppercase text-white/80">Report Fields</div>
+                                        <div className="text-[8px] text-white/40 tracking-wider uppercase">Auto-saved</div>
+                                    </div>
+                                    <div className="text-[10px] text-white/50 mb-2">Presets</div>
+                                    <div className="grid grid-cols-3 gap-1 mb-3">
+                                        {[
+                                            { name: 'Full', cfg: FULL_FIELD_CONFIG, desc: 'Everything (management)' },
+                                            { name: 'Department', cfg: DEPARTMENT_FIELD_CONFIG, desc: 'No financials / pipeline (shop floor)' },
+                                            { name: 'Minimal', cfg: MINIMAL_FIELD_CONFIG, desc: 'Bare-bones run sheet' },
+                                        ].map(p => (
+                                            <button
+                                                key={p.name}
+                                                onClick={() => setFieldConfig(p.cfg)}
+                                                title={p.desc}
+                                                className={`px-2 py-1.5 rounded text-[9px] font-bold tracking-wider uppercase border transition-all ${
+                                                    activePresetName === p.name
+                                                        ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200'
+                                                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'
+                                                }`}
+                                            >
+                                                {p.name}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="text-[10px] text-white/50 mb-1 flex items-center gap-1">
+                                        <Lock className="w-2.5 h-2.5" /> Confidential
+                                    </div>
+                                    <div className="space-y-1 mb-2">
+                                        {FIELD_LABELS.filter(f => f.group === 'sensitive').map(f => (
+                                            <label key={f.key} className="flex items-center gap-2 text-[10px] text-white/80 cursor-pointer hover:text-white px-1 py-0.5 rounded hover:bg-white/5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={fieldConfig[f.key]}
+                                                    onChange={e => setFieldConfig({ ...fieldConfig, [f.key]: e.target.checked })}
+                                                    className="accent-amber-500"
+                                                />
+                                                <span>{f.label}</span>
+                                                {!fieldConfig[f.key] && <EyeOff className="w-3 h-3 text-amber-400 ml-auto" />}
+                                            </label>
+                                        ))}
+                                    </div>
+
+                                    <div className="text-[10px] text-white/50 mb-1">Summary sections (PDF)</div>
+                                    <div className="space-y-1 mb-2">
+                                        {FIELD_LABELS.filter(f => f.group === 'sections').map(f => (
+                                            <label key={f.key} className="flex items-center gap-2 text-[10px] text-white/80 cursor-pointer hover:text-white px-1 py-0.5 rounded hover:bg-white/5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={fieldConfig[f.key]}
+                                                    onChange={e => setFieldConfig({ ...fieldConfig, [f.key]: e.target.checked })}
+                                                    className="accent-indigo-500"
+                                                />
+                                                <span>{f.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+
+                                    <div className="text-[10px] text-white/50 mb-1">Columns / fields</div>
+                                    <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                                        {FIELD_LABELS.filter(f => f.group === 'columns').map(f => (
+                                            <label key={f.key} className="flex items-center gap-2 text-[10px] text-white/80 cursor-pointer hover:text-white px-1 py-0.5 rounded hover:bg-white/5">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={fieldConfig[f.key]}
+                                                    onChange={e => setFieldConfig({ ...fieldConfig, [f.key]: e.target.checked })}
+                                                    className="accent-indigo-500"
+                                                />
+                                                <span>{f.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+
+                                    <div className="mt-3 pt-2 border-t border-white/10 text-[9px] text-white/40 leading-relaxed">
+                                        Applies to both <strong className="text-white/70">PDF</strong> and <strong className="text-white/70">CSV</strong>. Saved to this browser.
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                         <button
                             onClick={handleGenerateReport}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
                             title={typeFilter
-                                ? `Generate ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production report — only ${typeFilter} work for the department. Covers: ${scopeLabel}.`
-                                : `Generate full production PDF report. Covers: ${scopeLabel}.`}
+                                ? `Generate ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production report — only ${typeFilter} work for the department. Preset: ${activePresetName}. Covers: ${scopeLabel}.`
+                                : `Generate full production PDF report. Preset: ${activePresetName}. Covers: ${scopeLabel}.`}
                         >
                             <FileDown className="w-3.5 h-3.5" />
                             {typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} Report (PDF)` : 'Report (PDF)'}
