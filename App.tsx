@@ -565,13 +565,16 @@ const App: React.FC = () => {
             // Fetch ALL unfulfilled orders AFTER Shopify date-window fetch to avoid rate limiting
             setSyncStatusMsg('Fetching unfulfilled orders...');
             let unfulfilledOrders: ShopifyOrder[] = [];
+            let unfulfilledFetchOk = false;
             try {
                 unfulfilledOrders = await fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg));
+                unfulfilledFetchOk = true;
             } catch (e1) {
                 // Retry once after a short delay
                 try {
                     await new Promise(r => setTimeout(r, 2000));
                     unfulfilledOrders = await fetchAllUnfulfilledOrders(apiSettings, (msg) => setSyncStatusMsg(msg));
+                    unfulfilledFetchOk = true;
                 } catch (e2: any) {
                     console.warn('Unfulfilled orders fetch failed after retry:', e2.message);
                     setToastMsg({ text: `⚠️ Unfulfilled orders sync failed — counts may be incomplete. Try syncing again.`, type: 'error' });
@@ -609,6 +612,52 @@ const App: React.FC = () => {
             // Layer fresh API data on top (highest priority)
             sOrders.forEach(o => orderMap.set(o.id, o));
             unfulfilledOrders.forEach(o => orderMap.set(o.id, o));
+
+            // Reconcile stale "unfulfilled" orders that Shopify has since fulfilled.
+            // Deep sync caps at 5000 orders; if an order became fulfilled AFTER falling
+            // out of that window, its local copy stays permanently stale. When the full
+            // unfulfilled list succeeded we treat it as ground truth — any local
+            // unfulfilled/partial order NOT in that set is a stale candidate. We
+            // re-fetch those individually (capped + concurrency-limited to protect
+            // the API budget and avoid racing with fresh webhooks).
+            if (unfulfilledFetchOk) {
+                const currentUnfulfilledIds = new Set(unfulfilledOrders.map(o => o.id));
+                const nowMs = Date.now();
+                const STALE_AGE_MS = 24 * 60 * 60 * 1000;
+                const RECONCILE_CAP = 50;
+                const staleCandidates: ShopifyOrder[] = [];
+                for (const o of orderMap.values()) {
+                    if (staleCandidates.length >= RECONCILE_CAP) break;
+                    const isLocallyOpen = o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked';
+                    if (!isLocallyOpen) continue;
+                    if (currentUnfulfilledIds.has(o.id)) continue;
+                    const updatedMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
+                    if (!updatedMs || nowMs - updatedMs < STALE_AGE_MS) continue;
+                    staleCandidates.push(o);
+                }
+
+                if (staleCandidates.length > 0) {
+                    setSyncStatusMsg(`Reconciling ${staleCandidates.length} stale order${staleCandidates.length === 1 ? '' : 's'}...`);
+                    const CONCURRENCY = 5;
+                    let reconciled = 0;
+                    for (let i = 0; i < staleCandidates.length; i += CONCURRENCY) {
+                        const batch = staleCandidates.slice(i, i + CONCURRENCY);
+                        const results = await Promise.allSettled(
+                            batch.map(o => fetchSingleShopifyOrder(apiSettings, o.id))
+                        );
+                        results.forEach(r => {
+                            if (r.status === 'fulfilled' && r.value) {
+                                orderMap.set(r.value.id, r.value);
+                                reconciled++;
+                            }
+                        });
+                    }
+                    if (reconciled > 0) {
+                        console.log(`[sync] reconciled ${reconciled}/${staleCandidates.length} stale unfulfilled orders`);
+                    }
+                }
+            }
+
             const mergedOrders = Array.from(orderMap.values());
             setRawShopifyOrders(mergedOrders);
             setLocalItem('stash_raw_shopify_orders', mergedOrders).catch(console.error);
