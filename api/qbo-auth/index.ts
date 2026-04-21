@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
  * QuickBooks Online OAuth2 flow handler.
@@ -15,6 +16,42 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const QBO_AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
 const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 const TOKEN_ROW_ID = 'qbo_tokens';
+
+// ── Signed OAuth state helpers ────────────────────────────────────────
+// Format: "v1.<nonce-hex>.<hmac-hex>" where hmac = HMAC-SHA256(nonce,
+// QBO_CLIENT_SECRET). Stateless CSRF defence: an attacker can't forge a
+// valid state without the client secret, and we don't need session storage.
+// Legacy unsigned states (any value not starting with "v1.") are passed
+// through unchanged so in-flight OAuth flows from before this change
+// continue to work.
+const STATE_VERSION = 'v1';
+
+function signState(secret: string): string {
+  const nonce = randomBytes(16).toString('hex');
+  const sig = createHmac('sha256', secret).update(nonce).digest('hex');
+  return `${STATE_VERSION}.${nonce}.${sig}`;
+}
+
+function isSignedState(state: string | undefined | null): boolean {
+  return !!state && state.startsWith(`${STATE_VERSION}.`);
+}
+
+function verifySignedState(state: string, secret: string): boolean {
+  const parts = state.split('.');
+  if (parts.length !== 3 || parts[0] !== STATE_VERSION) return false;
+  const [, nonce, sig] = parts;
+  if (!nonce || !sig) return false;
+  const expected = createHmac('sha256', secret).update(nonce).digest('hex');
+  // timingSafeEqual requires equal-length buffers.
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length || a.length === 0) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL?.trim();
@@ -77,7 +114,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ─── AUTHORIZE ───────────────────────────────────────────
     if (action === 'authorize') {
       if (!redirectUri) return res.status(500).json({ error: 'QBO_REDIRECT_URI not configured' });
-      const state = Math.random().toString(36).substring(2, 15);
+      // Signed state — see signState() above. Prevents CSRF on the callback
+      // because an attacker can't forge a valid HMAC without the client secret.
+      const state = signState(clientSecret);
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
@@ -94,11 +133,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'callback') {
       const code = (req.query?.code as string) || (req.body?.code as string);
       const realmId = (req.query?.realmId as string) || (req.body?.realmId as string);
+      const state = (req.query?.state as string) || (req.body?.state as string) || '';
 
       if (!code || !realmId) {
         return res.status(400).json({ error: 'Missing code or realmId from QuickBooks callback' });
       }
       if (!redirectUri) return res.status(500).json({ error: 'QBO_REDIRECT_URI not configured' });
+
+      // If the state uses our signed format, require it to verify. Legacy
+      // unsigned states are allowed through so any OAuth flow started before
+      // this change still completes. After a week of clean deploys we can
+      // tighten this to "require signed state".
+      if (isSignedState(state)) {
+        if (!verifySignedState(state, clientSecret)) {
+          console.warn('[qbo-auth] callback rejected: invalid signed state');
+          return res.status(400).json({ error: 'Invalid OAuth state. Please restart the QuickBooks connection.' });
+        }
+      } else if (state) {
+        console.warn('[qbo-auth] callback accepting legacy unsigned state; this will be required in a future release');
+      }
 
       // Exchange authorization code for tokens
       const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');

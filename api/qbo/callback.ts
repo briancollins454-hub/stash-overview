@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 /**
  * QuickBooks OAuth2 callback handler.
@@ -12,6 +13,25 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 const TOKEN_ROW_ID = 'qbo_tokens';
 
+// Mirror of the helpers in api/qbo-auth/index.ts. Legacy unsigned states
+// pass through; signed "v1.<nonce>.<sig>" states must verify against
+// QBO_CLIENT_SECRET (the same secret used by /authorize to sign them).
+const STATE_VERSION = 'v1';
+function isSignedState(state: string | undefined | null): boolean {
+  return !!state && state.startsWith(`${STATE_VERSION}.`);
+}
+function verifySignedState(state: string, secret: string): boolean {
+  const parts = state.split('.');
+  if (parts.length !== 3 || parts[0] !== STATE_VERSION) return false;
+  const [, nonce, sig] = parts;
+  if (!nonce || !sig) return false;
+  const expected = createHmac('sha256', secret).update(nonce).digest('hex');
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length || a.length === 0) return false;
+  try { return timingSafeEqual(a, b); } catch { return false; }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const clientId = process.env.QBO_CLIENT_ID?.trim();
   const clientSecret = process.env.QBO_CLIENT_SECRET?.trim();
@@ -21,6 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const code = req.query?.code as string;
   const realmId = req.query?.realmId as string;
+  const state = (req.query?.state as string) || '';
 
   // Validate required params
   if (!code || !realmId) {
@@ -34,6 +55,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (!supabaseUrl || !supabaseKey) {
     return res.status(500).json({ error: 'Supabase not configured' });
+  }
+
+  // Signed-state check (legacy-safe — unsigned states still pass).
+  if (isSignedState(state)) {
+    if (!verifySignedState(state, clientSecret)) {
+      console.warn('[qbo/callback] rejected: invalid signed state');
+      return res.status(400).json({ error: 'Invalid OAuth state. Please restart the QuickBooks connection.' });
+    }
+  } else if (state) {
+    console.warn('[qbo/callback] accepting legacy unsigned state; this will be required in a future release');
   }
 
   try {
