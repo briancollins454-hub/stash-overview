@@ -84,6 +84,7 @@ const DigestManager = lazyRetry(() => import('./components/DigestManager'));
 const ProductionIntelligence = lazyRetry(() => import('./components/ProductionIntelligence'));
 const DecoProductionTable = lazyRetry(() => import('./components/DecoProductionTable'));
 const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
+const CloudHealth = lazyRetry(() => import('./components/CloudHealth'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -272,7 +273,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'priority', 'digest', 'shipped-not-invoiced'];
+  const validTabs = ['dashboard', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'priority', 'digest', 'shipped-not-invoiced', 'cloud-health'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2427,7 +2428,7 @@ const App: React.FC = () => {
                   { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                   { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'digest', label: 'Email Digest' }] },
-                  { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }] },
+                  { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                 ].map(group => {
                   const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
                   if (allowedTabs.length === 0) return null;
@@ -2523,7 +2524,7 @@ const App: React.FC = () => {
                       { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                       { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'digest', label: 'Email Digest' }] },
-                      { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }] },
+                      { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                     ].map(group => {
                       const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
                       if (allowedTabs.length === 0) return null;
@@ -3169,6 +3170,26 @@ const App: React.FC = () => {
                   ) : (
                     <GoogleUserManagement user={user} />
                   )}
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Cloud Health — Admin-only Supabase sync audit */}
+            {activeTab === 'cloud-health' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Cloud Health Error">
+                  <CloudHealth
+                    localCounts={{
+                      stash_orders: rawShopifyOrders.length,
+                      stash_deco_jobs: rawDecoJobs.length,
+                      stash_mappings: Object.keys(confirmedMatches).length,
+                      stash_product_patterns: Object.keys(productMappings).length,
+                      stash_job_links: Object.keys(itemJobLinks).length,
+                      stash_stock: physicalStock.length,
+                      stash_returns: returnStock.length,
+                      stash_reference_products: referenceProducts.length,
+                    }}
+                  />
                 </ErrorBoundary>
               </Suspense>
             )}

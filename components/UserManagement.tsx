@@ -54,6 +54,7 @@ const ALL_TABS = [
   { id: 'analyst', label: 'Analyst' },
   { id: 'finance', label: 'Finance' },
   { id: 'users', label: 'Users' },
+  { id: 'cloud-health', label: 'Cloud Health' },
   { id: 'manual', label: 'Manual' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
