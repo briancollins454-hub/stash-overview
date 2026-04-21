@@ -4,6 +4,13 @@ import { BrowserRouter } from 'react-router-dom';
 import './app.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { installAuthFetchInterceptor } from './services/authInterceptor';
+
+// Install BEFORE React renders so no /api/* request can go out before the
+// interceptor is active. Currently backends ignore these headers, so this
+// change is invisible; Phase B of the auth hardening will start validating
+// them route-by-route.
+installAuthFetchInterceptor();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
