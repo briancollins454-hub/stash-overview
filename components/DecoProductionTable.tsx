@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import type { DecoJob, DecoItem } from '../types';
-import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays } from 'lucide-react';
+import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown } from 'lucide-react';
 
 /* ---------- Production time estimation ---------- */
 const STITCHES_PER_MIN = 600;
@@ -120,9 +120,24 @@ const STATUS_BADGE: Record<string, { cls: string; short: string }> = {
 
 type SortKey = 'due' | 'value' | 'time' | 'pph' | 'stitches' | 'status' | 'ordered' | 'customer' | 'risk';
 type SortDir = 'asc' | 'desc';
-type StatusFilter = 'active' | 'production' | 'awaiting';
+type StatusFilter =
+    | 'active'
+    | 'production'
+    | 'awaiting'
+    | 'awaitingStock'
+    | 'awaitingProcessing'
+    | 'partiallyFulfilled'
+    | 'awaitingShipping';
 
 const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
+
+// Predicate for "Partially Fulfilled": some items shipped but not all.
+const isPartiallyFulfilled = (items: DecoItem[]): boolean => {
+    if (items.length === 0) return false;
+    let shipped = 0;
+    for (const i of items) if (i.isShipped) shipped++;
+    return shipped > 0 && shipped < items.length;
+};
 
 interface Props {
     decoJobs: DecoJob[];
@@ -258,6 +273,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         // Status filter (shipped/completed already excluded)
         if (statusFilter === 'production') list = list.filter(j => PRODUCTION_STATUSES.has(j.status));
         else if (statusFilter === 'awaiting') list = list.filter(j => AWAITING_STATUSES.has(j.status));
+        else if (statusFilter === 'awaitingStock') list = list.filter(j => j.status === 'Awaiting Stock');
+        else if (statusFilter === 'awaitingProcessing') list = list.filter(j => j.status === 'Awaiting Processing');
+        else if (statusFilter === 'partiallyFulfilled') list = list.filter(j => isPartiallyFulfilled(j.items));
+        else if (statusFilter === 'awaitingShipping') list = list.filter(j => j.status === 'Ready for Shipping');
 
         // Date range filters
         if (dueFrom) { const d = new Date(dueFrom); list = list.filter(j => j.dateDue && new Date(j.dateDue) >= d); }
@@ -306,6 +325,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
         else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
         else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
+        else if (statusFilter === 'awaitingStock') base = base.filter(j => j.status === 'Awaiting Stock');
+        else if (statusFilter === 'awaitingProcessing') base = base.filter(j => j.status === 'Awaiting Processing');
+        else if (statusFilter === 'partiallyFulfilled') base = base.filter(j => isPartiallyFulfilled(j.items));
+        else if (statusFilter === 'awaitingShipping') base = base.filter(j => j.status === 'Ready for Shipping');
         return base.filter(j => j.decoTypes.length === 0).length;
     }, [enrichedJobs, statusFilter]);
 
@@ -350,6 +373,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilter === 'active') base = base.filter(j => !EXCLUDED_STATUSES.has(j.status));
         else if (statusFilter === 'production') base = base.filter(j => PRODUCTION_STATUSES.has(j.status));
         else if (statusFilter === 'awaiting') base = base.filter(j => AWAITING_STATUSES.has(j.status));
+        else if (statusFilter === 'awaitingStock') base = base.filter(j => j.status === 'Awaiting Stock');
+        else if (statusFilter === 'awaitingProcessing') base = base.filter(j => j.status === 'Awaiting Processing');
+        else if (statusFilter === 'partiallyFulfilled') base = base.filter(j => isPartiallyFulfilled(j.items));
+        else if (statusFilter === 'awaitingShipping') base = base.filter(j => j.status === 'Ready for Shipping');
         if (searchTerm) {
             const s = searchTerm.toLowerCase();
             base = base.filter(j => j.jobNumber.includes(s) || j.customerName.toLowerCase().includes(s) || j.jobName.toLowerCase().includes(s) || j.decoTypes.some(t => t.toLowerCase().includes(s)));
@@ -357,6 +384,155 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         base.forEach(j => j.decoTypes.forEach(t => { counts[t] = (counts[t] || 0) + 1; }));
         return counts;
     }, [enrichedJobs, statusFilter, searchTerm]);
+
+    const handleDownloadReport = () => {
+        // Escape a CSV field per RFC 4180 (wrap in quotes, double-up inner quotes)
+        const esc = (v: string | number | null | undefined): string => {
+            if (v === null || v === undefined) return '';
+            const s = String(v);
+            if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+            return s;
+        };
+
+        // Per-type columns we break print items into (everything not EMB)
+        const printTypeCols = ['DTF', 'DTG', 'SCREEN', 'TRANSFER', 'UV', 'FLEX', 'VINYL', 'SUBLIMATION', 'FREEFORM'];
+
+        type Row = {
+            jobNumber: string;
+            customer: string;
+            jobName: string;
+            status: string;
+            dateOrdered: string;
+            dueDate: string;
+            daysUntilDue: string;
+            totalQty: number;
+            embQty: number;
+            embStitches: number;
+            printQty: number;
+            perType: Record<string, number>;
+            otherPrintQty: number; // print items with an unrecognised type
+            untypedQty: number;    // items with no decorationType at all
+            jobValue: number;
+        };
+
+        const isEmbItem = (i: DecoItem) =>
+            i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
+
+        const rows: Row[] = enrichedJobs.map(job => {
+            const perType: Record<string, number> = {};
+            printTypeCols.forEach(t => { perType[t] = 0; });
+            let embQty = 0;
+            let embStitches = 0;
+            let printQty = 0;
+            let otherPrintQty = 0;
+            let untypedQty = 0;
+
+            for (const item of job.items) {
+                const qty = item.quantity || 0;
+                if (isEmbItem(item)) {
+                    embQty += qty;
+                    embStitches += (item.stitchCount ?? 0) * qty;
+                    continue;
+                }
+                const dt = (item.decorationType || '').toUpperCase();
+                if (!dt || dt === 'NONE') { untypedQty += qty; continue; }
+                if (Object.prototype.hasOwnProperty.call(perType, dt)) {
+                    perType[dt] += qty;
+                    printQty += qty;
+                } else if (PRINT_TYPES.has(dt)) {
+                    // Recognised print type we don't have a column for — bucket into Other
+                    otherPrintQty += qty;
+                    printQty += qty;
+                } else {
+                    otherPrintQty += qty;
+                    printQty += qty;
+                }
+            }
+
+            return {
+                jobNumber: job.jobNumber,
+                customer: job.customerName,
+                jobName: job.jobName,
+                status: job.status,
+                dateOrdered: job.dateOrdered ? new Date(job.dateOrdered).toLocaleDateString('en-GB') : '',
+                dueDate: job.dateDue ? new Date(job.dateDue).toLocaleDateString('en-GB') : '',
+                daysUntilDue: job.daysUntilDue !== null && job.daysUntilDue !== undefined ? String(job.daysUntilDue) : '',
+                totalQty: job.totalQty,
+                embQty,
+                embStitches,
+                printQty,
+                perType,
+                otherPrintQty,
+                untypedQty,
+                jobValue: job.jobValue,
+            };
+        });
+
+        // Totals
+        const totals = rows.reduce((acc, r) => {
+            acc.totalQty += r.totalQty;
+            acc.embQty += r.embQty;
+            acc.embStitches += r.embStitches;
+            acc.printQty += r.printQty;
+            acc.otherPrintQty += r.otherPrintQty;
+            acc.untypedQty += r.untypedQty;
+            acc.jobValue += r.jobValue;
+            for (const t of printTypeCols) acc.perType[t] += r.perType[t];
+            return acc;
+        }, {
+            totalQty: 0, embQty: 0, embStitches: 0, printQty: 0, otherPrintQty: 0, untypedQty: 0, jobValue: 0,
+            perType: Object.fromEntries(printTypeCols.map(t => [t, 0])) as Record<string, number>,
+        });
+
+        const headers = [
+            'Job #', 'Customer', 'Job Name', 'Status',
+            'Date Ordered', 'Due Date', 'Days Until Due',
+            'Total Qty',
+            'Embroidery Qty', 'Embroidery Stitches',
+            'Print Qty (Total)',
+            ...printTypeCols.map(t => `${t} Qty`),
+            'Other Print Qty', 'Untyped Qty',
+            'Job Value (GBP)',
+        ];
+
+        const lines: string[] = [];
+        lines.push(headers.map(esc).join(','));
+        for (const r of rows) {
+            lines.push([
+                r.jobNumber, r.customer, r.jobName, r.status,
+                r.dateOrdered, r.dueDate, r.daysUntilDue,
+                r.totalQty,
+                r.embQty, r.embStitches,
+                r.printQty,
+                ...printTypeCols.map(t => r.perType[t]),
+                r.otherPrintQty, r.untypedQty,
+                r.jobValue.toFixed(2),
+            ].map(esc).join(','));
+        }
+        // Totals row
+        lines.push([
+            'TOTAL', `${rows.length} jobs`, '', '',
+            '', '', '',
+            totals.totalQty,
+            totals.embQty, totals.embStitches,
+            totals.printQty,
+            ...printTypeCols.map(t => totals.perType[t]),
+            totals.otherPrintQty, totals.untypedQty,
+            totals.jobValue.toFixed(2),
+        ].map(esc).join(','));
+
+        const csv = lines.join('\r\n');
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const today = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `production-report-${today}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
 
     const handlePrint = () => {
         const el = tableRef.current;
@@ -399,7 +575,16 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         </style></head><body>`);
         printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
         printWindow.document.write(`<div class="subtitle">${filtered.length} jobs · ${fmtK(totalValue)} pipeline · ${fmtTime(totalMinutes)} est. · Printed ${new Date().toLocaleString('en-GB')}</div>`);
-        const filters = [statusFilter !== 'active' ? statusFilter.toUpperCase() : '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
+        const statusFilterLabel: Record<StatusFilter, string> = {
+            active: '',
+            production: 'IN PRODUCTION',
+            awaiting: 'AWAITING',
+            awaitingStock: 'AWAITING STOCK',
+            awaitingProcessing: 'AWAITING PROCESSING',
+            partiallyFulfilled: 'PARTIALLY FULFILLED',
+            awaitingShipping: 'AWAITING SHIPPING',
+        };
+        const filters = [statusFilterLabel[statusFilter] || '', typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
         if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${filters.join(' · ')}</div>`);
         printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>EMB</th><th>Print</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
         filtered.forEach(job => {
@@ -488,6 +673,13 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                             </button>
                         )}
                         <button
+                            onClick={handleDownloadReport}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
+                            title="Download CSV report of all active jobs with embroidery & print totals"
+                        >
+                            <FileDown className="w-3.5 h-3.5" /> Report
+                        </button>
+                        <button
                             onClick={handlePrint}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all"
                             title="Print spreadsheet"
@@ -512,6 +704,10 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         { label: 'Active', key: 'active' as StatusFilter, count: enrichedJobs.length },
                         { label: 'In Production', key: 'production' as StatusFilter, count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
                         { label: 'Awaiting', key: 'awaiting' as StatusFilter, count: enrichedJobs.filter(j => AWAITING_STATUSES.has(j.status)).length },
+                        { label: 'Awaiting Stock', key: 'awaitingStock' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
+                        { label: 'Awaiting Processing', key: 'awaitingProcessing' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
+                        { label: 'Partially Fulfilled', key: 'partiallyFulfilled' as StatusFilter, count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
+                        { label: 'Awaiting Shipping', key: 'awaitingShipping' as StatusFilter, count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
                     ].map(f => (
                         <button
                             key={f.key}
