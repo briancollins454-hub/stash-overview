@@ -624,17 +624,22 @@ const App: React.FC = () => {
                 const currentUnfulfilledIds = new Set(unfulfilledOrders.map(o => o.id));
                 const nowMs = Date.now();
                 const STALE_AGE_MS = 24 * 60 * 60 * 1000;
-                const RECONCILE_CAP = 50;
+                const RECONCILE_CAP = 500;
                 const staleCandidates: ShopifyOrder[] = [];
+                let totalStale = 0;
                 for (const o of orderMap.values()) {
-                    if (staleCandidates.length >= RECONCILE_CAP) break;
                     const isLocallyOpen = o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked';
                     if (!isLocallyOpen) continue;
                     if (currentUnfulfilledIds.has(o.id)) continue;
                     const updatedMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
                     if (!updatedMs || nowMs - updatedMs < STALE_AGE_MS) continue;
-                    staleCandidates.push(o);
+                    totalStale++;
+                    if (staleCandidates.length < RECONCILE_CAP) {
+                        staleCandidates.push(o);
+                    }
                 }
+
+                console.log(`[sync] stale-unfulfilled: ${totalStale} found, ${staleCandidates.length} scheduled for reconcile (cap ${RECONCILE_CAP})`);
 
                 if (staleCandidates.length > 0) {
                     setSyncStatusMsg(`Reconciling ${staleCandidates.length} stale order${staleCandidates.length === 1 ? '' : 's'}...`);
@@ -651,10 +656,12 @@ const App: React.FC = () => {
                                 reconciled++;
                             }
                         });
+                        // Progress indicator for long runs
+                        if (staleCandidates.length > 20 && (i + CONCURRENCY) % 50 === 0) {
+                            setSyncStatusMsg(`Reconciling ${Math.min(i + CONCURRENCY, staleCandidates.length)}/${staleCandidates.length} stale orders...`);
+                        }
                     }
-                    if (reconciled > 0) {
-                        console.log(`[sync] reconciled ${reconciled}/${staleCandidates.length} stale unfulfilled orders`);
-                    }
+                    console.log(`[sync] reconciled ${reconciled}/${staleCandidates.length} stale unfulfilled orders`);
                 }
             }
 
