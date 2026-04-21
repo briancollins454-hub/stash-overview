@@ -654,22 +654,51 @@ const App: React.FC = () => {
                     setSyncStatusMsg(`Reconciling ${staleCandidates.length} stale order${staleCandidates.length === 1 ? '' : 's'}...`);
                     const CONCURRENCY = 5;
                     let reconciled = 0;
-                    for (let i = 0; i < staleCandidates.length; i += CONCURRENCY) {
-                        const batch = staleCandidates.slice(i, i + CONCURRENCY);
-                        const results = await Promise.allSettled(
-                            batch.map(o => fetchSingleShopifyOrder(apiSettings, o.id))
-                        );
-                        results.forEach(r => {
-                            if (r.status === 'fulfilled' && r.value) {
-                                orderMap.set(r.value.id, r.value);
-                                reconciled++;
+                    let failed: ShopifyOrder[] = [];
+
+                    const runBatch = async (candidates: ShopifyOrder[], concurrency: number, label: string) => {
+                        const localFailed: ShopifyOrder[] = [];
+                        for (let i = 0; i < candidates.length; i += concurrency) {
+                            const slice = candidates.slice(i, i + concurrency);
+                            const results = await Promise.allSettled(
+                                slice.map(o => fetchSingleShopifyOrder(apiSettings, o.id))
+                            );
+                            results.forEach((r, idx) => {
+                                if (r.status === 'fulfilled' && r.value) {
+                                    orderMap.set(r.value.id, r.value);
+                                    reconciled++;
+                                } else {
+                                    localFailed.push(slice[idx]);
+                                }
+                            });
+                            if (candidates.length > 20 && (i + concurrency) % 50 === 0) {
+                                setSyncStatusMsg(`${label} ${Math.min(i + concurrency, candidates.length)}/${candidates.length} stale orders...`);
                             }
-                        });
-                        // Progress indicator for long runs
-                        if (staleCandidates.length > 20 && (i + CONCURRENCY) % 50 === 0) {
-                            setSyncStatusMsg(`Reconciling ${Math.min(i + CONCURRENCY, staleCandidates.length)}/${staleCandidates.length} stale orders...`);
+                        }
+                        return localFailed;
+                    };
+
+                    // Main pass — aggressive concurrency
+                    failed = await runBatch(staleCandidates, CONCURRENCY, 'Reconciling');
+
+                    // If anything failed (usually tail-end Shopify throttle), wait for
+                    // the cost bucket to refill and retry once at lower concurrency.
+                    // Throttle bucket is 2000 pts, restores 100/s → a 5s pause restores
+                    // ~500 pts, enough for a low-concurrency retry pass to complete.
+                    if (failed.length > 0) {
+                        console.log(`[sync] ${failed.length} reconcile calls failed (likely throttle) — retrying after cooldown`);
+                        setSyncStatusMsg(`Retrying ${failed.length} throttled orders (5s cooldown)...`);
+                        await new Promise(r => setTimeout(r, 5000));
+                        const stillFailed = await runBatch(failed, 2, 'Retrying');
+                        if (stillFailed.length > 0) {
+                            // Second cooldown + final single-threaded attempt for stragglers
+                            console.log(`[sync] ${stillFailed.length} still failed — final pass serial`);
+                            setSyncStatusMsg(`Final reconcile pass for ${stillFailed.length} orders (8s cooldown)...`);
+                            await new Promise(r => setTimeout(r, 8000));
+                            await runBatch(stillFailed, 1, 'Final reconcile');
                         }
                     }
+
                     console.log(`[sync] reconciled ${reconciled}/${staleCandidates.length} stale unfulfilled orders`);
                 }
             }
