@@ -1329,9 +1329,17 @@ const App: React.FC = () => {
       rawDecoJobs.forEach(j => {
           const itemMap = new Map<string, DecoItem[]>();
           j.items.forEach(item => {
-              const id = (item.vendorSku || item.productCode || item.name || '').trim().toLowerCase();
-              if (!itemMap.has(id)) itemMap.set(id, []);
-              itemMap.get(id)!.push(item);
+              const identifiers = [item.vendorSku, item.productCode, item.name];
+              identifiers.forEach(t => {
+                  const id = (t || '').trim().toLowerCase();
+                  if (id) {
+                      if (!itemMap.has(id)) itemMap.set(id, []);
+                      // Avoid pushing the same item multiple times if identifiers are identical
+                      if (!itemMap.get(id)!.includes(item)) {
+                          itemMap.get(id)!.push(item);
+                      }
+                  }
+              });
           });
           jobCache.set(j.jobNumber, { job: j, itemMap });
       });
@@ -1361,14 +1369,16 @@ const App: React.FC = () => {
               
               let matchedDeco = undefined;
               if (manualDecoId && effectiveJob && jobData) {
-                  // Handle unique mapping with index (SKU@@@index)
                   if (manualDecoId.includes('@@@')) {
                       const [sku, idxStr] = manualDecoId.split('@@@');
                       const idx = parseInt(idxStr);
                       const d = effectiveJob.items[idx];
                       if (d) {
-                          const dId = (d.vendorSku || d.productCode || d.name || '').trim().toLowerCase();
-                          if (dId === sku.trim().toLowerCase()) {
+                          const skuTarget = sku.trim().toLowerCase();
+                          const matchTokens = [d.vendorSku, d.productCode, d.name];
+                          const isValidMatch = matchTokens.some(t => (t||'').trim().toLowerCase() === skuTarget);
+                          
+                          if (isValidMatch) {
                               matchedDeco = d;
                           }
                       }

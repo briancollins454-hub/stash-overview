@@ -472,21 +472,36 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                                 const idx = parseInt(idxStr);
                                                 if (decoJob.items[idx]) {
                                                     const d = decoJob.items[idx];
-                                                    const dId = d.vendorSku || d.productCode || d.name;
-                                                    if (dId === sku) {
+                                                    const dId = (d.vendorSku || d.productCode || d.name || '').trim().toLowerCase();
+                                                    if (dId === sku.trim().toLowerCase()) {
                                                         selectedDeco = d;
+                                                    } else {
+                                                        // Check alternate fields if the preferred one changed
+                                                        const matchTokens = [d.vendorSku, d.productCode, d.name];
+                                                        if (matchTokens.some(t => (t||'').trim().toLowerCase() === sku.trim().toLowerCase())) {
+                                                            selectedDeco = d;
+                                                        }
                                                     }
                                                 }
                                             }
                                             
                                             if (!selectedDeco) {
                                                 // Fallback to SKU matching for legacy or AI mappings
-                                                selectedDeco = decoJob.items.find(d => (d.vendorSku || d.productCode || d.name) === rawSelectedId.split('@@@')[0]);
+                                                const skuTarget = rawSelectedId.split('@@@')[0].trim().toLowerCase();
+                                                selectedDeco = decoJob.items.find(d => {
+                                                    const matchTokens = [d.vendorSku, d.productCode, d.name];
+                                                    return matchTokens.some(t => (t||'').trim().toLowerCase() === skuTarget);
+                                                });
                                                 if (selectedDeco) {
-                                                    // If we found it via SKU, we should ideally find the index too so the select value matches an option
+                                                    // Ensure the display id exactly matches the generated option value
+                                                    const sId = selectedDeco.vendorSku || selectedDeco.productCode || selectedDeco.name;
                                                     const idx = decoJob.items.indexOf(selectedDeco);
-                                                    displaySelectedId = `${rawSelectedId.split('@@@')[0]}@@@${idx}`;
+                                                    displaySelectedId = `${sId}@@@${idx}`;
                                                 }
+                                            } else {
+                                                const sId = selectedDeco.vendorSku || selectedDeco.productCode || selectedDeco.name;
+                                                const idx = decoJob.items.indexOf(selectedDeco);
+                                                displaySelectedId = `${sId}@@@${idx}`;
                                             }
                                         }
                                         const isMapped = !!rawSelectedId;
