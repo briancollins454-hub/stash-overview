@@ -23,6 +23,7 @@ import OrderTable from './components/OrderTable';
 import SettingsModal, { ApiSettings, HolidayRange } from './components/SettingsModal';
 import IntegrationGuide from './components/IntegrationGuide';
 import StatsCard from './components/StatsCard';
+import WorkingDaysPlanner from './components/WorkingDaysPlanner';
 import SavedFilters from './components/SavedFilters';
 
 // Retry wrapper for lazy imports — auto-reloads on stale chunk failures after deploy
@@ -2627,6 +2628,11 @@ const App: React.FC = () => {
                     }}
                     onApplyView={handleApplyView}
                   />
+                </div>
+                {/* Working-day planning horizon (15 and 20 business days
+                    from today, skipping weekends + configured closures). */}
+                <div className="pt-3">
+                  <WorkingDaysPlanner holidayRanges={apiSettings.holidayRanges} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pt-4">
                     <StatsCard title="NOT ON DECO" value={stats.notOnDeco} icon={<AlertTriangle />} colorClass="bg-red-500" onClick={() => setActiveQuickFilter(prev => prev === 'missing_po' ? null : 'missing_po')} isActive={activeQuickFilter === 'missing_po'}>
