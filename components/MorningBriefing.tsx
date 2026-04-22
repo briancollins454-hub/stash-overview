@@ -71,6 +71,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
   const [expandedStage, setExpandedStage] = useState<string | null>(null);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [expandedIssue, setExpandedIssue] = useState<number | null>(0);
+  const [expandedStaff, setExpandedStaff] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[] | null>(null);
 
   // Load cached finance data (same source as Financial Dashboard) for complete Deco picture
@@ -525,12 +526,20 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const staffMap = new Map<string, {
       name: string; active: number; blocked: number; overdue: number; overdueJobs: DecoJob[];
       producing: number; pipelineVal: number; stale: number; staleJobs: DecoJob[];
+      activeJobs: DecoJob[];
       shippedRecent: number; totalTurnaround: number; turnaroundCount: number;
     }>();
+    const mkEntry = (name: string) => ({
+      name, active: 0, blocked: 0, overdue: 0, overdueJobs: [] as DecoJob[],
+      producing: 0, pipelineVal: 0, stale: 0, staleJobs: [] as DecoJob[],
+      activeJobs: [] as DecoJob[],
+      shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0,
+    });
     active.forEach(j => {
       const sp = extractSP(j.salesPerson) || 'Unassigned';
-      const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
+      const e = staffMap.get(sp) || mkEntry(sp);
       e.active++;
+      e.activeJobs.push(j);
       e.pipelineVal += j.orderTotal || j.billableAmount || 0;
       if (BLOCKED.has(j.status || '')) e.blocked++;
       if (PRODUCING.has(j.status || '')) e.producing++;
@@ -544,7 +553,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const ninetyAgo = new Date(t0); ninetyAgo.setDate(t0.getDate() - 90);
     shipped.filter(j => { const d = pd(j.dateShipped); return d && d >= ninetyAgo; }).forEach(j => {
       const sp = extractSP(j.salesPerson) || 'Unassigned';
-      const e = staffMap.get(sp) || { name: sp, active: 0, blocked: 0, overdue: 0, overdueJobs: [], producing: 0, pipelineVal: 0, stale: 0, staleJobs: [], shippedRecent: 0, totalTurnaround: 0, turnaroundCount: 0 };
+      const e = staffMap.get(sp) || mkEntry(sp);
       e.shippedRecent++;
       const ord = pd(j.dateOrdered); const shp = pd(j.dateShipped);
       if (ord && shp) { e.totalTurnaround += daysBetween(ord, shp); e.turnaroundCount++; }
@@ -1075,20 +1084,105 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] text-white/35 uppercase tracking-wider font-bold">Team Workload</span>
-                <span className="text-[10px] text-white/40">{data.staffSummary.length} staff active{data.staffUnassigned ? ` \u00b7 ${data.staffUnassigned.active} unassigned` : ''}</span>
+                <span className="text-[10px] text-white/40">
+                  {data.staffSummary.length} staff active{data.staffUnassigned ? ` \u00b7 ${data.staffUnassigned.active} unassigned` : ''}
+                  <span className="text-white/20 ml-2">\u00b7 click a name to see their jobs</span>
+                </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                {data.staffSummary.map(st => (
-                  <div key={st.name} className={`px-3 py-1.5 rounded-lg text-xs border ${
-                    st.overdue > 0 ? 'border-red-500/20 bg-red-500/5' : st.blocked > st.producing ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5 bg-white/[0.02]'
-                  }`}>
-                    <span className="font-semibold text-white/80">{String(st.name).split(' ')[0]}</span>
-                    <span className="text-white/40 ml-1.5">{st.active} job{s(st.active)}</span>
-                    {st.overdue > 0 && <span className="text-red-400 ml-1.5">({st.overdue} overdue)</span>}
-                    {st.overdue === 0 && st.stale > 0 && <span className="text-amber-400 ml-1.5">({st.stale} stale)</span>}
-                  </div>
-                ))}
+                {data.staffSummary.map(st => {
+                  const isOpen = expandedStaff === st.name;
+                  return (
+                    <button
+                      key={st.name}
+                      onClick={() => setExpandedStaff(isOpen ? null : st.name)}
+                      className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${
+                        isOpen
+                          ? 'border-indigo-400/60 bg-indigo-500/15 ring-1 ring-indigo-400/30'
+                          : st.overdue > 0
+                            ? 'border-red-500/20 bg-red-500/5 hover:border-red-400/40'
+                            : st.blocked > st.producing
+                              ? 'border-amber-500/20 bg-amber-500/5 hover:border-amber-400/40'
+                              : 'border-white/5 bg-white/[0.02] hover:border-white/20'
+                      }`}
+                    >
+                      <span className="font-semibold text-white/80">{String(st.name).split(' ')[0]}</span>
+                      <span className="text-white/40 ml-1.5">{st.active} job{s(st.active)}</span>
+                      {st.overdue > 0 && <span className="text-red-400 ml-1.5">({st.overdue} overdue)</span>}
+                      {st.overdue === 0 && st.stale > 0 && <span className="text-amber-400 ml-1.5">({st.stale} stale)</span>}
+                    </button>
+                  );
+                })}
+                {data.staffUnassigned && data.staffUnassigned.active > 0 && (
+                  <button
+                    onClick={() => setExpandedStaff(expandedStaff === 'Unassigned' ? null : 'Unassigned')}
+                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${
+                      expandedStaff === 'Unassigned'
+                        ? 'border-indigo-400/60 bg-indigo-500/15 ring-1 ring-indigo-400/30'
+                        : 'border-white/5 bg-white/[0.02] hover:border-white/20'
+                    }`}
+                  >
+                    <span className="font-semibold text-white/60">Unassigned</span>
+                    <span className="text-white/40 ml-1.5">{data.staffUnassigned.active} job{s(data.staffUnassigned.active)}</span>
+                    {data.staffUnassigned.overdue > 0 && <span className="text-red-400 ml-1.5">({data.staffUnassigned.overdue} overdue)</span>}
+                  </button>
+                )}
               </div>
+
+              {/* Drill-down: show the selected staff member's actual jobs.
+                  Jobs are sorted overdue-first (most overdue at top), then
+                  producing, then the rest, so the user immediately sees
+                  what needs attention. */}
+              {expandedStaff && (() => {
+                const entry = expandedStaff === 'Unassigned'
+                  ? data.staffUnassigned
+                  : data.staffSummary.find(st => st.name === expandedStaff);
+                if (!entry) return null;
+                const sorted = [...entry.activeJobs].sort((a, b) => {
+                  const da = pd(a.dateDue) || pd(a.productionDueDate);
+                  const db = pd(b.dateDue) || pd(b.productionDueDate);
+                  const aOverdue = da && da < t0 ? 1 : 0;
+                  const bOverdue = db && db < t0 ? 1 : 0;
+                  if (aOverdue !== bOverdue) return bOverdue - aOverdue;
+                  if (aOverdue && da && db) return da.getTime() - db.getTime();
+                  const aProd = PRODUCING.has(a.status || '') ? 1 : 0;
+                  const bProd = PRODUCING.has(b.status || '') ? 1 : 0;
+                  if (aProd !== bProd) return bProd - aProd;
+                  if (da && db) return da.getTime() - db.getTime();
+                  if (da) return -1;
+                  if (db) return 1;
+                  return 0;
+                });
+                return (
+                  <div className="mt-3 bg-black/25 rounded-xl border border-indigo-400/20 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 bg-indigo-500/5">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-sm font-bold text-white">{entry.name}</span>
+                        <span className="text-[10px] text-white/50">{entry.active} active</span>
+                        {entry.overdue > 0 && <span className="text-[10px] text-red-400 font-bold">{entry.overdue} overdue</span>}
+                        {entry.blocked > 0 && <span className="text-[10px] text-amber-400">{entry.blocked} blocked</span>}
+                        {entry.producing > 0 && <span className="text-[10px] text-emerald-400">{entry.producing} in production</span>}
+                        <span className="text-[10px] text-white/30">{fmtK(entry.pipelineVal)} pipeline</span>
+                      </div>
+                      <button
+                        onClick={() => setExpandedStaff(null)}
+                        className="text-[10px] text-white/40 hover:text-white/70 px-2 py-0.5 rounded"
+                      >
+                        Close \u2715
+                      </button>
+                    </div>
+                    <div className="max-h-[420px] overflow-y-auto p-2 space-y-0.5">
+                      {sorted.length === 0 ? (
+                        <div className="px-3 py-6 text-center text-[11px] text-white/30">No active jobs</div>
+                      ) : (
+                        sorted.map(j => (
+                          <JobRow key={j.id} j={j} now={now} onClick={() => onNavigateToOrder(j.jobNumber)} />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
