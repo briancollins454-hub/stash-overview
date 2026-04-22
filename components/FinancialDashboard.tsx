@@ -1118,17 +1118,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         </div>
       )}
 
-      {/* Second row: Billing + Aging */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {/* Second row: Pipeline + Aging */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className={`${card} p-4`} title="Total value of Shopify orders created in the last 365 days that still have any unfulfilled items (unfulfilled or partial).">
           <div className={headerText}>Unfulfilled Shopify (365d)</div>
           <div className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{formatCurrency(unfulfilled365.value)}</div>
           <div className="text-[10px] text-gray-400 mt-0.5">{unfulfilled365.count} order{unfulfilled365.count !== 1 ? 's' : ''} · rolling 365 days</div>
-        </div>
-        <div className={`${card} p-4`}>
-          <div className={headerText}>Total Paid</div>
-          <div className="text-xl sm:text-2xl font-black text-green-600 dark:text-green-400 mt-1">{formatCurrency(summary.totalPaid)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">{summary.totalBillable > 0 ? ((summary.totalPaid / summary.totalBillable) * 100).toFixed(0) : 0}% collected</div>
         </div>
         <div className={`${card} p-4 cursor-pointer hover:ring-2 ring-yellow-400 transition-all ${agingFilter === '31-60' ? 'ring-2' : ''}`} onClick={() => setAgingFilter(f => f === '31-60' ? 'all' : '31-60')}>
           <div className={headerText}>31–60 Days</div>
