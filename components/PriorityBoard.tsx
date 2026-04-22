@@ -27,6 +27,45 @@ const fmtDate = (d: string | undefined) => {
   return isNaN(dt.getTime()) ? '\u2014' : dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
 };
 
+/**
+ * Small click-to-copy badge for the job number. Stops the row click
+ * from firing so we don't accidentally navigate instead of copying.
+ * Shows a brief "Copied" flash (1.2s) for feedback.
+ */
+const CopyableJobNum: React.FC<{ jobNumber: string; className?: string }> = ({ jobNumber, className }) => {
+  const [copied, setCopied] = useState(false);
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(jobNumber);
+      } else {
+        // Legacy fallback for non-HTTPS / older browsers.
+        const ta = document.createElement('textarea');
+        ta.value = jobNumber;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Silent — keep UI unchanged if the browser denies clipboard access.
+    }
+  };
+  return (
+    <span
+      onClick={handleClick}
+      title={copied ? 'Copied!' : 'Click to copy'}
+      className={`cursor-copy select-none transition-colors ${copied ? 'text-emerald-400' : 'hover:text-indigo-300'} ${className || ''}`}
+    >
+      {copied ? '\u2713 Copied' : `#${jobNumber}`}
+    </span>
+  );
+};
+
 const extractSP = (sp: any): string | undefined => {
   if (!sp) return undefined;
   if (typeof sp === 'string') return sp;
@@ -267,7 +306,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
                 return (
                   <div key={item.job.id} className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors" onClick={() => onNavigateToOrder(item.job.jobNumber)}>
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${us.dot}`}>{i + 1}</span>
-                    <span className="text-[10px] font-mono text-indigo-400/70 shrink-0">#{item.job.jobNumber}</span>
+                    <CopyableJobNum jobNumber={item.job.jobNumber} className="text-[10px] font-mono text-indigo-400/70 shrink-0" />
                     <span className="text-xs text-white/70 truncate flex-1">{item.job.customerName}</span>
                     <span className={`text-[9px] px-2 py-0.5 rounded-full ${us.pill}`}>{item.reason}</span>
                     <span className="text-[10px] text-white/50">{item.job.status}</span>
@@ -413,7 +452,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                     >
                       <span className="text-[10px] text-white/20 font-mono">{i + 1}</span>
                       <div className="min-w-0">
-                        <span className="text-[10px] font-mono text-indigo-400/70 block">#{item.job.jobNumber}</span>
+                        <CopyableJobNum jobNumber={item.job.jobNumber} className="text-[10px] font-mono text-indigo-400/70 block" />
                         <span className="text-[9px] text-white/25 block">{fmtDate(item.job.dateOrdered)}</span>
                       </div>
                       <div className="min-w-0">
