@@ -292,6 +292,29 @@ const configsEqual = (a: ReportFieldConfig, b: ReportFieldConfig): boolean => {
     return true;
 };
 
+// ─── Per-row print-annotation storage ───────────────────────────────────
+// Notes and "Aim" dates are decorations the user attaches to individual
+// jobs specifically for the printed report — separate from Deco's real
+// due date. Keyed by jobNumber so they survive re-fetches that change the
+// internal job.id. Persisted per-browser.
+const ROW_NOTES_KEY = 'stash_production_row_notes';
+const ROW_AIMS_KEY = 'stash_production_row_aim_dates';
+
+const loadStringRecord = (key: string): Record<string, string> => {
+    try {
+        const raw = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch { return {}; }
+};
+
+const saveStringRecord = (key: string, value: Record<string, string>) => {
+    try {
+        if (typeof window !== 'undefined') window.localStorage.setItem(key, JSON.stringify(value));
+    } catch { /* storage may be unavailable */ }
+};
+
 export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnrichProduction, isEnriching, enrichMsg }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>('due');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -313,6 +336,39 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const fieldPanelRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { saveFieldConfig(fieldConfig); }, [fieldConfig]);
+
+    // Per-row PDF controls: selection, notes, and aim dates.
+    // When a selection exists we export *only* those rows; otherwise we fall
+    // back to the full scoped list like before. Notes and aim dates persist
+    // across sessions regardless of whether the row is currently selected,
+    // so work isn't lost when someone unchecks and re-checks a job.
+    const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
+    const [jobNotes, setJobNotes] = useState<Record<string, string>>(() => loadStringRecord(ROW_NOTES_KEY));
+    const [aimDates, setAimDates] = useState<Record<string, string>>(() => loadStringRecord(ROW_AIMS_KEY));
+    useEffect(() => { saveStringRecord(ROW_NOTES_KEY, jobNotes); }, [jobNotes]);
+    useEffect(() => { saveStringRecord(ROW_AIMS_KEY, aimDates); }, [aimDates]);
+
+    const toggleJobSelected = (jobId: string) => {
+        setSelectedJobIds(prev => {
+            const next = new Set(prev);
+            if (next.has(jobId)) next.delete(jobId); else next.add(jobId);
+            return next;
+        });
+    };
+    const setJobNote = (jobNumber: string, value: string) => {
+        setJobNotes(prev => {
+            const next = { ...prev };
+            if (value) next[jobNumber] = value; else delete next[jobNumber];
+            return next;
+        });
+    };
+    const setJobAim = (jobNumber: string, value: string) => {
+        setAimDates(prev => {
+            const next = { ...prev };
+            if (value) next[jobNumber] = value; else delete next[jobNumber];
+            return next;
+        });
+    };
 
     // Close the field panel when the user clicks outside of it.
     useEffect(() => {
@@ -587,7 +643,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     }, [enrichedJobs, statusFilters, searchTerm]);
 
     // Jobs included in exported reports (respect selected status filters, ignore search/date/type).
-    const scopedJobs = useMemo(() => {
+    const scopedJobsBase = useMemo(() => {
         if (statusFilters.size === 0) return enrichedJobs;
         return enrichedJobs.filter(j => {
             for (const f of statusFilters) {
@@ -602,11 +658,32 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
     }, [enrichedJobs, statusFilters]);
 
+    // If the user has ticked specific rows, exports are scoped to just those.
+    // Otherwise we fall back to the full filter-scoped list (prior behaviour).
+    // Selection-IDs that no longer match any job are silently ignored.
+    const scopedJobs = useMemo(() => {
+        if (selectedJobIds.size === 0) return scopedJobsBase;
+        const picked = scopedJobsBase.filter(j => selectedJobIds.has(j.id));
+        // Fall back if every selected row got filtered out by status — avoids
+        // generating an empty report.
+        return picked.length > 0 ? picked : scopedJobsBase;
+    }, [scopedJobsBase, selectedJobIds]);
+
+    // Count of the user's currently-active selection that actually appears in
+    // the visible list — used to show "N selected" and disable the master toggle.
+    const visibleSelectedCount = useMemo(() => {
+        if (selectedJobIds.size === 0) return 0;
+        return scopedJobsBase.reduce((n, j) => n + (selectedJobIds.has(j.id) ? 1 : 0), 0);
+    }, [scopedJobsBase, selectedJobIds]);
+
     const scopeLabel = useMemo(() => {
+        if (visibleSelectedCount > 0) {
+            return `${visibleSelectedCount} selected job${visibleSelectedCount === 1 ? '' : 's'}`;
+        }
         if (statusFilters.size === 0) return 'All Active Jobs';
         // Preserve the order of STATUS_FILTER_KEYS for consistent display.
         return STATUS_FILTER_KEYS.filter(k => statusFilters.has(k)).map(k => STATUS_FILTER_LABELS[k]).join(' + ');
-    }, [statusFilters]);
+    }, [statusFilters, visibleSelectedCount]);
 
     const handleGenerateReport = () => {
         const cfg = fieldConfig; // snapshot so helpers below see a stable reference
@@ -757,6 +834,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 jobTotalQty: number;
                 otherTypes: string[];
                 jobValue: number;
+                note: string;         // optional per-row PDF note
+                aimDate: string;      // optional per-row aim date (yyyy-mm-dd)
             };
 
             const typeRows: TypeRow[] = [];
@@ -798,8 +877,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     jobTotalQty: job.totalQty,
                     otherTypes,
                     jobValue: job.jobValue,
+                    note: (jobNotes[job.jobNumber] || '').trim(),
+                    aimDate: aimDates[job.jobNumber] || '',
                 });
             }
+
+            const anyAimDates = typeRows.some(r => r.aimDate);
 
             // Sort by due date (overdue/soonest first), then by job number.
             typeRows.sort((a, b) => {
@@ -879,21 +962,25 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 renderTotal: () => string;
                 cellClass?: (r: TypeRow) => string;
             };
+            const fmtAim = (iso: string) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+            const noteLineHtml = (r: TypeRow) => r.note
+                ? `<div style="font-size:8px;font-style:italic;color:#7c2d12;margin-top:2px;">📝 ${esc(r.note)}</div>`
+                : '';
             const cols: ColDef[] = [
                 {
                     header: 'Job #',
-                    renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>`,
+                    renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>${!cfg.showJobName && !cfg.showCustomer ? noteLineHtml(r) : ''}`,
                     renderTotal: () => `TOTAL · ${totals.jobs} ${totals.jobs === 1 ? 'job' : 'jobs'}`,
                 },
             ];
             if (cfg.showCustomer) cols.push({
                 header: 'Customer',
-                renderCell: r => esc(r.customer),
+                renderCell: r => `${esc(r.customer)}${!cfg.showJobName ? noteLineHtml(r) : ''}`,
                 renderTotal: () => '',
             });
             if (cfg.showJobName) cols.push({
                 header: 'Job Name',
-                renderCell: r => esc(r.jobName),
+                renderCell: r => `${esc(r.jobName)}${noteLineHtml(r)}`,
                 renderTotal: () => '',
             });
             if (cfg.showStatus) cols.push({
@@ -906,6 +993,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 renderCell: r => esc(r.dueDate),
                 renderTotal: () => '',
                 cellClass: r => r.dueClass,
+            });
+            if (anyAimDates) cols.push({
+                header: 'Aim',
+                renderCell: r => r.aimDate ? `<strong style="color:#047857;">${esc(fmtAim(r.aimDate))}</strong>` : '—',
+                renderTotal: () => '',
             });
             cols.push({
                 header: `${typeLabel} Items`,
@@ -1006,6 +1098,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             untypedQty: number;
             jobValue: number;
             estMinutes: number;
+            note: string;
+            aimDate: string;
         };
 
         const rows: JobRow[] = scopedJobs.map(job => {
@@ -1054,8 +1148,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 untypedQty,
                 jobValue: job.jobValue,
                 estMinutes: job.est.totalMinutes,
+                note: (jobNotes[job.jobNumber] || '').trim(),
+                aimDate: aimDates[job.jobNumber] || '',
             };
         });
+        const anyFullAimDates = rows.some(r => r.aimDate);
 
         // Grand totals
         const totals = rows.reduce((acc, r) => {
@@ -1207,16 +1304,20 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             renderTotal: () => string;
             cellClass?: (r: JobRow) => string;
         };
+        const fmtAimFull = (iso: string) => iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+        const noteLineFull = (r: JobRow) => r.note
+            ? `<div style="font-size:8px;font-style:italic;color:#7c2d12;margin-top:2px;">📝 ${esc(r.note)}</div>`
+            : '';
         const fullCols: FullColDef[] = [
             {
                 header: 'Job #',
-                renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>`,
+                renderCell: r => `<strong>#${esc(r.jobNumber)}</strong>${!cfg.showCustomer ? noteLineFull(r) : ''}`,
                 renderTotal: () => `TOTAL · ${totals.jobs} jobs`,
             },
         ];
         if (cfg.showCustomer) fullCols.push({
             header: 'Customer',
-            renderCell: r => esc(r.customer),
+            renderCell: r => `${esc(r.customer)}${r.jobName ? `<div style="font-size:8px;color:#6b7280;">${esc(r.jobName)}</div>` : ''}${noteLineFull(r)}`,
             renderTotal: () => '',
         });
         if (cfg.showStatus) fullCols.push({
@@ -1229,6 +1330,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             renderCell: r => esc(r.dueDate),
             renderTotal: () => '',
             cellClass: r => r.dueClass,
+        });
+        if (anyFullAimDates) fullCols.push({
+            header: 'Aim',
+            renderCell: r => r.aimDate ? `<strong style="color:#047857;">${esc(fmtAimFull(r.aimDate))}</strong>` : '—',
+            renderTotal: () => '',
         });
         if (cfg.showTotalItems) fullCols.push({
             header: 'Items',
@@ -1364,6 +1470,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 jobTotalQty: number;
                 alsoOnJob: string;
                 jobValue: number;
+                note: string;
+                aimDate: string;
             };
             const rows: TypeCsvRow[] = [];
             for (const job of scopedJobs) {
@@ -1396,8 +1504,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     jobTotalQty: job.totalQty,
                     alsoOnJob: otherTypes.join(' + '),
                     jobValue: job.jobValue,
+                    note: (jobNotes[job.jobNumber] || '').trim(),
+                    aimDate: aimDates[job.jobNumber] ? formatDate(aimDates[job.jobNumber]) : '',
                 });
             }
+            const anyCsvAim = rows.some(r => r.aimDate);
+            const anyCsvNote = rows.some(r => r.note);
             rows.sort((a, b) => {
                 const aDue = a.dueDate ? a.dueDate.split('/').reverse().join('-') : '9999';
                 const bDue = b.dueDate ? b.dueDate.split('/').reverse().join('-') : '9999';
@@ -1438,6 +1550,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             if (cfg.showStatus) csvCols.push({ header: 'Status', row: r => r.status, total: '' });
             if (cfg.showDateOrdered) csvCols.push({ header: 'Date Ordered', row: r => r.dateOrdered, total: '' });
             if (cfg.showDueDate) csvCols.push({ header: 'Due Date', row: r => r.dueDate, total: '' });
+            if (anyCsvAim) csvCols.push({ header: 'Aim Date', row: r => r.aimDate, total: '' });
             if (cfg.showDaysUntilDue) csvCols.push({ header: 'Days Until Due', row: r => r.daysUntilDue, total: '' });
             csvCols.push({ header: `${typeLabel} Items`, row: r => r.typeQty, total: totals.qty });
             if (cfg.showTotalItems) csvCols.push({ header: 'Job Total Items', row: r => r.jobTotalQty, total: '' });
@@ -1445,6 +1558,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             if (cfg.showEstTime) csvCols.push({ header: 'Est. Time (min)', row: r => r.typeMinutes, total: totals.minutes });
             if (cfg.showAlsoOnJob) csvCols.push({ header: 'Also on Job', row: r => r.alsoOnJob, total: totals.mixed > 0 ? `${totals.mixed} mixed` : '' });
             if (cfg.showFinancials) csvCols.push({ header: 'Job Value (GBP)', row: r => r.jobValue.toFixed(2), total: totals.value.toFixed(2) });
+            if (anyCsvNote) csvCols.push({ header: 'Note', row: r => r.note, total: '' });
 
             lines.push(csvCols.map(c => esc(c.header)).join(','));
             for (const r of rows) lines.push(csvCols.map(c => esc(c.row(r))).join(','));
@@ -1473,6 +1587,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             untyped: number;
             estMinutes: number;
             jobValue: number;
+            note: string;
+            aimDate: string;
         };
 
         const rows: FullCsvRow[] = scopedJobs.map(job => {
@@ -1503,8 +1619,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 embQty, embStitches, printQty, perType, otherPrint, untyped,
                 estMinutes: job.est.totalMinutes,
                 jobValue: job.jobValue,
+                note: (jobNotes[job.jobNumber] || '').trim(),
+                aimDate: aimDates[job.jobNumber] ? formatDate(aimDates[job.jobNumber]) : '',
             };
         });
+        const anyFullCsvAim = rows.some(r => r.aimDate);
+        const anyFullCsvNote = rows.some(r => r.note);
 
         rows.sort((a, b) => {
             const aDue = a.dueDate ? a.dueDate.split('/').reverse().join('-') : '9999';
@@ -1554,6 +1674,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (cfg.showStatus) fullCsvCols.push({ header: 'Status', row: r => r.status, total: '' });
         if (cfg.showDateOrdered) fullCsvCols.push({ header: 'Date Ordered', row: r => r.dateOrdered, total: '' });
         if (cfg.showDueDate) fullCsvCols.push({ header: 'Due Date', row: r => r.dueDate, total: '' });
+        if (anyFullCsvAim) fullCsvCols.push({ header: 'Aim Date', row: r => r.aimDate, total: '' });
         if (cfg.showDaysUntilDue) fullCsvCols.push({ header: 'Days Until Due', row: r => r.daysUntilDue, total: '' });
         if (cfg.showTotalItems) fullCsvCols.push({ header: 'Total Items', row: r => r.totalQty, total: totals.totalQty });
         if (cfg.showDecoBreakdown) {
@@ -1566,6 +1687,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         }
         if (cfg.showEstTime) fullCsvCols.push({ header: 'Est. Time (min)', row: r => r.estMinutes, total: totals.estMinutes });
         if (cfg.showFinancials) fullCsvCols.push({ header: 'Job Value (GBP)', row: r => r.jobValue.toFixed(2), total: totals.jobValue.toFixed(2) });
+        if (anyFullCsvNote) fullCsvCols.push({ header: 'Note', row: r => r.note, total: '' });
 
         lines.push(fullCsvCols.map(c => esc(c.header)).join(','));
         for (const r of rows) lines.push(fullCsvCols.map(c => esc(c.row(r))).join(','));
@@ -1828,6 +1950,20 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 </div>
                             )}
                         </div>
+                        {visibleSelectedCount > 0 && (
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30" title="PDF / CSV will include only these rows">
+                                <span className="text-[9px] font-black tracking-wider uppercase text-emerald-300">
+                                    {visibleSelectedCount} selected
+                                </span>
+                                <button
+                                    onClick={() => setSelectedJobIds(new Set())}
+                                    className="text-[8px] font-bold tracking-widest uppercase text-emerald-400/70 hover:text-emerald-200 transition-colors"
+                                    title="Clear selection"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        )}
                         <button
                             onClick={handleGenerateReport}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
@@ -1836,7 +1972,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 : `Generate full production PDF report. Preset: ${activePresetName}. Covers: ${scopeLabel}.`}
                         >
                             <FileDown className="w-3.5 h-3.5" />
-                            {typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} Report (PDF)` : 'Report (PDF)'}
+                            {visibleSelectedCount > 0
+                                ? `PDF (${visibleSelectedCount} selected)`
+                                : (typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} Report (PDF)` : 'Report (PDF)')}
                         </button>
                         <button
                             onClick={handleDownloadCsv}
@@ -1982,6 +2120,29 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 <table className="w-full text-left text-[10px]">
                     <thead>
                         <tr className="border-b border-white/10 text-white/30 font-bold uppercase tracking-widest text-[9px]">
+                            <th className="px-2 py-2.5 w-8 text-center" title="Select rows to export — checked rows are the only ones included in the PDF / CSV. Unchecked = export the whole scope as before.">
+                                <input
+                                    type="checkbox"
+                                    className="accent-emerald-500 cursor-pointer"
+                                    checked={filtered.length > 0 && filtered.every(j => selectedJobIds.has(j.id))}
+                                    ref={el => {
+                                        if (el) {
+                                            const picked = filtered.filter(j => selectedJobIds.has(j.id)).length;
+                                            el.indeterminate = picked > 0 && picked < filtered.length;
+                                        }
+                                    }}
+                                    onChange={e => {
+                                        const checked = e.target.checked;
+                                        setSelectedJobIds(prev => {
+                                            const next = new Set(prev);
+                                            if (checked) filtered.forEach(j => next.add(j.id));
+                                            else filtered.forEach(j => next.delete(j.id));
+                                            return next;
+                                        });
+                                    }}
+                                    title="Select all visible / none"
+                                />
+                            </th>
                             <th className="px-3 py-2.5 w-20 cursor-pointer hover:text-white/60" onClick={() => toggleSort('due')}>
                                 <span className="flex items-center gap-1">Job <SortIcon col="due" /></span>
                             </th>
@@ -2022,7 +2183,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     </thead>
                     <tbody className="divide-y divide-white/[0.03]">
                         {filtered.length === 0 && (
-                            <tr><td colSpan={16} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
+                            <tr><td colSpan={17} className="px-5 py-8 text-center text-white/30 text-xs">No jobs match this filter.</td></tr>
                         )}
                         {filtered.map(job => {
                             const isExpanded = expandedJob === job.id;
@@ -2035,18 +2196,42 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 : 'text-white/20';
                             const pphColor = job.poundPerHour >= 50 ? 'text-emerald-400 font-bold' : job.poundPerHour >= 25 ? 'text-amber-400' : job.poundPerHour > 0 ? 'text-red-400' : 'text-white/20';
 
+                            const isSelected = selectedJobIds.has(job.id);
+                            const rowNote = jobNotes[job.jobNumber] || '';
+                            const rowAim = aimDates[job.jobNumber] || '';
                             return (
                                 <React.Fragment key={job.id}>
                                     <tr
-                                        className="hover:bg-white/5 cursor-pointer transition-colors"
+                                        className={`hover:bg-white/5 cursor-pointer transition-colors ${isSelected ? 'bg-emerald-500/[0.06]' : ''}`}
                                         onClick={() => setExpandedJob(isExpanded ? null : job.id)}
                                     >
+                                        <td className="px-2 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                className="accent-emerald-500 cursor-pointer"
+                                                checked={isSelected}
+                                                onChange={() => toggleJobSelected(job.id)}
+                                                title="Include this job in the exported PDF / CSV"
+                                            />
+                                        </td>
                                         <td className="px-3 py-2.5">
                                             <span className="text-[10px] font-mono text-indigo-400/70">#{job.jobNumber}</span>
                                         </td>
                                         <td className="px-3 py-2.5">
                                             <div className="text-xs text-white/80 font-bold truncate max-w-[200px]">{job.customerName}</div>
                                             <div className="text-[9px] text-white/30 truncate max-w-[200px]">{job.jobName}</div>
+                                            {(rowNote || rowAim) && (
+                                                <div className="mt-1 flex items-center gap-2 text-[8px]">
+                                                    {rowAim && (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-bold uppercase tracking-wider">
+                                                            Aim {new Date(rowAim + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                                                        </span>
+                                                    )}
+                                                    {rowNote && (
+                                                        <span className="italic text-amber-300/80 truncate max-w-[220px]" title={rowNote}>📝 {rowNote}</span>
+                                                    )}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
                                             <span className={`inline-block px-2 py-0.5 rounded text-[8px] font-black uppercase whitespace-nowrap border ${statusInfo.cls}`} title={job.status}>{statusInfo.short}</span>
@@ -2107,10 +2292,53 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                             </span>
                                         </td>
                                     </tr>
+                                    {/* Selection sub-row: per-job note + aim date for the exported PDF */}
+                                    {isSelected && (
+                                        <tr className="bg-emerald-500/[0.04]" onClick={e => e.stopPropagation()}>
+                                            <td className="px-2 py-2 border-t border-emerald-500/10" />
+                                            <td colSpan={16} className="px-3 py-2 border-t border-emerald-500/10">
+                                                <div className="flex items-center gap-3 flex-wrap">
+                                                    <span className="text-[8px] font-bold uppercase tracking-widest text-emerald-400/70 shrink-0">For PDF:</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <label className="text-[8px] font-bold uppercase tracking-widest text-white/40">Aim</label>
+                                                        <input
+                                                            type="date"
+                                                            value={rowAim}
+                                                            onChange={e => setJobAim(job.jobNumber, e.target.value)}
+                                                            onClick={e => e.stopPropagation()}
+                                                            className="bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/80 focus:outline-none focus:ring-1 focus:ring-emerald-500/50 [color-scheme:dark]"
+                                                            title="Aim date shown on the exported PDF (separate from the Deco due date)"
+                                                        />
+                                                        {rowAim && (
+                                                            <button
+                                                                onClick={e => { e.stopPropagation(); setJobAim(job.jobNumber, ''); }}
+                                                                className="text-[8px] font-bold uppercase tracking-widest text-red-400/60 hover:text-red-300 transition-colors"
+                                                                title="Clear aim date"
+                                                            >
+                                                                Clear
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 flex-1 min-w-[240px]">
+                                                        <label className="text-[8px] font-bold uppercase tracking-widest text-white/40 shrink-0">Note</label>
+                                                        <input
+                                                            type="text"
+                                                            value={rowNote}
+                                                            onChange={e => setJobNote(job.jobNumber, e.target.value)}
+                                                            onClick={e => e.stopPropagation()}
+                                                            placeholder="Note to print with this job (e.g. 'Rush — customer collecting Friday')"
+                                                            maxLength={180}
+                                                            className="flex-1 bg-white/5 border border-white/10 rounded px-2 py-1 text-[10px] text-white/80 placeholder:text-white/25 focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
                                     {/* Expanded item detail */}
                                     {isExpanded && (
                                         <tr>
-                                            <td colSpan={16} className="bg-[#16162e] px-4 py-3">
+                                            <td colSpan={17} className="bg-[#16162e] px-4 py-3">
                                                 <div className="overflow-x-auto">
                                                     <table className="w-full text-left text-[9px]">
                                                         <thead>
