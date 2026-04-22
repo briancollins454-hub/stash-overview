@@ -12,16 +12,14 @@ export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const logout = () => signOut(auth);
 
 /**
- * Fast, client-side domain fence. This is the first line of defence
- * only — the authoritative gate is the server allow-list (see
- * `checkServerAuthorization` below and the `api/authorized-users`
- * endpoint). We keep this check in place so we can reject obviously
- * wrong accounts immediately, without a network round-trip.
+ * Legacy helper. The former domain-based fence has been removed —
+ * authorisation is now determined entirely by the server allow-list
+ * (`api/authorized-users`). This helper simply confirms an email was
+ * returned by Firebase at all, and is kept as a tiny sanity check
+ * before spending a round-trip on the authoritative server gate.
  */
 export const isAuthorizedEmail = (email: string | null): boolean => {
-  if (!email) return false;
-  const domain = email.split('@')[1]?.toLowerCase();
-  return domain === 'marxcorporate.com' || domain === 'stashshop.co.uk';
+  return typeof email === 'string' && email.includes('@');
 };
 
 export interface AuthorizationResult {

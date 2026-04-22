@@ -196,9 +196,9 @@ const SeniorManagementAccess: React.FC<Props> = ({ token, firebaseIdToken, isSup
                 required
                 disabled={!!editing}
                 className="w-full px-3 py-2.5 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs font-bold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none disabled:opacity-50"
-                placeholder="name@marxcorporate.com"
+                placeholder="name@example.com"
               />
-              <div className="text-[9px] text-slate-500 mt-1">Must be on marxcorporate.com or stashshop.co.uk</div>
+              <div className="text-[9px] text-slate-500 mt-1">Any Google account — the allow-list itself controls access.</div>
             </div>
             <div>
               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Display Name</label>

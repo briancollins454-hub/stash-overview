@@ -82,14 +82,12 @@ export function useAuth() {
       }
 
       (async () => {
-        // Fast-path: reject off-domain accounts without burning a server
-        // call. The server enforces this again as defence-in-depth.
+        // Sanity check — Firebase should always give us an email, but
+        // guard anyway. The authoritative gate is the server allow-list
+        // check below; there is no domain restriction any more.
         if (!isAuthorizedEmail(currentUser.email)) {
           setUser(null);
-          setAuthError(
-            `Access Denied: ${currentUser.email} is not on a trusted domain. ` +
-            'Please use your @marxcorporate.com or @stashshop.co.uk account.'
-          );
+          setAuthError(`Access Denied: no email was returned from your Google account.`);
           try { await firebaseLogout(); } catch {}
           setIsAuthLoading(false);
           return;

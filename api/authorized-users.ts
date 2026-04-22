@@ -36,10 +36,11 @@ const SESSION_SECRET = process.env.SESSION_SECRET || '';
 /** Hardcoded master key — owner can never be locked out. */
 const OWNER_EMAIL = 'office@marxcorporate.com';
 
-/** The email domains that remain acceptable at the Firebase layer.
- *  Kept as defence-in-depth so a compromised allow-list entry cannot
- *  grant access to an arbitrary Google account. */
-const TRUSTED_DOMAINS = new Set(['marxcorporate.com', 'stashshop.co.uk']);
+// NOTE: No domain restriction. Access is governed entirely by the
+// `stash_authorized_users` allow-list — any email a superuser adds
+// (Gmail, Outlook, partner domains, etc.) is permitted to sign in.
+// The allow-list itself is the fence; the domain check would just
+// make it harder to add, say, a freelance consultant's gmail account.
 
 /* ─── Firestore helpers (scoped to this endpoint's collection) ─────── */
 
@@ -168,9 +169,9 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ email: string }
     const data = await resp.json();
     const user = data.users?.[0];
     if (!user?.email) return null;
-    const domain = user.email.split('@')[1]?.toLowerCase();
-    if (!TRUSTED_DOMAINS.has(domain)) return null;
-    return { email: user.email.toLowerCase() };
+    // No domain fence — whether this email can use the app is
+    // determined by the allow-list, not by its @-suffix.
+    return { email: String(user.email).toLowerCase() };
   } catch {
     return null;
   }
@@ -287,9 +288,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { email, phone, displayName, notes } = body;
         if (!email || typeof email !== 'string') return res.status(400).json({ error: 'email required' });
         const clean = email.trim().toLowerCase();
-        const domain = clean.split('@')[1];
-        if (!domain || !TRUSTED_DOMAINS.has(domain)) {
-          return res.status(400).json({ error: `Email must be on a trusted domain (${Array.from(TRUSTED_DOMAINS).join(', ')})` });
+        // Basic shape check only — any email with a domain is acceptable.
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+          return res.status(400).json({ error: 'Enter a valid email address' });
         }
         if (!displayName || typeof displayName !== 'string') return res.status(400).json({ error: 'displayName required' });
         // Phone is captured but not validated strictly in Phase 1 (Phase 2 will enforce E.164).

@@ -206,11 +206,9 @@ async function verifyFirebaseIdToken(idToken: string, authToken?: string): Promi
     const user = data.users?.[0];
     if (!user?.email) return null;
     const email = String(user.email).toLowerCase();
-    const domain = email.split('@')[1];
-    if (domain !== 'marxcorporate.com' && domain !== 'stashshop.co.uk') return null;
+    // No domain fence — authorisation is governed by the allow-list only.
     // Owner is always authorised (bootstrap safety net).
     if (email === OWNER_EMAIL.toLowerCase()) return { email };
-    // Anyone else must be on the allow-list.
     const ok = await isOnAllowList(email, authToken);
     if (!ok) return null;
     return { email };
