@@ -47,14 +47,33 @@ let cachedChannelsAt = 0;
 async function resolveChannels(token: string): Promise<ChannelMap[]> {
   const now = Date.now();
   if (cachedChannels && now - cachedChannelsAt < 10 * 60_000) return cachedChannels;
-  const resp = await fetch(`${SLACK_API}/conversations.list?types=public_channel,private_channel&limit=1000`, {
+
+  // Fetch public and private channels as two separate calls so we don't need
+  // `groups:read` for workspaces that only use public channels. If the bot
+  // doesn't have `groups:read`, the private call fails with missing_scope and
+  // we simply continue with the public list.
+  const combined: ChannelMap[] = [];
+
+  const pubResp = await fetch(`${SLACK_API}/conversations.list?types=public_channel&limit=1000`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const data: any = await resp.json();
-  if (!data.ok) throw new Error(`slack conversations.list failed: ${data.error}`);
-  cachedChannels = (data.channels || []).map((c: any) => ({ id: c.id, name: c.name }));
+  const pub: any = await pubResp.json();
+  if (!pub.ok) throw new Error(`slack conversations.list (public) failed: ${pub.error}`);
+  for (const c of (pub.channels || [])) combined.push({ id: c.id, name: c.name });
+
+  try {
+    const privResp = await fetch(`${SLACK_API}/conversations.list?types=private_channel&limit=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const priv: any = await privResp.json();
+    if (priv.ok) {
+      for (const c of (priv.channels || [])) combined.push({ id: c.id, name: c.name });
+    }
+  } catch { /* groups:read not granted — safe to skip */ }
+
+  cachedChannels = combined;
   cachedChannelsAt = now;
-  return cachedChannels!;
+  return cachedChannels;
 }
 
 function channelDisplayName(id: string, channels: ChannelMap[] | null): string {

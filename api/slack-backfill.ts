@@ -25,17 +25,32 @@ const DEFAULT_EMB_NAME = process.env.SLACK_CHANNEL_EMB_NAME || 'embroidery-updat
 interface ChannelRef { id: string; name: string; display: 'print-updates' | 'embroidery-updates' }
 
 async function resolveTrackedChannels(token: string): Promise<ChannelRef[]> {
-  const resp = await fetch(`${SLACK_API}/conversations.list?types=public_channel,private_channel&limit=1000`, {
+  // Public and private channels are fetched separately so missing `groups:read`
+  // scope doesn't take the whole call down when the channels are public.
+  const raw: { id: string; name: string }[] = [];
+
+  const pubResp = await fetch(`${SLACK_API}/conversations.list?types=public_channel&limit=1000`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const data: any = await resp.json();
-  if (!data.ok) throw new Error(`conversations.list failed: ${data.error}`);
+  const pub: any = await pubResp.json();
+  if (!pub.ok) throw new Error(`conversations.list (public) failed: ${pub.error}`);
+  for (const c of (pub.channels || [])) raw.push({ id: c.id, name: c.name });
+
+  try {
+    const privResp = await fetch(`${SLACK_API}/conversations.list?types=private_channel&limit=1000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const priv: any = await privResp.json();
+    if (priv.ok) {
+      for (const c of (priv.channels || [])) raw.push({ id: c.id, name: c.name });
+    }
+  } catch { /* groups:read not granted — safe to skip */ }
 
   const envPrint = process.env.SLACK_CHANNEL_PRINT_ID;
   const envEmb = process.env.SLACK_CHANNEL_EMB_ID;
 
   const out: ChannelRef[] = [];
-  for (const c of (data.channels || [])) {
+  for (const c of raw) {
     if (envPrint && c.id === envPrint) out.push({ id: c.id, name: c.name, display: 'print-updates' });
     else if (envEmb && c.id === envEmb) out.push({ id: c.id, name: c.name, display: 'embroidery-updates' });
     else if (!envPrint && c.name === DEFAULT_PRINT_NAME) out.push({ id: c.id, name: c.name, display: 'print-updates' });
