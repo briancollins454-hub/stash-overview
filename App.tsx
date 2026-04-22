@@ -77,6 +77,7 @@ const BatchFulfillment = lazyRetry(() => import('./components/BatchFulfillment')
 const FinancialDashboard = lazyRetry(() => import('./components/FinancialDashboard'));
 const SalesAnalytics = lazyRetry(() => import('./components/SalesAnalytics'));
 const ShippedNotInvoiced = lazyRetry(() => import('./components/ShippedNotInvoiced'));
+const CreditBlockList = lazyRetry(() => import('./components/CreditBlockList'));
 const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 const CommandCenter = lazyRetry(() => import('./components/CommandCenter'));
 const MorningBriefing = lazyRetry(() => import('./components/MorningBriefing'));
@@ -252,7 +253,7 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
     username: user.email || '',
     role: 'superuser',
     displayName: user.displayName || user.email || 'Admin',
-    allowedTabs: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','sales','users','manual','alerts','settings','briefing','priority','digest','shipped-not-invoiced'],
+    allowedTabs: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','sales','users','manual','alerts','settings','briefing','priority','digest','shipped-not-invoiced','credit-block'],
   };
 
   return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
@@ -274,7 +275,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'priority', 'digest', 'shipped-not-invoiced', 'cloud-health'];
+  const validTabs = ['dashboard', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'cloud-health'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2437,7 +2438,7 @@ const App: React.FC = () => {
                   { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                   { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
-                  { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'digest', label: 'Email Digest' }] },
+                  { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'digest', label: 'Email Digest' }] },
                   { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                 ].map(group => {
                   const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
@@ -2533,7 +2534,7 @@ const App: React.FC = () => {
                       { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                       { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
-                      { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'digest', label: 'Email Digest' }] },
+                      { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'digest', label: 'Email Digest' }] },
                       { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                     ].map(group => {
                       const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
@@ -3119,6 +3120,19 @@ const App: React.FC = () => {
                     isDark={isDark}
                     settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Credit Block List Tab */}
+            {activeTab === 'credit-block' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Credit Block List Error">
+                  <CreditBlockList
+                    decoJobs={rawDecoJobs}
+                    isDark={isDark}
+                    onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
                   />
                 </ErrorBoundary>
               </Suspense>

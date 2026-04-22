@@ -60,6 +60,7 @@ const ALL_TABS = [
   { id: 'revenue', label: 'Revenue' },
   { id: 'sales', label: 'Sales' },
   { id: 'shipped-not-invoiced', label: 'Unbilled' },
+  { id: 'credit-block', label: 'Credit Block' },
   { id: 'digest', label: 'Digest' },
   { id: 'autolink', label: 'Linker' },
   { id: 'fulfill', label: 'Fulfill' },
