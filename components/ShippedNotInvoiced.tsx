@@ -11,7 +11,7 @@ interface Props {
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
-type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'orderTotal' | 'daysSinceShipped';
+type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'daysSinceShipped';
 type SortDir = 'asc' | 'desc';
 
 const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
@@ -80,7 +80,6 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         case 'jobNumber': av = a.jobNumber; bv = b.jobNumber; break;
         case 'customerName': av = a.customerName; bv = b.customerName; break;
         case 'outstandingBalance': av = a.outstandingBalance || 0; bv = b.outstandingBalance || 0; break;
-        case 'orderTotal': av = a.orderTotal || 0; bv = b.orderTotal || 0; break;
         case 'dateShipped': av = a.dateShipped || ''; bv = b.dateShipped || ''; break;
         case 'daysSinceShipped': av = a.daysSinceShipped; bv = b.daysSinceShipped; break;
         default: av = 0; bv = 0;
@@ -107,10 +106,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   };
 
   const exportCsv = () => {
-    const header = ['Job Number', 'PO Number', 'Customer', 'Job Name', 'Order Total', 'Outstanding', 'Date Shipped', 'Days Since Shipped'];
+    const header = ['Job Number', 'PO Number', 'Customer', 'Job Name', 'Outstanding', 'Date Shipped', 'Days Since Shipped'];
     const rows = filtered.map(j => [
       j.jobNumber, j.poNumber || '', j.customerName, j.jobName,
-      (j.orderTotal || 0).toFixed(2), (j.outstandingBalance || 0).toFixed(2),
+      (j.outstandingBalance || 0).toFixed(2),
       j.dateShipped || '', j.daysSinceShipped.toString()
     ]);
     const csv = [header, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
@@ -195,7 +194,6 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     ['jobNumber', 'Job #'],
                     ['customerName', 'Customer'],
                     ['', 'Job Name'],
-                    ['orderTotal', 'Order Total'],
                     ['outstandingBalance', 'Outstanding'],
                     ['dateShipped', 'Shipped'],
                     ['daysSinceShipped', 'Days Ago'],
@@ -226,7 +224,6 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                     </td>
                     <td className={`px-4 py-3 font-medium ${textPrimary}`}>{j.customerName}</td>
                     <td className={`px-4 py-3 ${textSecondary} max-w-[200px] truncate`}>{j.jobName}</td>
-                    <td className={`px-4 py-3 ${textPrimary} font-medium`}>{fmt(j.orderTotal || 0)}</td>
                     <td className="px-4 py-3 font-bold text-amber-500">{fmt(j.outstandingBalance || 0)}</td>
                     <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateShipped)}</td>
                     <td className="px-4 py-3">
