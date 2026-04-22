@@ -6,6 +6,7 @@ import {
   pd, daysBetween,
   type PriorityResult, type PrioritySection, type Urgency,
 } from '../services/priorityEngine';
+import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -51,7 +52,7 @@ type TimeFrameId = typeof TIME_FRAMES[number]['id'];
 
 /* ---------- Per-section metric helpers ---------- */
 
-function getMetricDays(job: DecoJob, section: PrioritySection, now: Date): number | null {
+function getMetricDays(job: DecoJob, section: PrioritySection, now: Date, readyAtMap?: ReadyAtMap): number | null {
   const due = pd(job.dateDue) || pd(job.productionDueDate);
   const ordered = pd(job.dateOrdered);
   switch (section.filterMetric) {
@@ -61,13 +62,20 @@ function getMetricDays(job: DecoJob, section: PrioritySection, now: Date): numbe
       return due ? daysBetween(now, due) : null;
     case 'days_past_due':
       return due ? daysBetween(due, now) : null;
+    case 'days_since_ready': {
+      const iso = readyAtMap?.[job.id];
+      if (!iso) return null; // not yet stamped on this client
+      const readyAt = new Date(iso);
+      if (Number.isNaN(readyAt.getTime())) return null;
+      return Math.max(0, daysBetween(readyAt, now));
+    }
     default:
       return null;
   }
 }
 
 function formatMetric(days: number | null, section: PrioritySection): string {
-  if (days === null) return '\u2014';
+  if (days === null) return section.filterMetric === 'days_since_ready' ? 'New' : '\u2014';
   switch (section.filterMetric) {
     case 'days_since_ordered':
       return `${days}d`;
@@ -78,6 +86,8 @@ function formatMetric(days: number | null, section: PrioritySection): string {
     case 'days_past_due':
       if (days <= 0) return 'Due today';
       return `${days}d`;
+    case 'days_since_ready':
+      return days === 0 ? 'Today' : `${days}d`;
     default:
       return `${days}d`;
   }
@@ -92,21 +102,23 @@ function metricColor(days: number | null, section: PrioritySection): string {
       if (days < 0) return Math.abs(days) >= 5 ? 'text-red-400 font-bold' : 'text-orange-400 font-bold';
       return days <= 3 ? 'text-amber-400 font-bold' : 'text-white/50';
     case 'days_past_due':
+    case 'days_since_ready':
       return days >= 10 ? 'text-red-400 font-bold' : days >= 5 ? 'text-orange-400 font-bold' : days >= 3 ? 'text-amber-400' : 'text-white/50';
     default:
       return 'text-white/50';
   }
 }
 
-function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number | null, filterMax: number | null, now: Date): boolean {
+function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number | null, filterMax: number | null, now: Date, readyAtMap?: ReadyAtMap): boolean {
   if (filterMin === null && filterMax === null) return true;
-  const metric = getMetricDays(job, section, now);
+  const metric = getMetricDays(job, section, now, readyAtMap);
   if (metric === null) return true;
   const lo = filterMin ?? 0;
   const hi = filterMax ?? Infinity;
   switch (section.filterMetric) {
     case 'days_since_ordered':
     case 'days_past_due':
+    case 'days_since_ready':
       return metric >= lo && metric <= hi;
     case 'days_until_due':
       return metric >= -hi && metric <= lo;
@@ -120,6 +132,7 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
 export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
+  const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
 
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
@@ -135,6 +148,18 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
     decoJobs.forEach(j => map.set(j.id, j));
     return Array.from(map.values());
   }, [decoJobs, financeJobs]);
+
+  // Reconcile per-job "became ready" timestamps whenever the job set changes.
+  // First observation anchors to date_completed (when present) or now,
+  // future syncs leave the stamp alone until the job leaves ready status.
+  useEffect(() => {
+    let cancelled = false;
+    if (allJobs.length === 0) return;
+    refreshReadyAtForJobs(allJobs).then(map => {
+      if (!cancelled) setReadyAtMap(map);
+    }).catch(() => { /* non-fatal — section just falls back to 'New' */ });
+    return () => { cancelled = true; };
+  }, [allJobs]);
 
   const active = useMemo(() =>
     allJobs.filter(j => {
@@ -215,6 +240,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
           onToggle={() => toggleSection(sec.key)}
           onNavigate={onNavigateToOrder}
           now={now}
+          readyAtMap={readyAtMap}
         />
       ))}
 
@@ -273,6 +299,7 @@ interface SectionCardProps {
   onToggle: () => void;
   onNavigate: (orderNum: string) => void;
   now: Date;
+  readyAtMap: ReadyAtMap;
 }
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
@@ -285,7 +312,7 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }: SectionCardProps) {
+function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap }: SectionCardProps) {
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
@@ -293,8 +320,8 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }:
   const filterMin = tf?.min ?? null;
   const filterMax = tf?.max ?? null;
   const items = useMemo(() =>
-    allItems.filter(r => passesFilter(r.job, section, filterMin, filterMax, now)),
-  [allItems, filterMin, filterMax, section, now]);
+    allItems.filter(r => passesFilter(r.job, section, filterMin, filterMax, now, readyAtMap)),
+  [allItems, filterMin, filterMax, section, now, readyAtMap]);
 
   const totalValue = items.reduce((a, r) => a + (r.job.orderTotal || r.job.billableAmount || 0), 0);
   const criticalCount = items.filter(r => r.urgency === 'critical').length;
@@ -304,7 +331,8 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }:
   const filterHint = (filterMin === null && filterMax === null) ? '' : (
     section.filterMetric === 'days_since_ordered' ? `Orders waiting ${filterMin}–${filterMax} days` :
     section.filterMetric === 'days_until_due' ? `Due within ${filterMin}–${filterMax} days` :
-    section.filterMetric === 'days_past_due' ? `Waiting ${filterMin}–${filterMax} days to ship` : ''
+    section.filterMetric === 'days_past_due' ? `Waiting ${filterMin}–${filterMax} days to ship` :
+    section.filterMetric === 'days_since_ready' ? `Ready ${filterMin}–${filterMax} days awaiting dispatch` : ''
   );
 
   return (
@@ -374,7 +402,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now }:
                 {items.map((item, i) => {
                   const us = URGENCY_STYLE[item.urgency];
                   const staff = extractSP(item.job.salesPerson) || '\u2014';
-                  const metric = getMetricDays(item.job, section, now);
+                  const metric = getMetricDays(item.job, section, now, readyAtMap);
                   const metricStr = formatMetric(metric, section);
                   const mStyle = metricColor(metric, section);
                   return (
