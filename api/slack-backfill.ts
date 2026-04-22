@@ -133,7 +133,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const botToken = process.env.SLACK_BOT_TOKEN;
+  // .trim() guards against trailing whitespace or newlines that sometimes
+  // come along when pasting tokens into the Vercel env var UI — without this
+  // the token looks fine in the dashboard but Slack returns invalid_auth.
+  const botToken = (process.env.SLACK_BOT_TOKEN || '').trim();
   if (!botToken) {
     res.status(500).json({ error: 'SLACK_BOT_TOKEN not configured' });
     return;

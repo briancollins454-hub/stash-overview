@@ -189,8 +189,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const signingSecret = process.env.SLACK_SIGNING_SECRET;
-  const botToken = process.env.SLACK_BOT_TOKEN;
+  // Trim env vars — pasting into Vercel's UI frequently leaves a trailing
+  // newline / space, which Slack then rejects as invalid_auth even though
+  // the token itself is valid. A defensive .trim() removes that whole class
+  // of bug.
+  const signingSecret = (process.env.SLACK_SIGNING_SECRET || '').trim();
+  const botToken = (process.env.SLACK_BOT_TOKEN || '').trim();
   if (!signingSecret || !botToken) {
     console.error('[slack-events] missing SLACK_SIGNING_SECRET or SLACK_BOT_TOKEN');
     res.status(500).json({ error: 'Slack not configured' });
