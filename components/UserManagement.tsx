@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock, ToggleLeft, ToggleRight } from 'lucide-react';
+import SeniorManagementAccess from './SeniorManagementAccess';
 
 export interface AppUser {
   id: string;
@@ -476,6 +477,17 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
             </div>
           )}
         </div>
+      )}
+
+      {/* Google sign-in allow-list (senior management). Superuser-only.
+          The existing username/password table above is left untouched so
+          it continues to work as a fallback if anyone loses Google access. */}
+      {currentUser.role === 'superuser' && (
+        <SeniorManagementAccess
+          token={token}
+          firebaseIdToken={firebaseIdToken}
+          isSuperuser={currentUser.role === 'superuser'}
+        />
       )}
     </div>
   );

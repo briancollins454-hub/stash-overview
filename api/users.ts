@@ -170,7 +170,30 @@ async function firestoreUpdate(docId: string, updates: Record<string, any>, auth
 }
 
 // ─── Firebase ID Token Verification ────────────────────────────────────────
-async function verifyFirebaseIdToken(idToken: string): Promise<{ email: string } | null> {
+// Admin operations authenticated with a Google ID token must now also be on
+// the senior-management allow-list (Firestore collection
+// `stash_authorized_users`). The owner email is always allowed so we can
+// never accidentally lock the system out.
+const OWNER_EMAIL = 'office@marxcorporate.com';
+const ALLOWLIST_COLLECTION = 'stash_authorized_users';
+function allowlistDocId(email: string): string {
+  return email.toLowerCase().replace(/@/g, '_at_').replace(/\./g, '_dot_');
+}
+async function isOnAllowList(email: string, authToken?: string): Promise<boolean> {
+  const id = allowlistDocId(email);
+  try {
+    const resp = await fetch(`${FIRESTORE_BASE}/${ALLOWLIST_COLLECTION}/${encodeURIComponent(id)}?key=${FIREBASE_API_KEY}`, {
+      headers: fsHeaders(authToken),
+    });
+    if (!resp.ok) return false;
+    const doc = await resp.json();
+    return doc?.fields?.is_active?.booleanValue !== false;
+  } catch {
+    return false;
+  }
+}
+
+async function verifyFirebaseIdToken(idToken: string, authToken?: string): Promise<{ email: string } | null> {
   try {
     // Use Firebase Auth REST API to verify the ID token and get user info
     const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`, {
@@ -182,19 +205,25 @@ async function verifyFirebaseIdToken(idToken: string): Promise<{ email: string }
     const data = await resp.json();
     const user = data.users?.[0];
     if (!user?.email) return null;
-    const domain = user.email.split('@')[1]?.toLowerCase();
+    const email = String(user.email).toLowerCase();
+    const domain = email.split('@')[1];
     if (domain !== 'marxcorporate.com' && domain !== 'stashshop.co.uk') return null;
-    return { email: user.email };
+    // Owner is always authorised (bootstrap safety net).
+    if (email === OWNER_EMAIL.toLowerCase()) return { email };
+    // Anyone else must be on the allow-list.
+    const ok = await isOnAllowList(email, authToken);
+    if (!ok) return null;
+    return { email };
   } catch {
     return null;
   }
 }
 
 // ─── Auth Check ────────────────────────────────────────────────────────────
-async function requireAdmin(tokenStr: string | undefined, firebaseIdToken?: string): Promise<{ userId: string; role: string }> {
+async function requireAdmin(tokenStr: string | undefined, firebaseIdToken?: string, authToken?: string): Promise<{ userId: string; role: string }> {
   if (firebaseIdToken) {
-    const result = await verifyFirebaseIdToken(firebaseIdToken);
-    if (!result) throw new Error('Invalid Firebase token or unauthorized domain');
+    const result = await verifyFirebaseIdToken(firebaseIdToken, authToken);
+    if (!result) throw new Error('Invalid Firebase token, unauthorized domain, or email not on allow-list');
     return { userId: `google:${result.email}`, role: 'superuser' };
   }
   if (!tokenStr) throw new Error('Authentication required');
@@ -278,14 +307,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // ─── LIST USERS ──────────────────────────────────
       case 'list': {
-        await requireAdmin(token, firebaseIdToken);
+        await requireAdmin(token, firebaseIdToken, authToken);
         const users = await firestoreList(authToken);
         return res.json(users.map(formatUser));
       }
 
       // ─── CREATE USER ─────────────────────────────────
       case 'create': {
-        const caller = await requireAdmin(token, firebaseIdToken);
+        const caller = await requireAdmin(token, firebaseIdToken, authToken);
         const { firstName, lastName, username, password, role } = data;
         if (!firstName || !lastName || !username || !password) {
           return res.status(400).json({ error: 'All fields are required' });
@@ -319,7 +348,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // ─── UPDATE USER ─────────────────────────────────
       case 'update': {
-        const caller = await requireAdmin(token, firebaseIdToken);
+        const caller = await requireAdmin(token, firebaseIdToken, authToken);
         const { userId, firstName, lastName, role, password, isActive, allowedTabs } = data;
         if (!userId) return res.status(400).json({ error: 'userId required' });
 
@@ -354,7 +383,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // ─── DELETE USER (soft delete) ────────────────────
       case 'delete': {
-        const caller = await requireAdmin(token, firebaseIdToken);
+        const caller = await requireAdmin(token, firebaseIdToken, authToken);
         const { userId } = data;
         if (!userId) return res.status(400).json({ error: 'userId required' });
         if (userId === caller.userId) {

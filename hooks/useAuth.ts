@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { auth, loginWithGoogle, logout as firebaseLogout, isAuthorizedEmail } from '../firebase';
+import { auth, loginWithGoogle, logout as firebaseLogout, isAuthorizedEmail, checkServerAuthorization } from '../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 export interface CustomUser {
@@ -63,28 +63,63 @@ export function useAuth() {
     }
   }, []);
 
-  // Firebase auth listener
+  // Firebase auth listener. The listener itself is synchronous, but the
+  // authorisation check requires a trip to the server (Firestore allow-
+  // list). We run it inside an async IIFE so the subscription stays
+  // non-blocking while the decision is being made.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // Only set Firebase user if we don't have a custom user
-      if (!localStorage.getItem(CUSTOM_AUTH_KEY)) {
-        if (currentUser) {
-          if (isAuthorizedEmail(currentUser.email)) {
+      if (localStorage.getItem(CUSTOM_AUTH_KEY)) {
+        // Custom username/password session takes precedence; ignore the
+        // Firebase listener in that case.
+        setIsAuthLoading(false);
+        return;
+      }
+      if (!currentUser) {
+        setUser(null);
+        setIsAuthLoading(false);
+        return;
+      }
+
+      (async () => {
+        // Fast-path: reject off-domain accounts without burning a server
+        // call. The server enforces this again as defence-in-depth.
+        if (!isAuthorizedEmail(currentUser.email)) {
+          setUser(null);
+          setAuthError(
+            `Access Denied: ${currentUser.email} is not on a trusted domain. ` +
+            'Please use your @marxcorporate.com or @stashshop.co.uk account.'
+          );
+          try { await firebaseLogout(); } catch {}
+          setIsAuthLoading(false);
+          return;
+        }
+
+        // Senior-management allow-list check (authoritative gate).
+        try {
+          const idToken = await currentUser.getIdToken();
+          const result = await checkServerAuthorization(idToken);
+          if (result.authorized) {
             setUser(currentUser);
             setAuthError(null);
           } else {
             setUser(null);
-            setAuthError(`Access Denied: ${currentUser.email} is not authorized. Please use a @marxcorporate.com or @stashshop.co.uk email.`);
-            firebaseLogout();
+            const msg = result.reason === 'not_on_list'
+              ? `Access Denied: ${currentUser.email} is not on the senior-management allow-list. Contact the system owner to request access.`
+              : result.reason === 'invalid_token_or_domain'
+                ? `Access Denied: we could not verify your account.`
+                : `Access Denied: authorization check failed. Please try again in a moment.`;
+            setAuthError(msg);
+            try { await firebaseLogout(); } catch {}
           }
-        } else {
-          // Only clear if no custom user
-          if (!localStorage.getItem(CUSTOM_AUTH_KEY)) {
-            setUser(null);
-          }
+        } catch {
+          setUser(null);
+          setAuthError('Authorization check failed. Please try again.');
+          try { await firebaseLogout(); } catch {}
+        } finally {
+          setIsAuthLoading(false);
         }
-      }
-      setIsAuthLoading(false);
+      })();
     });
     return () => unsubscribe();
   }, []);
