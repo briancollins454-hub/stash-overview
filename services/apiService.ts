@@ -572,7 +572,10 @@ export const fetchDecoFinancials = async (
                 dateShipped: job.date_shipped || job.date_completed,
                 itemsProduced: 0, totalItems: 0,
                 notes: '', productCode: '', items: [],
-                orderTotal: parseFloat(job.item_amount) || parseFloat(job.total) || undefined,
+                // Prefer grand total (inc. tax) so it matches outstandingBalance. Deco's
+                // `item_amount` is pre-tax subtotal and would wrongly display lower than
+                // the outstanding balance on VAT-bearing orders.
+                orderTotal: parseFloat(job.total) || parseFloat(job.order_total) || parseFloat(job.item_amount) || undefined,
                 orderSubtotal: parseFloat(job.item_amount) || undefined,
                 orderTax: parseFloat(job.tax_amount) || parseFloat(job.tax) || undefined,
                 paymentStatus: job.payment_status?.toString(),
