@@ -85,6 +85,7 @@ const PriorityBoard = lazyRetry(() => import('./components/PriorityBoard'));
 const DigestManager = lazyRetry(() => import('./components/DigestManager'));
 const ProductionIntelligence = lazyRetry(() => import('./components/ProductionIntelligence'));
 const DecoProductionTable = lazyRetry(() => import('./components/DecoProductionTable'));
+const SlackFeeds = lazyRetry(() => import('./components/SlackFeeds'));
 const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
 const CloudHealth = lazyRetry(() => import('./components/CloudHealth'));
 import NotificationBell from './components/NotificationBell';
@@ -2930,6 +2931,9 @@ const App: React.FC = () => {
             {activeTab === 'production' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <div className="space-y-6">
+                  <ErrorBoundary fallbackTitle="Slack Feeds Error">
+                    <SlackFeeds />
+                  </ErrorBoundary>
                   <ErrorBoundary fallbackTitle="Production Intelligence Error">
                     <ProductionIntelligence
                       decoJobs={rawDecoJobs}
