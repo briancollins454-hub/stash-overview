@@ -1182,18 +1182,25 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             { label: 'Other / On Hold', count: scopedJobs.filter(j => j.status === 'On Hold' || j.status === 'Awaiting Artwork' || j.status === 'Awaiting Review' || j.status === 'Awaiting PO' || j.status === 'Not Ordered').length },
         ];
 
-        // Decoration summary (Embroidery + per-print-type)
+        // Decoration summary (Embroidery + per-print-type).
+        // Only include rows that actually have work — hides the long list of
+        // zero-qty print types so the summary stays clean.
         const embJobCount = rows.filter(r => r.embQty > 0).length;
-        const decorationRows = [
-            { label: 'Embroidery', jobs: embJobCount, qty: totals.embQty, extra: `${fmtStitches(totals.embStitches)} stitches`, highlight: true },
-            ...printTypeCols.map(t => ({
-                label: t,
-                jobs: rows.filter(r => r.perType[t] > 0).length,
-                qty: totals.perType[t],
-                extra: '',
-                highlight: false,
-            })),
-        ];
+        const decorationRows: { label: string; jobs: number; qty: number; extra: string; highlight: boolean }[] = [];
+        if (totals.embQty > 0) {
+            decorationRows.push({ label: 'Embroidery', jobs: embJobCount, qty: totals.embQty, extra: `${fmtStitches(totals.embStitches)} stitches`, highlight: true });
+        }
+        for (const t of printTypeCols) {
+            if (totals.perType[t] > 0) {
+                decorationRows.push({
+                    label: t,
+                    jobs: rows.filter(r => r.perType[t] > 0).length,
+                    qty: totals.perType[t],
+                    extra: '',
+                    highlight: false,
+                });
+            }
+        }
         if (totals.otherPrintQty > 0) {
             decorationRows.push({ label: 'Other Print', jobs: rows.filter(r => r.otherPrintQty > 0).length, qty: totals.otherPrintQty, extra: '', highlight: false });
         }
@@ -1290,7 +1297,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         <td>TOTAL</td>
                         <td class="num">—</td>
                         <td class="num">${(totals.embQty + totals.printQty + totals.otherPrintQty + totals.untypedQty).toLocaleString()}</td>
-                        <td>${fmtStitches(totals.embStitches)} stitches (embroidery)</td>
+                        <td>${totals.embStitches > 0 ? `${fmtStitches(totals.embStitches)} stitches (embroidery)` : ''}</td>
                     </tr>
                 </tbody>
             </table>
