@@ -3080,6 +3080,7 @@ const App: React.FC = () => {
                 <ErrorBoundary fallbackTitle="Financial Dashboard Error">
                   <FinancialDashboard
                     decoJobs={rawDecoJobs}
+                    shopifyOrders={rawShopifyOrders}
                     isDark={isDark}
                     settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}

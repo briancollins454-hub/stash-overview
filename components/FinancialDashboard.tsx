@@ -7,7 +7,7 @@ import {
   FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
-import { DecoJob } from '../types';
+import { DecoJob, ShopifyOrder } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
 import { getItem, setItem } from '../services/localStore';
 import { supabaseFetch } from '../services/supabase';
@@ -15,6 +15,7 @@ import { ApiSettings } from './SettingsModal';
 
 interface Props {
   decoJobs: DecoJob[]; // fallback / cached jobs from main sync
+  shopifyOrders?: ShopifyOrder[]; // raw Shopify orders for unfulfilled value metric
   isDark: boolean;
   settings: ApiSettings;
   onNavigateToOrder?: (orderNumber: string) => void;
@@ -185,7 +186,7 @@ const paymentStatusColor = (ps: string | undefined): string => {
   return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
 };
 
-const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
+const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isDark, settings, onNavigateToOrder }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('customers');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortField, setSortField] = useState<SortField>('balance');
@@ -654,6 +655,23 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     };
   }, [customerAccounts, allJobs]);
 
+  // Rolling 365-day value of Shopify orders with ANY unfulfilled item
+  // (i.e. fulfillmentStatus unfulfilled OR partial).
+  const unfulfilled365 = useMemo(() => {
+    const cutoff = Date.now() - 365 * 24 * 60 * 60 * 1000;
+    let value = 0;
+    let count = 0;
+    for (const o of shopifyOrders) {
+      if (o.fulfillmentStatus !== 'unfulfilled' && o.fulfillmentStatus !== 'partial') continue;
+      const d = Date.parse(o.date);
+      if (!Number.isFinite(d) || d < cutoff) continue;
+      const price = parseFloat(o.totalPrice || '0');
+      if (Number.isFinite(price)) value += price;
+      count += 1;
+    }
+    return { value, count };
+  }, [shopifyOrders]);
+
   // Filtered & sorted data
   const filteredAccounts = useMemo(() => {
     let list = [...customerAccounts];
@@ -1102,10 +1120,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
       {/* Second row: Billing + Aging */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className={`${card} p-4`}>
-          <div className={headerText}>Total Billed</div>
-          <div className="text-xl sm:text-2xl font-black text-gray-900 dark:text-white mt-1">{formatCurrency(summary.totalBillable)}</div>
-          <div className="text-[10px] text-gray-400 mt-0.5">All orders</div>
+        <div className={`${card} p-4`} title="Total value of Shopify orders created in the last 365 days that still have any unfulfilled items (unfulfilled or partial).">
+          <div className={headerText}>Unfulfilled Shopify (365d)</div>
+          <div className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{formatCurrency(unfulfilled365.value)}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">{unfulfilled365.count} order{unfulfilled365.count !== 1 ? 's' : ''} · rolling 365 days</div>
         </div>
         <div className={`${card} p-4`}>
           <div className={headerText}>Total Paid</div>
