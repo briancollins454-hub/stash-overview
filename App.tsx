@@ -769,10 +769,15 @@ const App: React.FC = () => {
             }
 
             if (sOrders.length > 0 && cloudFetchOk) {
-                // Only push unfulfilled/partial orders to cloud — NOT fulfilled orders
-                // This prevents stale fulfilled orders from inflating counts on other devices
+                // Only push unfulfilled/partial orders to cloud — NOT fulfilled orders.
+                // Also pass the IDs of orders that are now fulfilled/restocked locally
+                // so saveCloudOrders can prune any stale copies still sitting in cloud
+                // marked as unfulfilled (accumulated drift — fixes CloudHealth delta).
                 const cloudOrders = mergedOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked');
-                saveCloudOrders(apiSettings, cloudOrders).catch(console.error);
+                const staleIds = mergedOrders
+                    .filter(o => o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked')
+                    .map(o => o.id);
+                saveCloudOrders(apiSettings, cloudOrders, staleIds).catch(console.error);
             }
 
             // Push only API-fresh deco jobs to cloud — never stale local cache
@@ -1308,7 +1313,11 @@ const App: React.FC = () => {
             // bootstrap mid-flight sync data that isn't user-authored).
             const hasLocalOrders = initialOrders.length > 0;
             if (hasLocalOrders) {
-                saveCloudOrders(apiSettings, initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked')).catch(e => console.warn('Order cache push failed:', e));
+                const activeOrders = initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked');
+                const staleIds = initialOrders
+                    .filter(o => o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked')
+                    .map(o => o.id);
+                saveCloudOrders(apiSettings, activeOrders, staleIds).catch(e => console.warn('Order cache push failed:', e));
             }
 
             setSyncStatusMsg('Fetching cloud data...');

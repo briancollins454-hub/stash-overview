@@ -298,8 +298,12 @@ const CloudHealth: React.FC<Props> = ({ localCounts }) => {
           pool.splice(j, 1);
         }
         const found = await supabaseExistsBatch(def.table, def.idColumn!, picked);
-        const missing = picked.filter(p => !found.has(p));
-        results[def.table] = { checked: picked.length, missing: missing.length, sample: missing.slice(0, 5) };
+        // Use a Set to dedupe — `picked` is unique by construction but clamp
+        // defensively so the display can never show a nonsense ratio like 101/100.
+        const missingSet = new Set<string>();
+        picked.forEach(p => { if (!found.has(p)) missingSet.add(p); });
+        const missingCount = Math.min(missingSet.size, picked.length);
+        results[def.table] = { checked: picked.length, missing: missingCount, sample: Array.from(missingSet).slice(0, 5) };
       } catch (e: any) {
         results[def.table] = { checked: 0, missing: -1, sample: [String(e?.message || e).slice(0, 120)] };
       }

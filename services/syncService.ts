@@ -138,16 +138,51 @@ export const fetchCloudData = async (settings: ApiSettings, opts?: { includeOrde
     }
 };
 
-export const saveCloudOrders = async (settings: ApiSettings, orders: ShopifyOrder[]) => {
-    if (orders.length === 0) return;
+/**
+ * Pushes the set of orders that belong in the cloud (typically unfulfilled /
+ * partial). Also prunes the cloud of:
+ *   1. Any row whose stored fulfillmentStatus is fulfilled/restocked (the
+ *      original safety net), and
+ *   2. Any row whose order_id appears in `staleIds` — these are orders that
+ *      USED to be unfulfilled (so they were pushed to cloud) but have since
+ *      been fulfilled / restocked locally. Without this explicit cleanup,
+ *      those rows stay in cloud forever still tagged as unfulfilled, causing
+ *      Cloud Health "negative delta" drift.
+ */
+export const saveCloudOrders = async (
+    settings: ApiSettings,
+    orders: ShopifyOrder[],
+    staleIds?: string[]
+) => {
     const uniqueOrders = Array.from(new Map(orders.map(o => [o.id, o])).values());
+    const uniqueStale = staleIds ? Array.from(new Set(staleIds.filter(Boolean))) : [];
+    if (uniqueOrders.length === 0 && uniqueStale.length === 0) return;
     return trackSave('stash_orders', uniqueOrders.length, async () => {
         try {
-            // Clean fulfilled/restocked orders from cloud — they should not be synced
+            // 1. Delete anything in the cloud that's marked fulfilled/restocked.
             try {
                 await fetchWithProxy(`stash_orders?order_data->>fulfillmentStatus=in.(fulfilled,restocked)`, 'DELETE');
             } catch (cleanupErr) {
                 console.warn('Cloud order cleanup failed (non-fatal):', cleanupErr);
+            }
+
+            // 2. Delete rows explicitly flagged as now-fulfilled locally — in
+            // URL-safe batches (PostgREST in.() + URL length limits).
+            if (uniqueStale.length > 0) {
+                const STALE_BATCH = 50;
+                for (let i = 0; i < uniqueStale.length; i += STALE_BATCH) {
+                    const batch = uniqueStale.slice(i, i + STALE_BATCH);
+                    const list = batch.map(id => `"${String(id).replace(/"/g, '\\"')}"`).join(',');
+                    try {
+                        await fetchWithProxy(
+                            `stash_orders?order_id=in.(${encodeURIComponent(list)})`,
+                            'DELETE'
+                        );
+                    } catch (staleErr) {
+                        console.warn('Cloud stale-order prune failed (non-fatal):', staleErr);
+                        break; // stop trying on the first failure; we'll retry next sync
+                    }
+                }
             }
 
             const batchSize = 20;
