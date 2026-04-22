@@ -42,7 +42,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [carriersLoaded, setCarriersLoaded] = useState(false);
   const [selectedCarrier, setSelectedCarrier] = useState('');
   const [selectedService, setSelectedService] = useState('');
-  const [weight, setWeight] = useState({ value: 250, units: 'grams' as const });
+  const [weight, setWeight] = useState<{ value: number; units: string }>({ value: 250, units: 'grams' });
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [labelResult, setLabelResult] = useState<ShipStationLabelResult | null>(null);
   const [labelError, setLabelError] = useState<string | null>(null);
@@ -695,12 +695,12 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
                           {o.shopify.items.map((item, idx) => (
                             <div key={idx} className="flex items-center justify-between">
                               <div className="min-w-0 flex-1">
-                                <p className="text-[10px] font-bold text-white truncate">{item.title}</p>
-                                {item.variantTitle && <p className="text-[9px] text-gray-500">{item.variantTitle}</p>}
+                                <p className="text-[10px] font-bold text-white truncate">{item.name}</p>
+                                {item.sku && <p className="text-[9px] text-gray-500">{item.sku}</p>}
                               </div>
                               <div className="flex items-center gap-3 shrink-0">
                                 <span className="text-[9px] font-black text-gray-400">×{item.quantity}</span>
-                                <span className="text-[10px] font-bold text-gray-300">£{parseFloat(item.price).toFixed(2)}</span>
+                                <span className="text-[10px] font-bold text-gray-300">£{parseFloat(item.price ?? '0').toFixed(2)}</span>
                               </div>
                             </div>
                           ))}

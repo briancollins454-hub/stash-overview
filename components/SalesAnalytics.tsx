@@ -197,7 +197,7 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
         page++;
         setProgress(`Fetching page ${page}...`);
 
-        const res = await fetch('/api/shopify', {
+        const res: Response = await fetch('/api/shopify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -208,9 +208,9 @@ const SalesAnalytics: React.FC<Props> = ({ settings, isDark }) => {
 
         if (!res.ok) throw new Error(`API error: ${res.status}`);
 
-        const json = await res.json();
+        const json: any = await res.json();
         if (json.errors) throw new Error(json.errors.map((e: any) => e.message).join('; '));
-        const data = json?.data?.orders;
+        const data: any = json?.data?.orders;
         if (!data) throw new Error('No order data returned — check date range');
 
         const nodes = data.edges.map((e: any) => e.node as OrderNode);

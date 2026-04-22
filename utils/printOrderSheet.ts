@@ -74,7 +74,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   // Two-column header: logo+barcode+details LEFT, shipping address RIGHT
   const addr = order.shopify.shippingAddress;
   const addrLines = addr
-    ? [addr.name, addr.address1, addr.address2, addr.city, addr.zip, addr.country].filter(Boolean).map(l => escapeHtml(l))
+    ? [addr.name, addr.address1, addr.address2, addr.city, addr.zip, addr.country].filter((l): l is string => Boolean(l)).map(l => escapeHtml(l))
     : [];
   const noAddressWarning = addrLines.length === 0
     ? '<div style="background:#fef2f2;border:2px solid #dc2626;color:#dc2626;padding:6px 10px;font-weight:bold;font-size:12px;text-align:center;margin:4px 0;">\u26A0 NO SHIPPING ADDRESS ON FILE \u2014 Check Shopify / ShipStation</div>'

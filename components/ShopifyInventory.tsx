@@ -845,7 +845,7 @@ const ShopifyInventory: React.FC = () => {
                                 <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
                               </div>
                             ) : (
-                              <button onClick={() => startEdit({ inventoryItemId: v.inventoryItemId, available: v.available, price: v.price })} className="text-slate-400 hover:text-indigo-600"><Edit className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => startEdit({ inventoryItemId: v.inventoryItemId, variantId: v.variantId, available: v.available, price: v.price })} className="text-slate-400 hover:text-indigo-600"><Edit className="w-3.5 h-3.5" /></button>
                             )}
                           </td>
                         </tr>

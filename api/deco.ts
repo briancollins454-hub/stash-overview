@@ -10,13 +10,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const domain = process.env.DECO_DOMAIN;
-  const username = process.env.DECO_USERNAME;
-  const password = process.env.DECO_PASSWORD;
+  const rawDomain = process.env.DECO_DOMAIN;
+  const rawUser = process.env.DECO_USERNAME;
+  const rawPass = process.env.DECO_PASSWORD;
 
-  if (!domain || !username || !password) {
+  if (!rawDomain || !rawUser || !rawPass) {
     return res.status(500).json({ error: 'Deco credentials not configured on server' });
   }
+  // Re-bind as definitely-string so callers inside nested closures keep the
+  // narrowing that TypeScript otherwise drops once we leave this scope.
+  const domain: string = rawDomain;
+  const username: string = rawUser;
+  const password: string = rawPass;
 
   const { action, endpoint, params, jobIds } = req.body || {};
 

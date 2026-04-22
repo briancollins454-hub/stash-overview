@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from 'react';
-import { UnifiedOrder, DecoJob, ApiSettings } from '../types';
+import { UnifiedOrder, DecoJob } from '../types';
+import { ApiSettings } from './SettingsModal';
 import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
 import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
 import { 
@@ -853,7 +854,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                 >
                                     <MessageSquare className="w-3.5 h-3.5" />
                                     {(noteCounts?.[order.shopify.id] || 0) > 0 ? (
-                                        <span>{noteCounts[order.shopify.id]} Note{noteCounts[order.shopify.id] !== 1 ? 's' : ''}</span>
+                                        <span>{noteCounts![order.shopify.id]} Note{noteCounts![order.shopify.id] !== 1 ? 's' : ''}</span>
                                     ) : (
                                         <span>Chat</span>
                                     )}

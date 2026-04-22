@@ -46,15 +46,18 @@ async function showPushNotification(title: string, body: string, tag: string) {
   try {
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.ready;
-      await reg.showNotification(title, {
+      // `vibrate` and `renotify` are non-standard extensions (Chrome/Android)
+      // that the current TS DOM lib does not type. Cast to sidestep the type.
+      const opts: NotificationOptions = {
         body,
         tag,
         icon: '/icon-192.png',
         badge: '/icon-192.png',
-        vibrate: [200, 100, 200],
-        renotify: true,
         requireInteraction: false,
-      });
+      };
+      (opts as any).vibrate = [200, 100, 200];
+      (opts as any).renotify = true;
+      await reg.showNotification(title, opts);
       return;
     }
   } catch {}

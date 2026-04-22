@@ -1728,9 +1728,10 @@ const App: React.FC = () => {
       for (const o of sample) {
         const unmapped = o.shopify.items.filter(i => !i.linkedDecoItemId && i.itemStatus !== 'fulfilled');
         if (unmapped.length > 0 && o.deco) {
+          const decoItems = o.deco!.items;
           console.log(`[EAN Auto-Map] Order ${o.shopify.orderNumber}: ${unmapped.length} unmapped items`);
           unmapped.slice(0, 2).forEach(i => console.log(`  Shopify: "${i.name}" sku="${i.sku}" ean="${i.ean}"`));
-          o.deco.items.slice(0, 2).forEach(d => console.log(`  Deco: "${d.name}" vendorSku="${d.vendorSku}" productCode="${d.productCode}" ean="${d.ean}"`));
+          decoItems.slice(0, 2).forEach(d => console.log(`  Deco: "${d.name}" vendorSku="${d.vendorSku}" productCode="${d.productCode}" ean="${d.ean}"`));
         }
       }
     }

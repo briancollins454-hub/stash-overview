@@ -4,13 +4,7 @@ export const config = { runtime: 'edge' };
 // CRUD for observations, learned patterns, and entity knowledge.
 // Stores what the AI has seen, learned, and knows about people/environment.
 
-interface SupabaseHeaders {
-  [key: string]: string | undefined;
-  'Content-Type': string;
-  apikey: string;
-  Authorization: string;
-  Prefer?: string;
-}
+type SupabaseHeaders = Record<string, string>;
 
 function getConfig(req: Request) {
   const origin = req.headers.get('origin') || '';
