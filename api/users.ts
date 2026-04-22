@@ -80,10 +80,13 @@ function toFirestoreFields(data: Record<string, any>): Record<string, any> {
 }
 
 // Default tab access per role
+// Keep in sync with ALL_TABS in components/UserManagement.tsx and with
+// validTabs in App.tsx. When adding a new tab, add it here too so
+// freshly-created admin/superuser accounts get it by default.
 const DEFAULT_TABS: Record<string, string[]> = {
-  superuser: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts','settings'],
-  admin: ['dashboard','command','kanban','intelligence','production','reports','operations','stock','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','users','manual','alerts'],
-  manager: ['dashboard','command','kanban','production','operations','stock','mto','deco','fulfill','manual'],
+  superuser: ['dashboard','briefing','command','priority','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','sales','shipped-not-invoiced','digest','autolink','fulfill','analyst','finance','users','cloud-health','manual','alerts','settings'],
+  admin: ['dashboard','briefing','command','priority','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','sales','shipped-not-invoiced','digest','autolink','fulfill','analyst','finance','users','cloud-health','manual','alerts'],
+  manager: ['dashboard','briefing','command','priority','kanban','production','operations','stock','inventory','mto','deco','fulfill','manual'],
   viewer: ['dashboard','reports','revenue'],
 };
 

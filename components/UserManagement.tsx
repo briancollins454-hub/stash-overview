@@ -36,19 +36,30 @@ const ROLES = [
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
 ];
 
+// Keep this list in lock-step with the validTabs list in App.tsx and with
+// DEFAULT_TABS on the server (api/users.ts). If you add a tab to one, add
+// it here too so admins can grant/revoke access per user.
+// Intentionally omitted: 'guide' (one-time setup wizard) and 'widget' (the
+// embedded Shopify Admin block — auto-activated, never user-facing).
 const ALL_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'briefing', label: 'Briefing' },
   { id: 'command', label: 'Live' },
+  { id: 'priority', label: 'Priority' },
   { id: 'kanban', label: 'Kanban' },
   { id: 'intelligence', label: 'Intel' },
   { id: 'production', label: 'Production' },
   { id: 'reports', label: 'Reports' },
   { id: 'operations', label: 'Ops' },
   { id: 'stock', label: 'Stock' },
+  { id: 'inventory', label: 'Inventory' },
   { id: 'efficiency', label: 'Efficiency' },
   { id: 'mto', label: 'MTO' },
   { id: 'deco', label: 'Deco' },
   { id: 'revenue', label: 'Revenue' },
+  { id: 'sales', label: 'Sales' },
+  { id: 'shipped-not-invoiced', label: 'Unbilled' },
+  { id: 'digest', label: 'Digest' },
   { id: 'autolink', label: 'Linker' },
   { id: 'fulfill', label: 'Fulfill' },
   { id: 'analyst', label: 'Analyst' },
@@ -63,7 +74,7 @@ const ALL_TABS = [
 const DEFAULT_TABS: Record<string, string[]> = {
   superuser: ALL_TABS.map(t => t.id),
   admin: ALL_TABS.filter(t => t.id !== 'settings').map(t => t.id),
-  manager: ['dashboard','command','kanban','production','operations','stock','mto','deco','fulfill','manual'],
+  manager: ['dashboard','briefing','command','priority','kanban','production','operations','stock','inventory','mto','deco','fulfill','manual'],
   viewer: ['dashboard','reports','revenue'],
 };
 
