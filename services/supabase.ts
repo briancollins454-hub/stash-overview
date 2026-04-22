@@ -89,6 +89,11 @@ export const supabaseCount = async (table: string): Promise<number | null> => {
  * Check whether a given set of primary-key values exists in a cloud table.
  * Returns a Set of keys that WERE found in the cloud. Used by the Cloud
  * Health integrity check.
+ *
+ * Requests are split into small sub-batches so that long id strings (e.g.
+ * product pattern keys containing brand/category text) never blow past the
+ * URL length limit — which used to silently return 0 matches and cause a
+ * false "100/100 missing" alarm.
  */
 export const supabaseExistsBatch = async (
   table: string,
@@ -97,29 +102,44 @@ export const supabaseExistsBatch = async (
 ): Promise<Set<string>> => {
   const found = new Set<string>();
   if (!supabaseUrl || !supabaseKey || values.length === 0) return found;
-  try {
-    // PostgREST in.() syntax: quote every value and escape internal quotes,
-    // then URL-encode the whole comma list (but leave the =in.( ) syntax alone).
-    const filter = values
-      .map(v => `"${String(v).replace(/"/g, '\\"')}"`)
-      .join(',');
-    const url = `${supabaseUrl}/rest/v1/${table}?select=${column}&${column}=in.(${encodeURIComponent(filter)})`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-    });
-    if (!res.ok) return found;
-    const rows = await res.json();
-    if (Array.isArray(rows)) {
-      rows.forEach(r => {
-        if (r && r[column] != null) found.add(String(r[column]));
+
+  // Keep the encoded URL well below typical 4 KB / 8 KB proxy limits.
+  // Dynamically size each chunk based on the longest value so we don't
+  // overshoot when keys are long.
+  const avgLen = values.reduce((s, v) => s + String(v).length, 0) / values.length;
+  const maxLen = values.reduce((m, v) => Math.max(m, String(v).length), 0);
+  // Budget ~2.5 KB of raw key characters per request (URL-encoded expands
+  // roughly 3x). Minimum 5, maximum 50 per chunk.
+  const budget = 2500;
+  const baseline = Math.max(avgLen, maxLen);
+  const chunkSize = Math.max(5, Math.min(50, Math.floor(budget / (baseline + 4))));
+
+  for (let i = 0; i < values.length; i += chunkSize) {
+    const chunk = values.slice(i, i + chunkSize);
+    try {
+      // PostgREST in.() syntax: quote every value and escape internal quotes,
+      // then URL-encode the whole comma list (but leave the =in.( ) syntax alone).
+      const filter = chunk
+        .map(v => `"${String(v).replace(/"/g, '\\"')}"`)
+        .join(',');
+      const url = `${supabaseUrl}/rest/v1/${table}?select=${column}&${column}=in.(${encodeURIComponent(filter)})`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
       });
+      if (!res.ok) continue; // skip this chunk; others may still succeed
+      const rows = await res.json();
+      if (Array.isArray(rows)) {
+        rows.forEach(r => {
+          if (r && r[column] != null) found.add(String(r[column]));
+        });
+      }
+    } catch {
+      // Any failure on this chunk → move on; caller will see those keys as missing.
     }
-  } catch {
-    // Any failure → treat as "nothing found" (caller reports it as missing).
   }
   return found;
 };
