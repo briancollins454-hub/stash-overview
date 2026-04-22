@@ -65,6 +65,16 @@ interface TableDef {
   idColumn?: string;
   /** How to extract the same id from a local record for the integrity check. */
   localId?: (row: any) => string | null;
+  /**
+   * Optional predicate. If provided, the Cloud Health integrity check and
+   * the local-vs-cloud count comparison only consider rows passing this
+   * filter. Use this when the cloud intentionally stores a subset of the
+   * local data (e.g. stash_orders only keeps active orders — fulfilled /
+   * restocked are deleted from the cloud to keep it lean).
+   */
+  cloudScope?: (row: any) => boolean;
+  /** Short note shown on the card explaining a reduced cloud scope. */
+  cloudScopeNote?: string;
 }
 
 const TABLES: TableDef[] = [
@@ -74,6 +84,14 @@ const TABLES: TableDef[] = [
     localKey: 'stash_raw_shopify_orders',
     idColumn: 'order_id',
     localId: (r: any) => (r?.id ? String(r.id) : null),
+    // Cloud only keeps active orders — fulfilled/restocked are intentionally
+    // deleted from Supabase by saveCloudOrders() to keep the table lean.
+    // Compare like-for-like by filtering the local side the same way.
+    cloudScope: (o: any) => {
+      const s = o?.fulfillmentStatus;
+      return s !== 'fulfilled' && s !== 'restocked';
+    },
+    cloudScopeNote: 'Cloud intentionally excludes fulfilled & restocked orders',
   },
   {
     table: 'stash_deco_jobs',
@@ -195,9 +213,21 @@ const CloudHealth: React.FC<Props> = ({ localCounts }) => {
     await Promise.all(TABLES.map(async (def) => {
       setStats(prev => ({ ...prev, [def.table]: { ...prev[def.table], loading: true } }));
 
-      // Local count: prefer prop, fall back to IDB blob length.
+      // Local count: if the cloud only stores a filtered subset of the local
+      // data, we always load the blob and apply the filter so the local vs
+      // cloud comparison is apples-to-apples. Otherwise we prefer the fast
+      // prop count and fall back to the IDB blob length.
       let local: number | null = null;
-      if (localCounts && localCounts[def.table] !== undefined) {
+      if (def.cloudScope && def.localKey) {
+        try {
+          const blob = await getLocalItem<any>(def.localKey);
+          if (Array.isArray(blob)) local = blob.filter(def.cloudScope).length;
+          else if (blob && typeof blob === 'object') local = Object.values(blob).filter(def.cloudScope).length;
+          else local = 0;
+        } catch {
+          local = null;
+        }
+      } else if (localCounts && localCounts[def.table] !== undefined) {
         local = localCounts[def.table] ?? null;
       } else if (def.localKey) {
         try {
@@ -247,7 +277,8 @@ const CloudHealth: React.FC<Props> = ({ localCounts }) => {
         const blob = await getLocalItem<any>(def.localKey!);
         let ids: string[] = [];
         if (Array.isArray(blob)) {
-          ids = blob
+          const source = def.cloudScope ? blob.filter(def.cloudScope) : blob;
+          ids = source
             .map(r => (r && r.id ? String(r.id) : (def.table === 'stash_deco_jobs' && r?.jobNumber ? String(r.jobNumber) : null)))
             .filter((x): x is string => !!x);
         } else if (blob && typeof blob === 'object' && def.isRecord) {
@@ -430,6 +461,11 @@ const CloudHealth: React.FC<Props> = ({ localCounts }) => {
                     <span className="text-indigo-400/50">no recent saves logged</span>
                   )}
                 </div>
+                {def.cloudScopeNote && (
+                  <div className="text-[10px] text-indigo-400/70 italic pt-0.5" title={def.cloudScopeNote}>
+                    ⓘ {def.cloudScopeNote}
+                  </div>
+                )}
                 {integrityResult[def.table] && integrityResult[def.table].checked > 0 && (
                   <div className="text-[10px] text-indigo-200/70 flex items-center gap-1.5 pt-1">
                     {integrityResult[def.table].missing === 0 ? (
