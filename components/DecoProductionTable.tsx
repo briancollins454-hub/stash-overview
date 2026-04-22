@@ -2078,7 +2078,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                         <td className="px-3 py-2.5 text-center font-bold text-blue-300">{job.est.totalMinutes > 0 ? fmtTime(job.est.totalMinutes) : '—'}</td>
                                         <td className="px-3 py-2.5 text-center text-[9px] text-white/40">{job.est.isEmbroidery ? job.est.machineType : '—'}</td>
                                         <td className="px-3 py-2.5 text-center">
-                                            <span className={ageColor}>{job.daysInProd !== null ? `${job.daysInProd}d` : '—'}</span>
+                                            <div className={ageColor}>{job.daysInProd !== null ? `${job.daysInProd}d` : '—'}</div>
+                                            <div className="text-[8px] text-white/20">{fmtDate(job.dateOrdered)}</div>
                                         </td>
                                         <td className="px-3 py-2.5 text-center">
                                             <div className={dueColor}>{job.daysUntilDue !== null ? (job.daysUntilDue < 0 ? `${Math.abs(job.daysUntilDue)}d over` : job.daysUntilDue === 0 ? 'Today' : `${job.daysUntilDue}d`) : '—'}</div>
