@@ -131,7 +131,6 @@ type SortDir = 'asc' | 'desc';
 type StatusFilter =
     | 'active'
     | 'production'
-    | 'awaiting'
     | 'awaitingStock'
     | 'awaitingProcessing'
     | 'partiallyFulfilled'
@@ -157,14 +156,13 @@ interface Props {
 
 // All selectable status filter keys excluding the catch-all 'active'.
 const STATUS_FILTER_KEYS: Exclude<StatusFilter, 'active'>[] = [
-    'production', 'awaiting', 'awaitingStock', 'awaitingProcessing', 'partiallyFulfilled', 'awaitingShipping',
+    'production', 'awaitingStock', 'awaitingProcessing', 'partiallyFulfilled', 'awaitingShipping',
 ];
 
 // Readable labels, used in UI + report headings.
 const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
     active: 'Active',
     production: 'In Production',
-    awaiting: 'Awaiting',
     awaitingStock: 'Awaiting Stock',
     awaitingProcessing: 'Awaiting Processing',
     partiallyFulfilled: 'Partially Fulfilled',
@@ -513,7 +511,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             list = list.filter(j => {
                 for (const f of statusFilters) {
                     if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
-                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
@@ -571,7 +568,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             base = base.filter(j => {
                 for (const f of statusFilters) {
                     if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
-                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
@@ -625,7 +621,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             base = base.filter(j => {
                 for (const f of statusFilters) {
                     if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
-                    if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && j.items && isPartiallyFulfilled(j.items)) return true;
@@ -648,7 +643,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         return enrichedJobs.filter(j => {
             for (const f of statusFilters) {
                 if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
-                if (f === 'awaiting' && AWAITING_STATUSES.has(j.status)) return true;
                 if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                 if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                 if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
@@ -2027,7 +2021,6 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         const tabs: { label: string; key: StatusFilter; count: number }[] = [
                             { label: 'Active', key: 'active', count: enrichedJobs.length },
                             { label: 'In Production', key: 'production', count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
-                            { label: 'Awaiting', key: 'awaiting', count: enrichedJobs.filter(j => AWAITING_STATUSES.has(j.status)).length },
                             { label: 'Awaiting Stock', key: 'awaitingStock', count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
                             { label: 'Awaiting Processing', key: 'awaitingProcessing', count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
                             { label: 'Partially Fulfilled', key: 'partiallyFulfilled', count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
