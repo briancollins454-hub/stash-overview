@@ -14,7 +14,7 @@ interface Props {
   currentUserEmail?: string;
 }
 
-type SortKey = 'jobNumber' | 'customerName' | 'orderTotal' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status' | 'salesPerson';
+type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status' | 'salesPerson';
 
 // Sentinel used in the responsible-person dropdown to represent jobs that
 // have no salesperson attached in Deco. Kept as a non-printable character
@@ -280,7 +280,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
     switch (sortKey) {
       case 'jobNumber': av = a.jobNumber; bv = b.jobNumber; break;
       case 'customerName': av = a.customerName; bv = b.customerName; break;
-      case 'orderTotal': av = a.orderTotal || 0; bv = b.orderTotal || 0; break;
       case 'outstandingBalance': av = a.outstandingBalance || 0; bv = b.outstandingBalance || 0; break;
       case 'dateShipped': av = a.dateShipped || ''; bv = b.dateShipped || ''; break;
       case 'dateOrdered': av = a.dateOrdered || ''; bv = b.dateOrdered || ''; break;
@@ -372,12 +371,11 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
   };
 
   const exportCsv = () => {
-    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Order Total', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By'];
+    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By'];
     const toRow = (j: Row, section: string) => [
       section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName,
       j.salesPerson || '',
       j.status,
-      (j.orderTotal || 0).toFixed(2),
       (j.outstandingBalance || 0).toFixed(2),
       j.dateOrdered || '', j.dateShipped || '',
       j.daysSince.toString(),
@@ -441,7 +439,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
           <td class="job-name">${esc(r.jobName || '—')}</td>
           <td>${esc(r.salesPerson || '—')}</td>
           <td>${esc(r.status)}</td>
-          <td class="num">${esc(fmtMoney(r.orderTotal || 0))}</td>
           <td class="num ${(r.outstandingBalance || 0) > 0 ? 'owed' : ''}">${esc(fmtMoney(r.outstandingBalance || 0))}</td>
           <td>${esc(fmtDay(r.dateOrdered))}</td>
           <td>${esc(fmtDay(r.dateShipped))}</td>
@@ -464,7 +461,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
                 <th>Job Name</th>
                 <th>Responsible</th>
                 <th>Status</th>
-                <th class="num">Order Total</th>
                 <th class="num">Outstanding</th>
                 <th>Ordered</th>
                 <th>Shipped</th>
@@ -610,7 +606,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
                 ['', 'Job Name'],
                 ['salesPerson', 'Responsible'],
                 ['status', 'Status'],
-                ['orderTotal', 'Order Total'],
                 ['outstandingBalance', 'Outstanding'],
                 ['dateOrdered', 'Ordered'],
                 ['dateShipped', 'Shipped'],
@@ -666,10 +661,13 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
                       )}
                     </span>
                   </td>
-                  <td className={`px-4 py-3 font-semibold ${j.isZeroPriced ? 'text-amber-400' : textPrimary}`}>
-                    {fmt(j.orderTotal || 0)}
-                  </td>
-                  <td className={`px-4 py-3 font-bold ${(j.outstandingBalance || 0) > 0 ? 'text-rose-400' : textSecondary}`}>
+                  <td className={`px-4 py-3 font-bold ${
+                    j.isZeroPriced
+                      ? 'text-amber-400'
+                      : (j.outstandingBalance || 0) > 0
+                        ? 'text-rose-400'
+                        : textSecondary
+                  }`}>
                     {fmt(j.outstandingBalance || 0)}
                   </td>
                   <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateOrdered)}</td>
