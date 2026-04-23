@@ -65,18 +65,26 @@ function parseDecoItems(job) {
       line.workflow_items.forEach(wf => {
         const variantName = wf.option_id && optionNameMap[wf.option_id] ? standardizeSize(optionNameMap[wf.option_id]) : '';
         const uniqueName = `${line.product_name || 'Item'}${colorName ? ` - ${colorName}` : ''}${variantName ? ` - ${variantName}` : ''}`;
+        const procS = wf.procurement_status || 0;
+        const prodS = wf.production_status || 0;
+        const shipS = wf.shipping_status || 0;
+        const stage = shipS >= 80 ? 'shipped' : prodS >= 80 ? 'produced' : procS >= 60 ? 'awaiting' : 'notReady';
         items.push({
           productCode: line.product_code || '', vendorSku: wf.vendor_sku || line.sku || '',
           name: uniqueName, ean: wf.barcode || wf.ean || potentialEan,
           quantity: wf.qty_to_fulfill || 0,
           isReceived: wf.procurement_status >= 60, isProduced: wf.production_status >= 80, isShipped: wf.shipping_status >= 80,
-          procurementStatus: wf.procurement_status || 0, productionStatus: wf.production_status || 0, shippingStatus: wf.shipping_status || 0,
+          procurementStatus: procS, productionStatus: prodS, shippingStatus: shipS,
+          productionStage: stage,
           status: wf.shipping_status >= 80 ? 'Shipped' : (wf.production_status >= 80 ? 'Produced' : (wf.procurement_status >= 60 ? 'Awaiting Production' : 'Awaiting Stock')),
           unitPrice: parseFloat(line.unit_price) || undefined,
           totalPrice: parseFloat(line.total_price) || undefined,
         });
       });
     } else {
+      const rawProd = typeof line.production_status === 'number' ? line.production_status : 0;
+      const hasShippedDate = !!line.shipped_date;
+      const stage = hasShippedDate ? 'shipped' : rawProd >= 2 ? 'produced' : rawProd === 1 ? 'awaiting' : 'notReady';
       items.push({
         productCode: line.product_code || '', vendorSku: line.sku || '',
         name: line.product_name || 'Item', ean: potentialEan,
@@ -84,6 +92,7 @@ function parseDecoItems(job) {
         status: line.production_status === 3 ? 'Shipped' : (line.production_status === 2 ? 'Produced' : 'Ordered'),
         isReceived: true, isProduced: (line.production_status || 0) >= 2, isShipped: (line.production_status || 0) >= 3,
         procurementStatus: 60, productionStatus: line.production_status >= 2 ? 80 : 20, shippingStatus: line.production_status === 3 ? 80 : 0,
+        productionStage: stage,
         unitPrice: parseFloat(line.unit_price) || undefined,
         totalPrice: parseFloat(line.total_price) || undefined,
       });

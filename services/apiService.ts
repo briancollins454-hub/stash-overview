@@ -200,6 +200,14 @@ const parseDecoItems = (job: any): DecoItem[] => {
             line.workflow_items.forEach((wf: any) => {
                 let variantName = wf.option_id && optionNameMap[wf.option_id] ? standardizeSize(optionNameMap[wf.option_id]) : '';
                 let uniqueName = `${line.product_name || 'Item'}${colorName ? ` - ${colorName}` : ''}${variantName ? ` - ${variantName}` : ''}`;
+                const procS = wf.procurement_status || 0;
+                const prodS = wf.production_status || 0;
+                const shipS = wf.shipping_status || 0;
+                const stage: 'notReady' | 'awaiting' | 'produced' | 'shipped' =
+                    shipS >= 80 ? 'shipped'
+                    : prodS >= 80 ? 'produced'
+                    : procS >= 60 ? 'awaiting'
+                    : 'notReady';
                 items.push({
                     productCode: line.product_code || '',
                     vendorSku: wf.vendor_sku || (wf.option_id && optionSkuMap[wf.option_id]) || line.sku || '',
@@ -209,9 +217,10 @@ const parseDecoItems = (job: any): DecoItem[] => {
                     isReceived: wf.procurement_status >= 60,
                     isProduced: wf.production_status >= 80,
                     isShipped: wf.shipping_status >= 80,
-                    procurementStatus: wf.procurement_status || 0,
-                    productionStatus: wf.production_status || 0,
-                    shippingStatus: wf.shipping_status || 0,
+                    procurementStatus: procS,
+                    productionStatus: prodS,
+                    shippingStatus: shipS,
+                    productionStage: stage,
                     status: wf.shipping_status >= 80 ? 'Shipped' : (wf.production_status >= 80 ? 'Produced' : (wf.procurement_status >= 60 ? 'Awaiting Production' : 'Awaiting Stock')),
                     unitPrice: parseFloat(line.unit_price) || undefined,
                     totalPrice: parseFloat(line.total_price) || undefined,
@@ -229,6 +238,19 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 });
             });
         } else {
+            const rawProd = typeof line.production_status === 'number' ? line.production_status : 0;
+            const hasShippedDate = !!line.shipped_date;
+            // Deco line-level production_status observed in API probes:
+            //   0/null = not yet assigned to production (notReady)
+            //   1      = awaiting production (files ready, not processed)
+            //   2      = in-progress (treat as produced for legacy compatibility)
+            //   3      = produced (processed_date is set)
+            // Shipping is signalled by line.shipped_date being set.
+            const stage: 'notReady' | 'awaiting' | 'produced' | 'shipped' =
+                hasShippedDate ? 'shipped'
+                : rawProd >= 2 ? 'produced'
+                : rawProd === 1 ? 'awaiting'
+                : 'notReady';
             items.push({
                 productCode: line.product_code || '',
                 vendorSku: line.sku || '',
@@ -242,6 +264,7 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 procurementStatus: 60,
                 productionStatus: line.production_status >= 2 ? 80 : 20,
                 shippingStatus: line.production_status === 3 ? 80 : 0,
+                productionStage: stage,
                 unitPrice: parseFloat(line.unit_price) || undefined,
                 totalPrice: parseFloat(line.total_price) || undefined,
                 decorationDetails: line.decoration_details || line.decorations || undefined,

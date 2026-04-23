@@ -112,6 +112,14 @@ export interface DecoItem {
   procurementStatus: number;
   productionStatus: number;
   shippingStatus: number;
+  // Per-line production stage derived from Deco's production_status +
+  // workflow_items status codes. Drives the "In Production" and
+  // "Awaiting Shipping" job-level tabs on the Production page.
+  //   notReady  = awaiting stock / artwork / not-yet-dispatched to production
+  //   awaiting  = ready to produce, not yet processed
+  //   produced  = decoration complete, not yet shipped
+  //   shipped   = shipped on this line
+  productionStage?: 'notReady' | 'awaiting' | 'produced' | 'shipped';
   // Extended fields
   unitPrice?: number;
   totalPrice?: number;

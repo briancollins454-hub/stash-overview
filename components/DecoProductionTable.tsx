@@ -401,6 +401,46 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const PRODUCTION_STATUSES = new Set(['In Production', 'Production', 'Order']);
     const AWAITING_STATUSES = new Set(['Awaiting Stock', 'Awaiting Artwork', 'Awaiting Review', 'Awaiting Processing', 'Awaiting PO', 'Not Ordered', 'On Hold']);
 
+    // Derive per-line production stage. Falls back to the legacy
+    // isReceived/isProduced/isShipped flags for jobs cached before the
+    // `productionStage` field was added to DecoItem.
+    const getStage = (i: DecoItem): 'notReady' | 'awaiting' | 'produced' | 'shipped' => {
+        if (i.productionStage) return i.productionStage;
+        if (i.isShipped) return 'shipped';
+        if (i.isProduced) return 'produced';
+        if (i.isReceived) return 'awaiting';
+        return 'notReady';
+    };
+
+    // "In Production" — partially produced. At least one line is decorated
+    // while at least one line is still awaiting production / stock / artwork.
+    // Deco's order_status stays at "Awaiting Processing" until the whole
+    // order is shipped, so we can't rely on it for this bucket.
+    const isInProductionJob = (j: DecoJob): boolean => {
+        if (!j.items || j.items.length === 0) return false;
+        let produced = 0;
+        let pending = 0;
+        for (const i of j.items) {
+            const s = getStage(i);
+            if (s === 'produced') produced++;
+            else if (s === 'awaiting' || s === 'notReady') pending++;
+        }
+        return produced > 0 && pending > 0;
+    };
+
+    // "Awaiting Shipping" — every line is produced, nothing has actually
+    // been shipped yet, and the order as a whole is still active.
+    const isAwaitingShippingJob = (j: DecoJob): boolean => {
+        if (!j.items || j.items.length === 0) return false;
+        let produced = 0;
+        for (const i of j.items) {
+            const s = getStage(i);
+            if (s === 'produced') produced++;
+            else return false;
+        }
+        return produced === j.items.length;
+    };
+
     const enrichedJobs = useMemo(() => {
         return decoJobs
             .filter(job => !EXCLUDED_STATUSES.has(job.status))
@@ -510,11 +550,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilters.size > 0) {
             list = list.filter(j => {
                 for (const f of statusFilters) {
-                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'production' && isInProductionJob(j)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
-                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                    if (f === 'awaitingShipping' && isAwaitingShippingJob(j)) return true;
                 }
                 return false;
             });
@@ -567,11 +607,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilters.size > 0) {
             base = base.filter(j => {
                 for (const f of statusFilters) {
-                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'production' && isInProductionJob(j)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
-                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                    if (f === 'awaitingShipping' && isAwaitingShippingJob(j)) return true;
                 }
                 return false;
             });
@@ -620,11 +660,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilters.size > 0) {
             base = base.filter(j => {
                 for (const f of statusFilters) {
-                    if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                    if (f === 'production' && isInProductionJob(j)) return true;
                     if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                     if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                     if (f === 'partiallyFulfilled' && j.items && isPartiallyFulfilled(j.items)) return true;
-                    if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                    if (f === 'awaitingShipping' && isAwaitingShippingJob(j)) return true;
                 }
                 return false;
             });
@@ -642,11 +682,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (statusFilters.size === 0) return enrichedJobs;
         return enrichedJobs.filter(j => {
             for (const f of statusFilters) {
-                if (f === 'production' && PRODUCTION_STATUSES.has(j.status)) return true;
+                if (f === 'production' && isInProductionJob(j)) return true;
                 if (f === 'awaitingStock' && j.status === 'Awaiting Stock') return true;
                 if (f === 'awaitingProcessing' && j.status === 'Awaiting Processing') return true;
                 if (f === 'partiallyFulfilled' && isPartiallyFulfilled(j.items)) return true;
-                if (f === 'awaitingShipping' && j.status === 'Ready for Shipping') return true;
+                if (f === 'awaitingShipping' && isAwaitingShippingJob(j)) return true;
             }
             return false;
         });
@@ -1170,9 +1210,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         const statusGroups = [
             { label: 'Awaiting Stock', count: scopedJobs.filter(j => j.status === 'Awaiting Stock').length },
             { label: 'Awaiting Processing', count: scopedJobs.filter(j => j.status === 'Awaiting Processing').length },
-            { label: 'In Production', count: scopedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
+            { label: 'In Production', count: scopedJobs.filter(j => isInProductionJob(j)).length },
             { label: 'Partially Fulfilled', count: scopedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
-            { label: 'Awaiting Shipping', count: scopedJobs.filter(j => j.status === 'Ready for Shipping').length },
+            { label: 'Awaiting Shipping', count: scopedJobs.filter(j => isAwaitingShippingJob(j)).length },
             { label: 'Other / On Hold', count: scopedJobs.filter(j => j.status === 'On Hold' || j.status === 'Awaiting Artwork' || j.status === 'Awaiting Review' || j.status === 'Awaiting PO' || j.status === 'Not Ordered').length },
         ];
 
@@ -2020,11 +2060,11 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         };
                         const tabs: { label: string; key: StatusFilter; count: number }[] = [
                             { label: 'Active', key: 'active', count: enrichedJobs.length },
-                            { label: 'In Production', key: 'production', count: enrichedJobs.filter(j => PRODUCTION_STATUSES.has(j.status)).length },
+                            { label: 'In Production', key: 'production', count: enrichedJobs.filter(j => isInProductionJob(j)).length },
                             { label: 'Awaiting Stock', key: 'awaitingStock', count: enrichedJobs.filter(j => j.status === 'Awaiting Stock').length },
                             { label: 'Awaiting Processing', key: 'awaitingProcessing', count: enrichedJobs.filter(j => j.status === 'Awaiting Processing').length },
                             { label: 'Partially Fulfilled', key: 'partiallyFulfilled', count: enrichedJobs.filter(j => isPartiallyFulfilled(j.items)).length },
-                            { label: 'Awaiting Shipping', key: 'awaitingShipping', count: enrichedJobs.filter(j => j.status === 'Ready for Shipping').length },
+                            { label: 'Awaiting Shipping', key: 'awaitingShipping', count: enrichedJobs.filter(j => isAwaitingShippingJob(j)).length },
                         ];
                         return tabs.map(f => {
                             const isSelected = f.key === 'active' ? activeIsSelected : statusFilters.has(f.key as Exclude<StatusFilter, 'active'>);
