@@ -135,6 +135,15 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
         const customer = (j.customerName || '').toLowerCase();
         if (balance === 0 && customer.includes('stash')) return false;
 
+        // Rule 4 — exclude Gift of Kit ("GOK") promotional orders. These
+        // legitimately have a £0 invoice balance and no payment recorded,
+        // so they'll otherwise match every other rule and pollute the list.
+        // Match either the word GOK (bounded, to avoid matching e.g.
+        // "Bangok") or the full phrase "gift of kit", across job name,
+        // customer name and notes — covers whichever field staff tag it on.
+        const haystack = `${j.jobName || ''}\u0001${j.customerName || ''}\u0001${j.notes || ''}`.toLowerCase();
+        if (/\bgok\b/.test(haystack) || haystack.includes('gift of kit')) return false;
+
         // If both balance and total are zero AND there's no ship date, this
         // is almost certainly an empty/draft order, not an AR leak.
         if (balance === 0 && total === 0 && !j.dateShipped) return false;
@@ -477,7 +486,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, and &pound;0-balance internal <span className="font-mono">stash</span> customers.
+        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, and <span className="font-mono">GOK</span> / Gift of Kit orders.
       </div>
     </div>
   );
