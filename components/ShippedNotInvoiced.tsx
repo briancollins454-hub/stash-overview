@@ -135,8 +135,19 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     loadPaymentSent();
   }, [loadFromFinanceCache, loadPaymentSent]);
 
-  const markSent = useCallback(async (jobNumber: string) => {
+  const markSent = useCallback(async (jobNumber: string, customerName: string) => {
     if (!isSupabaseReady() || isTogglingId) return;
+
+    // Guardrail — staff specifically asked for a confirm step so a stray
+    // click can't silently mark a job as "payment request sent" when no
+    // email has actually gone out.
+    const ok = window.confirm(
+      `Mark payment request as SENT for job #${jobNumber} (${customerName})?\n\n` +
+      `This will hide it from the list and record your email + a timestamp. ` +
+      `You can undo it from the "Showing sent" view if needed.`
+    );
+    if (!ok) return;
+
     setIsTogglingId(jobNumber);
 
     // Optimistic update so the row can fade out immediately; we roll back if
@@ -453,7 +464,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
                           </div>
                         ) : (
                           <button
-                            onClick={() => markSent(j.jobNumber)}
+                            onClick={() => markSent(j.jobNumber, j.customerName)}
                             disabled={toggling}
                             title="Mark payment request as sent"
                             className={`flex items-center gap-1.5 px-2 py-1 rounded border ${borderColor} text-xs font-medium ${textSecondary} hover:bg-indigo-500/20 hover:text-indigo-300 hover:border-indigo-500/40 transition-colors disabled:opacity-40`}
