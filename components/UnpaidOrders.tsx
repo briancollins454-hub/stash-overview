@@ -143,14 +143,17 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
         //   - "Stash Shop" — partner/internal stores where invoicing is
         //     handled outside Deco (e.g. "Devon Stash Shop 47925",
         //     "CHGS Staff Stash Shop 46313")
+        //   - "Sample" — product/decoration samples sent at no charge
         //
         // Match across job name, customer name and notes so we catch the
-        // tag wherever staff have attached it. GOK uses word boundaries
-        // so we don't false-match tokens like "Bangok".
+        // tag wherever staff have attached it. GOK and SAMPLE use word
+        // boundaries so we don't false-match tokens like "Bangok" or a
+        // customer called "Samplesworth".
         const haystack = `${j.jobName || ''}\u0001${j.customerName || ''}\u0001${j.notes || ''}`.toLowerCase();
         if (/\bgok\b/.test(haystack)) return false;
         if (haystack.includes('gift of kit')) return false;
         if (haystack.includes('stash shop')) return false;
+        if (/\bsamples?\b/.test(haystack)) return false;
 
         // If both balance and total are zero AND there's no ship date, this
         // is almost certainly an empty/draft order, not an AR leak.
@@ -494,7 +497,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, and <span className="font-mono">Stash Shop</span> orders.
+        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, <span className="font-mono">Stash Shop</span> orders, and <span className="font-mono">Sample</span> orders.
       </div>
     </div>
   );
