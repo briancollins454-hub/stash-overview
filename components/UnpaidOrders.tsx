@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CircleDollarSign, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download,
   RefreshCw, Check, Copy, ShieldAlert, ChevronDown, ChevronRight, ShieldCheck, Undo2,
+  Printer, UserRound,
 } from 'lucide-react';
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
@@ -13,7 +14,12 @@ interface Props {
   currentUserEmail?: string;
 }
 
-type SortKey = 'jobNumber' | 'customerName' | 'orderTotal' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status';
+type SortKey = 'jobNumber' | 'customerName' | 'orderTotal' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status' | 'salesPerson';
+
+// Sentinel used in the responsible-person dropdown to represent jobs that
+// have no salesperson attached in Deco. Kept as a non-printable character
+// so it can never clash with a real name.
+const UNASSIGNED = '\u0000__UNASSIGNED__';
 type SortDir = 'asc' | 'desc';
 type SectionKey = 'zero' | 'priced' | 'authorised';
 
@@ -105,6 +111,11 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
     authorised: true, // reference bucket — start closed to keep the page tidy
   });
   const toggleSection = (key: SectionKey) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
+
+  // Responsible-person filter. '' means "show all". Selecting a specific
+  // name here narrows every section (and the PDF export) to that staff
+  // member's jobs. UNASSIGNED matches jobs with no salesperson on them.
+  const [responsibleFilter, setResponsibleFilter] = useState<string>('');
 
   // ─── Data loading ────────────────────────────────────────────────────
   const loadFromFinanceCache = useCallback(async () => {
@@ -275,12 +286,39 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
       case 'dateOrdered': av = a.dateOrdered || ''; bv = b.dateOrdered || ''; break;
       case 'daysSince': av = a.daysSince; bv = b.daysSince; break;
       case 'status': av = a.status; bv = b.status; break;
+      case 'salesPerson': av = (a.salesPerson || '').toLowerCase(); bv = (b.salesPerson || '').toLowerCase(); break;
       default: av = 0; bv = 0;
     }
     if (av < bv) return sortDir === 'asc' ? -1 : 1;
     if (av > bv) return sortDir === 'asc' ? 1 : -1;
     return 0;
   }, [sortKey, sortDir]);
+
+  // Unique salespeople present across all current jobs (post search, pre
+  // responsible filter) — this keeps the dropdown options stable while a
+  // filter is applied so staff can switch between names without the list
+  // collapsing. "Unassigned" is only offered if at least one job has no
+  // salesperson on it.
+  const salesPeople = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    let list = jobs;
+    if (q) {
+      list = list.filter(j =>
+        j.jobNumber.toLowerCase().includes(q) ||
+        j.poNumber?.toLowerCase().includes(q) ||
+        j.customerName.toLowerCase().includes(q) ||
+        j.jobName.toLowerCase().includes(q)
+      );
+    }
+    const set = new Set<string>();
+    let hasUnassigned = false;
+    for (const j of list) {
+      const sp = (j.salesPerson || '').trim();
+      if (sp) set.add(sp); else hasUnassigned = true;
+    }
+    const names = Array.from(set).sort((a, b) => a.localeCompare(b));
+    return { names, hasUnassigned };
+  }, [jobs, search]);
 
   const { zeroPricedRows, pricedRows, authorisedRows } = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -293,6 +331,13 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
         j.jobName.toLowerCase().includes(q)
       );
     }
+    if (responsibleFilter) {
+      list = list.filter(j => {
+        const sp = (j.salesPerson || '').trim();
+        if (responsibleFilter === UNASSIGNED) return !sp;
+        return sp === responsibleFilter;
+      });
+    }
     // Authorisation only has semantic meaning for zero-priced rows. If the
     // order later gets a real price, it drifts into priced-but-unpaid and
     // the authorisation is implicitly ignored (but not deleted).
@@ -300,7 +345,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
     const zeroPricedRows = list.filter(j => j.isZeroPriced && !j.authorisedAt).sort(sorter);
     const pricedRows = list.filter(j => !j.isZeroPriced).sort(sorter);
     return { zeroPricedRows, pricedRows, authorisedRows };
-  }, [jobs, search, sorter]);
+  }, [jobs, search, sorter, responsibleFilter]);
 
   const zeroPricedOutstanding = useMemo(
     () => zeroPricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
@@ -327,9 +372,11 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
   };
 
   const exportCsv = () => {
-    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Status', 'Order Total', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By'];
+    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Order Total', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By'];
     const toRow = (j: Row, section: string) => [
-      section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName, j.status,
+      section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName,
+      j.salesPerson || '',
+      j.status,
       (j.orderTotal || 0).toFixed(2),
       (j.outstandingBalance || 0).toFixed(2),
       j.dateOrdered || '', j.dateShipped || '',
@@ -351,6 +398,182 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
     a.download = `unpaid-orders-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // ─── Chase list PDF ────────────────────────────────────────────────
+  // Generates a printable HTML document that opens in a new window with
+  // the browser's print dialog, matching the existing DecoProductionTable
+  // pattern. When a responsible person is selected, this is scoped to
+  // their jobs so they can take the PDF to chase their own customers.
+  const printChaseList = () => {
+    if (zeroPricedRows.length + pricedRows.length === 0) return;
+
+    const esc = (s: unknown) =>
+      String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    const whoLabel = responsibleFilter
+      ? (responsibleFilter === UNASSIGNED ? 'Unassigned jobs' : responsibleFilter)
+      : 'All staff';
+
+    const fmtMoney = (n: number) =>
+      '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const fmtDay = (d?: string | null) => {
+      if (!d) return '—';
+      return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+    };
+
+    const renderSection = (title: string, rows: Row[], accent: 'amber' | 'rose') => {
+      if (rows.length === 0) return '';
+      const totalOut = rows.reduce((s, r) => s + (r.outstandingBalance || 0), 0);
+      const borderClr = accent === 'amber' ? '#d97706' : '#e11d48';
+      const headerBg = accent === 'amber' ? '#fef3c7' : '#ffe4e6';
+      const headerText = accent === 'amber' ? '#92400e' : '#9f1239';
+
+      const bodyRows = rows.map(r => `
+        <tr>
+          <td class="job-num">${esc(r.jobNumber)}</td>
+          <td>${esc(r.customerName)}</td>
+          <td class="job-name">${esc(r.jobName || '—')}</td>
+          <td>${esc(r.salesPerson || '—')}</td>
+          <td>${esc(r.status)}</td>
+          <td class="num">${esc(fmtMoney(r.orderTotal || 0))}</td>
+          <td class="num ${(r.outstandingBalance || 0) > 0 ? 'owed' : ''}">${esc(fmtMoney(r.outstandingBalance || 0))}</td>
+          <td>${esc(fmtDay(r.dateOrdered))}</td>
+          <td>${esc(fmtDay(r.dateShipped))}</td>
+          <td class="num">${r.daysSince}</td>
+          <td class="notes-col"></td>
+        </tr>
+      `).join('');
+
+      return `
+        <section class="group">
+          <div class="group-header" style="background:${headerBg};color:${headerText};border-left:4px solid ${borderClr};">
+            <strong>${esc(title)}</strong>
+            <span class="group-meta">${rows.length} ${rows.length === 1 ? 'order' : 'orders'} · Outstanding ${esc(fmtMoney(totalOut))}</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Job #</th>
+                <th>Customer</th>
+                <th>Job Name</th>
+                <th>Responsible</th>
+                <th>Status</th>
+                <th class="num">Order Total</th>
+                <th class="num">Outstanding</th>
+                <th>Ordered</th>
+                <th>Shipped</th>
+                <th class="num">Days</th>
+                <th class="notes-col">Notes / Action taken</th>
+              </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </section>
+      `;
+    };
+
+    const combinedOut =
+      zeroPricedRows.reduce((s, r) => s + (r.outstandingBalance || 0), 0) +
+      pricedRows.reduce((s, r) => s + (r.outstandingBalance || 0), 0);
+
+    const styles = `
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; margin: 24px; background: #fff; }
+      h1 { margin: 0 0 4px 0; font-size: 22px; }
+      .brand { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #6366f1; font-weight: 700; margin-bottom: 6px; }
+      .report-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px solid #e5e7eb; }
+      .meta { text-align: right; font-size: 12px; color: #4b5563; line-height: 1.5; }
+      .meta strong { color: #111827; }
+      .summary { display: flex; gap: 12px; margin-bottom: 20px; }
+      .tile { flex: 1; padding: 10px 14px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
+      .tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280; }
+      .tile-value { font-size: 18px; font-weight: 700; color: #111827; margin-top: 2px; }
+      .tile-value.rose { color: #e11d48; }
+      .group { margin-bottom: 22px; page-break-inside: avoid; }
+      .group-header { padding: 8px 12px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border-radius: 4px 4px 0 0; }
+      .group-meta { font-weight: 600; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th { background: #f3f4f6; text-align: left; padding: 6px 8px; border-bottom: 2px solid #d1d5db; font-weight: 600; color: #374151; }
+      td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+      td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+      td.job-num { font-family: 'SF Mono', Menlo, monospace; font-weight: 600; color: #4f46e5; white-space: nowrap; }
+      td.job-name { max-width: 180px; }
+      td.owed { color: #e11d48; font-weight: 600; }
+      td.notes-col { width: 160px; }
+      .actions { background: #eef2ff; border: 1px solid #c7d2fe; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+      .actions button { background: #4f46e5; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px; }
+      .print-footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #6b7280; text-align: center; }
+      @media print {
+        body { margin: 12mm; }
+        .no-print { display: none !important; }
+        .group { page-break-inside: auto; }
+        thead { display: table-header-group; }
+      }
+    `;
+
+    const bodyHtml = `
+      <div class="actions no-print">
+        <span>Invoice chase list — use your browser's print dialog to save as PDF or send to the printer.</span>
+        <button onclick="window.print()">Print / Save as PDF</button>
+      </div>
+
+      <div class="report-header">
+        <div>
+          <div class="brand">Stash · Invoice Chase</div>
+          <h1>Unpaid Invoice Chase List</h1>
+          <div style="font-size:13px;color:#4b5563;margin-top:4px;">Responsible: <strong style="color:#111827;">${esc(whoLabel)}</strong></div>
+        </div>
+        <div class="meta">
+          <strong>${esc(dateStr)}</strong><br>
+          Generated ${esc(timeStr)}<br>
+          ${zeroPricedRows.length + pricedRows.length} ${zeroPricedRows.length + pricedRows.length === 1 ? 'order' : 'orders'} to chase
+        </div>
+      </div>
+
+      <div class="summary">
+        <div class="tile">
+          <div class="tile-label">Zero priced</div>
+          <div class="tile-value">${zeroPricedRows.length}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Priced but unpaid</div>
+          <div class="tile-value">${pricedRows.length}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">Outstanding total</div>
+          <div class="tile-value rose">${esc(fmtMoney(combinedOut))}</div>
+        </div>
+      </div>
+
+      ${renderSection('Zero priced — shipped without a price (no invoice raised yet)', zeroPricedRows, 'amber')}
+      ${renderSection('Priced but unpaid — invoice likely raised, payment outstanding', pricedRows, 'rose')}
+
+      <div class="print-footer">
+        Stash Unpaid Orders · Chase list for ${esc(whoLabel)} · ${esc(dateStr)} ${esc(timeStr)} · Contact the customer to confirm invoicing / payment status.
+      </div>
+    `;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Please allow pop-ups for this site to generate the chase list PDF.');
+      return;
+    }
+    const scopeTag = responsibleFilter
+      ? (responsibleFilter === UNASSIGNED ? 'unassigned' : responsibleFilter.replace(/\s+/g, '_'))
+      : 'all-staff';
+    const title = `Unpaid Orders — ${scopeTag} — ${dateStr}`;
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${styles}</style></head><body>${bodyHtml}</body></html>`;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { try { win.print(); } catch { /* user can click the button */ } }, 300);
   };
 
   const cardBg = isDark ? 'bg-[#232347]' : 'bg-white';
@@ -385,6 +608,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
                 ['jobNumber', 'Job #'],
                 ['customerName', 'Customer'],
                 ['', 'Job Name'],
+                ['salesPerson', 'Responsible'],
                 ['status', 'Status'],
                 ['orderTotal', 'Order Total'],
                 ['outstandingBalance', 'Outstanding'],
@@ -422,6 +646,16 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
                   </td>
                   <td className={`px-4 py-3 font-medium ${textPrimary}`}>{j.customerName}</td>
                   <td className={`px-4 py-3 ${textSecondary} max-w-[200px] truncate`}>{j.jobName}</td>
+                  <td className={`px-4 py-3 ${textSecondary} whitespace-nowrap`}>
+                    {j.salesPerson ? (
+                      <span className="inline-flex items-center gap-1">
+                        <UserRound className="w-3 h-3" />
+                        {j.salesPerson}
+                      </span>
+                    ) : (
+                      <span className="italic opacity-60">Unassigned</span>
+                    )}
+                  </td>
                   <td className={`px-4 py-3 ${textSecondary}`}>
                     <span className="flex items-center gap-1.5">
                       {j.status}
@@ -579,7 +813,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
         </div>
       </div>
 
-      {/* Search + Export */}
+      {/* Search + Responsible filter + Exports */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px] max-w-md">
           <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary}`} />
@@ -591,9 +825,54 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
             className={`w-full pl-9 pr-3 py-2 rounded-lg border ${borderColor} ${cardBg} ${textPrimary} text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none`}
           />
         </div>
+
+        <div className="relative">
+          <UserRound className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+          <select
+            value={responsibleFilter}
+            onChange={e => setResponsibleFilter(e.target.value)}
+            className={`pl-9 pr-8 py-2 rounded-lg border ${borderColor} ${cardBg} ${textPrimary} text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none appearance-none`}
+            title="Filter by the staff member responsible for each job"
+          >
+            <option value="">Responsible: All staff</option>
+            {salesPeople.names.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+            {salesPeople.hasUnassigned && (
+              <option value={UNASSIGNED}>— Unassigned —</option>
+            )}
+          </select>
+          <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+        </div>
+
+        <button
+          onClick={printChaseList}
+          disabled={zeroPricedRows.length + pricedRows.length === 0}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+            zeroPricedRows.length + pricedRows.length === 0
+              ? 'bg-slate-500/40 text-white/60 cursor-not-allowed'
+              : 'bg-rose-600 text-white hover:bg-rose-700'
+          }`}
+          title={responsibleFilter
+            ? `Print an invoice-chase list for ${responsibleFilter === UNASSIGNED ? 'unassigned jobs' : responsibleFilter}`
+            : 'Print an invoice-chase list for the currently shown jobs'}
+        >
+          <Printer className="w-3.5 h-3.5" /> Chase list PDF
+        </button>
+
         <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
           <Download className="w-3.5 h-3.5" /> Export CSV
         </button>
+
+        {responsibleFilter && (
+          <button
+            onClick={() => setResponsibleFilter('')}
+            className={`text-xs ${textSecondary} hover:underline`}
+            title="Clear responsible filter"
+          >
+            Clear filter
+          </button>
+        )}
       </div>
 
       {/* ─── SECTION 1: Zero priced ─────────────────────────────────── */}
