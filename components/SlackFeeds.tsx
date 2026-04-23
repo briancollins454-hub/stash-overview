@@ -1,22 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Printer, Palette, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
+import { Printer, Palette, Truck, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 
 /* ================================================================
-   SLACK FEEDS — live #print-updates + #embroidery-updates panels
+   SLACK FEEDS — live shop-floor channel mirror
    ================================================================
-   - Two side-by-side panels at the top of the Production tab.
-   - Messages come from Supabase table `stash_slack_messages`, which is
-     populated by /api/slack-events (real-time webhook) and seeded by
-     /api/slack-backfill (last 3 days on first load).
-   - Polls Supabase every 15s so users see new chatter without a refresh.
-   - Anyone logged in can view. No write access.
+   Three side-by-side panels (print / embroidery / delivery updates)
+   that mirror the matching Slack channels in near-real-time.
+
+   Data flow:
+     Slack → /api/slack-events (webhook) → Supabase stash_slack_messages
+                                                 ↑
+     Slack history → /api/slack-backfill ────────┘
+                                                 ↓
+                     this component polls Supabase every 15s
+
+   Lives on its own page (tab id "shop-floor") so floor staff can park
+   it on a second screen without the Production page's other widgets.
+   Anyone logged in can view; writes only ever happen server-side.
    ================================================================ */
 
 interface SlackMessage {
   id: string;
   channel_id: string;
-  channel_name: 'print-updates' | 'embroidery-updates' | string;
+  channel_name: ChannelKey | string;
   user_id: string | null;
   user_name: string | null;
   user_avatar: string | null;
@@ -28,11 +35,35 @@ interface SlackMessage {
   thread_ts: string | null;
 }
 
-type ChannelKey = 'print-updates' | 'embroidery-updates';
+type ChannelKey = 'print-updates' | 'embroidery-updates' | 'delivery-updates';
+type AccentKey = 'indigo' | 'pink' | 'emerald';
 
 const POLL_INTERVAL_MS = 15_000;
 const BACKFILL_DAYS = 3;
 const MAX_MESSAGES_PER_FEED = 200;
+
+// ─── Feed catalogue ─────────────────────────────────────────────────────────
+// Single source of truth for which channels we render. Add an entry here to
+// expose another channel — the layout adapts automatically. Keep the `channel`
+// values aligned with `TRACKED_CHANNELS` in api/slack-events.ts + slack-backfill.ts.
+interface FeedSpec {
+  channel: ChannelKey;
+  title: string;
+  accent: AccentKey;
+  icon: React.ReactNode;
+}
+
+const FEEDS: FeedSpec[] = [
+  { channel: 'print-updates',      title: 'Print Updates',      accent: 'indigo',  icon: <Printer className="w-4 h-4 text-indigo-300" /> },
+  { channel: 'embroidery-updates', title: 'Embroidery Updates', accent: 'pink',    icon: <Palette className="w-4 h-4 text-pink-300" /> },
+  { channel: 'delivery-updates',   title: 'Delivery Updates',   accent: 'emerald', icon: <Truck   className="w-4 h-4 text-emerald-300" /> },
+];
+
+const ACCENT_STYLES: Record<AccentKey, { headerBg: string; headerText: string; dot: string }> = {
+  indigo:  { headerBg: 'bg-indigo-900/40 border-indigo-700/60',   headerText: 'text-indigo-200',  dot: 'bg-indigo-400'  },
+  pink:    { headerBg: 'bg-pink-900/40 border-pink-700/60',       headerText: 'text-pink-200',    dot: 'bg-pink-400'    },
+  emerald: { headerBg: 'bg-emerald-900/40 border-emerald-700/60', headerText: 'text-emerald-200', dot: 'bg-emerald-400' },
+};
 
 /* ----------------------------------------------------------------
    Slack text → HTML
@@ -48,32 +79,22 @@ function renderSlackText(text: string): string {
   if (!text) return '';
   let out = escapeHtml(text);
 
-  // <https://foo|label> → <a>label</a>
   out = out.replace(/&lt;(https?:\/\/[^|&]+)\|([^&]+)&gt;/g, (_m, url, label) =>
     `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">${label}</a>`);
-  // Bare <https://foo> links
   out = out.replace(/&lt;(https?:\/\/[^|&]+)&gt;/g, (_m, url) =>
     `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-400 hover:underline">${url}</a>`);
-  // <@USERID> — we don't have a user map on the client, so show @mention
   out = out.replace(/&lt;@([UW][A-Z0-9]+)&gt;/g, (_m) => `<span class="text-sky-400 font-medium">@mention</span>`);
-  // <#CHANID|name> → #name
   out = out.replace(/&lt;#[CG][A-Z0-9]+\|([^&]+)&gt;/g, (_m, name) =>
     `<span class="text-sky-400 font-medium">#${name}</span>`);
 
-  // Code block ``` ``` — handle before inline code/bold/italic
   out = out.replace(/```([\s\S]+?)```/g, (_m, code) =>
     `<pre class="bg-slate-900/80 border border-slate-700 rounded p-2 text-xs font-mono text-slate-200 overflow-x-auto my-1">${code}</pre>`);
-  // Inline code
   out = out.replace(/`([^`]+?)`/g, (_m, code) =>
     `<code class="bg-slate-900/60 border border-slate-700 rounded px-1 text-xs font-mono text-slate-200">${code}</code>`);
-  // *bold*
   out = out.replace(/(^|[^*])\*([^*\n]+?)\*/g, (_m, pre, inner) => `${pre}<strong class="font-semibold text-slate-100">${inner}</strong>`);
-  // _italic_
   out = out.replace(/(^|[^_])_([^_\n]+?)_/g, (_m, pre, inner) => `${pre}<em class="italic">${inner}</em>`);
 
-  // Preserve newlines inside the paragraph.
   out = out.replace(/\n/g, '<br/>');
-
   return out;
 }
 
@@ -97,7 +118,6 @@ function formatAbsolute(tsEpoch: number): string {
 
 /* ----------------------------------------------------------------
    Supabase queries
-   We read newest-first from `stash_slack_messages` scoped to each channel.
    ---------------------------------------------------------------- */
 async function fetchMessages(channel: ChannelKey): Promise<SlackMessage[]> {
   const oldest = Math.floor(Date.now() / 1000) - BACKFILL_DAYS * 86400;
@@ -114,9 +134,8 @@ async function fetchMessages(channel: ChannelKey): Promise<SlackMessage[]> {
 }
 
 async function triggerBackfill(): Promise<void> {
-  // Fire-and-forget from the client's perspective — we'll re-query Supabase
-  // a second or two later. No auth needed: the endpoint is idempotent and
-  // only the server holds the bot token.
+  // Fire-and-forget; we re-query Supabase after a short delay. Endpoint is
+  // idempotent (upsert on channel_id:ts) so calling it twice is harmless.
   await fetch(`/api/slack-backfill?days=${BACKFILL_DAYS}`, { method: 'GET' });
 }
 
@@ -126,26 +145,13 @@ async function triggerBackfill(): Promise<void> {
 interface FeedColumnProps {
   title: string;
   channel: ChannelKey;
-  accent: 'indigo' | 'pink';
+  accent: AccentKey;
   icon: React.ReactNode;
   messages: SlackMessage[];
   isLoading: boolean;
   error: string | null;
   lastUpdated: number | null;
 }
-
-const ACCENT_STYLES: Record<'indigo' | 'pink', { headerBg: string; headerText: string; dot: string }> = {
-  indigo: {
-    headerBg: 'bg-indigo-900/40 border-indigo-700/60',
-    headerText: 'text-indigo-200',
-    dot: 'bg-indigo-400',
-  },
-  pink: {
-    headerBg: 'bg-pink-900/40 border-pink-700/60',
-    headerText: 'text-pink-200',
-    dot: 'bg-pink-400',
-  },
-};
 
 function FeedColumn({ title, channel, accent, icon, messages, isLoading, error, lastUpdated }: FeedColumnProps) {
   const style = ACCENT_STYLES[accent];
@@ -159,18 +165,18 @@ function FeedColumn({ title, channel, accent, icon, messages, isLoading, error, 
   }), [messages]);
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden min-h-[360px] max-h-[520px]">
-      <div className={`px-4 py-2.5 border-b ${style.headerBg} flex items-center justify-between`}>
-        <div className="flex items-center gap-2">
-          <span className={`relative flex h-2 w-2`}>
+    <div className="flex-1 min-w-0 flex flex-col bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden min-h-[400px] h-[calc(100vh-220px)] max-h-[900px]">
+      <div className={`px-4 py-2.5 border-b ${style.headerBg} flex items-center justify-between flex-shrink-0`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="relative flex h-2 w-2 flex-shrink-0">
             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dot} opacity-75`}></span>
             <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dot}`}></span>
           </span>
           {icon}
-          <span className={`text-sm font-semibold ${style.headerText}`}>{title}</span>
-          <span className="text-xs text-slate-400">#{channel}</span>
+          <span className={`text-sm font-semibold ${style.headerText} truncate`}>{title}</span>
+          <span className="text-xs text-slate-400 truncate hidden sm:inline">#{channel}</span>
         </div>
-        <div className="flex items-center gap-1 text-xs text-slate-400">
+        <div className="flex items-center gap-1 text-xs text-slate-400 flex-shrink-0">
           {isLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Clock className="w-3 h-3" />}
           <span>{lastUpdated ? formatRelative(lastUpdated / 1000) : '—'}</span>
         </div>
@@ -190,14 +196,15 @@ function FeedColumn({ title, channel, accent, icon, messages, isLoading, error, 
           <div className="text-center text-sm text-slate-500 py-8">
             No messages in the last {BACKFILL_DAYS} days.
             <div className="text-xs mt-1">Waiting for activity…</div>
+            <div className="text-[11px] mt-2 text-slate-600">
+              Make sure the bot is invited to <span className="font-mono">#{channel}</span>.
+            </div>
           </div>
         )}
         {visible.map(m => (
           <article key={m.id} className="flex gap-2.5 group">
             <div className="flex-shrink-0">
               {m.user_avatar ? (
-                // Slack avatars are CDN-served, no auth needed.
-                // eslint-disable-next-line @next/next/no-img-element
                 <img src={m.user_avatar} alt={m.user_name || 'user'} className="w-8 h-8 rounded" />
               ) : (
                 <div className="w-8 h-8 rounded bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">
@@ -231,23 +238,32 @@ function FeedColumn({ title, channel, accent, icon, messages, isLoading, error, 
    Main component
    ---------------------------------------------------------------- */
 export default function SlackFeeds() {
-  const [printMessages, setPrintMessages] = useState<SlackMessage[]>([]);
-  const [embMessages, setEmbMessages] = useState<SlackMessage[]>([]);
+  // Messages are stored per-channel in a record so adding/removing a feed
+  // is purely a FEEDS config change — no extra useState required.
+  const [messagesByChannel, setMessagesByChannel] = useState<Record<ChannelKey, SlackMessage[]>>(() => {
+    const init: Partial<Record<ChannelKey, SlackMessage[]>> = {};
+    for (const f of FEEDS) init[f.channel] = [];
+    return init as Record<ChannelKey, SlackMessage[]>;
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [hasBackfilled, setHasBackfilled] = useState(false);
   const backfillInFlight = useRef(false);
 
-  const loadBoth = useCallback(async (): Promise<{ printCount: number; embCount: number }> => {
-    const [pr, em] = await Promise.all([
-      fetchMessages('print-updates'),
-      fetchMessages('embroidery-updates'),
-    ]);
-    setPrintMessages(pr);
-    setEmbMessages(em);
+  const loadAll = useCallback(async (): Promise<number> => {
+    const entries = await Promise.all(
+      FEEDS.map(async f => [f.channel, await fetchMessages(f.channel)] as const)
+    );
+    const next: Partial<Record<ChannelKey, SlackMessage[]>> = {};
+    let total = 0;
+    for (const [channel, msgs] of entries) {
+      next[channel] = msgs;
+      total += msgs.length;
+    }
+    setMessagesByChannel(next as Record<ChannelKey, SlackMessage[]>);
     setLastUpdated(Date.now());
-    return { printCount: pr.length, embCount: em.length };
+    return total;
   }, []);
 
   const refresh = useCallback(async () => {
@@ -258,18 +274,19 @@ export default function SlackFeeds() {
     }
     setError(null);
     try {
-      const counts = await loadBoth();
+      const total = await loadAll();
 
-      // If we just came up empty on first load, trigger a backfill once so
-      // staff aren't staring at a blank panel. Subsequent polls won't retry.
-      if (!hasBackfilled && counts.printCount === 0 && counts.embCount === 0 && !backfillInFlight.current) {
+      // Auto-backfill once if *all* feeds are empty on first load. We don't
+      // retry per-feed because an empty single channel is a legitimate state
+      // (nobody's posted there for 3 days) — only total emptiness suggests
+      // the mirror hasn't been bootstrapped.
+      if (!hasBackfilled && total === 0 && !backfillInFlight.current) {
         backfillInFlight.current = true;
         setHasBackfilled(true);
         try {
           await triggerBackfill();
-          // Give Supabase a beat to commit before we re-query.
           await new Promise(r => setTimeout(r, 1500));
-          await loadBoth();
+          await loadAll();
         } finally {
           backfillInFlight.current = false;
         }
@@ -279,34 +296,31 @@ export default function SlackFeeds() {
     } finally {
       setIsLoading(false);
     }
-  }, [hasBackfilled, loadBoth]);
+  }, [hasBackfilled, loadAll]);
 
-  // Manual "Sync last 3 days" — also available to admins in case Slack
-  // events aren't wired up yet.
   const runBackfill = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       await triggerBackfill();
       await new Promise(r => setTimeout(r, 1500));
-      await loadBoth();
+      await loadAll();
     } catch (e: any) {
       setError(e?.message || 'Backfill failed');
     } finally {
       setIsLoading(false);
     }
-  }, [loadBoth]);
+  }, [loadAll]);
 
   useEffect(() => {
     refresh();
     const iv = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
-    // refresh's own dependencies cover hasBackfilled; don't re-arm the interval.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <section className="space-y-2" aria-label="Slack production feeds">
+    <section className="space-y-2" aria-label="Slack shop-floor feeds">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
           Live from Slack
@@ -321,27 +335,22 @@ export default function SlackFeeds() {
           Sync {BACKFILL_DAYS}d
         </button>
       </div>
-      <div className="flex flex-col lg:flex-row gap-3">
-        <FeedColumn
-          title="Print Updates"
-          channel="print-updates"
-          accent="indigo"
-          icon={<Printer className="w-4 h-4 text-indigo-300" />}
-          messages={printMessages}
-          isLoading={isLoading}
-          error={error}
-          lastUpdated={lastUpdated}
-        />
-        <FeedColumn
-          title="Embroidery Updates"
-          channel="embroidery-updates"
-          accent="pink"
-          icon={<Palette className="w-4 h-4 text-pink-300" />}
-          messages={embMessages}
-          isLoading={isLoading}
-          error={error}
-          lastUpdated={lastUpdated}
-        />
+      {/* 1 col on phones, 2 cols on tablets, 3 cols on desktop so each feed
+          stays readable at every width without horizontal scroll. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {FEEDS.map(f => (
+          <FeedColumn
+            key={f.channel}
+            title={f.title}
+            channel={f.channel}
+            accent={f.accent}
+            icon={f.icon}
+            messages={messagesByChannel[f.channel] || []}
+            isLoading={isLoading}
+            error={error}
+            lastUpdated={lastUpdated}
+          />
+        ))}
       </div>
     </section>
   );

@@ -27,15 +27,38 @@ import crypto from 'crypto';
  *   - SLACK_BOT_TOKEN            — xoxb-… from "OAuth & Permissions"
  *   - SUPABASE_URL               — already set
  *   - SUPABASE_SERVICE_KEY       — service key (preferred) or anon (fallback)
- *   - SLACK_CHANNEL_PRINT_ID     — optional; auto-resolved from CHANNEL_PRINT_NAME if missing
- *   - SLACK_CHANNEL_PRINT_NAME   — defaults to "print-updates"
- *   - SLACK_CHANNEL_EMB_ID       — optional; auto-resolved from CHANNEL_EMB_NAME if missing
- *   - SLACK_CHANNEL_EMB_NAME     — defaults to "embroidery-updates"
+ *   - SLACK_CHANNEL_PRINT_ID       — optional; auto-resolved from name if missing
+ *   - SLACK_CHANNEL_PRINT_NAME     — defaults to "print-updates"
+ *   - SLACK_CHANNEL_EMB_ID         — optional; auto-resolved from name if missing
+ *   - SLACK_CHANNEL_EMB_NAME       — defaults to "embroidery-updates"
+ *   - SLACK_CHANNEL_DELIVERY_ID    — optional; auto-resolved from name if missing
+ *   - SLACK_CHANNEL_DELIVERY_NAME  — defaults to "delivery-updates"
  */
 
 const SLACK_API = 'https://slack.com/api';
-const DEFAULT_PRINT_NAME = process.env.SLACK_CHANNEL_PRINT_NAME || 'print-updates';
-const DEFAULT_EMB_NAME = process.env.SLACK_CHANNEL_EMB_NAME || 'embroidery-updates';
+
+// ─── Tracked channel config ─────────────────────────────────────────────────
+// Single source of truth for which Slack channels we mirror. Add another
+// {display, nameEnv, idEnv, defaultName} entry here to onboard a new channel
+// — no other changes in this file needed. The matching frontend lives in
+// components/SlackFeeds.tsx and must declare the same `display` keys.
+const TRACKED_CHANNELS = [
+  {
+    display: 'print-updates',
+    defaultName: process.env.SLACK_CHANNEL_PRINT_NAME || 'print-updates',
+    envId: process.env.SLACK_CHANNEL_PRINT_ID,
+  },
+  {
+    display: 'embroidery-updates',
+    defaultName: process.env.SLACK_CHANNEL_EMB_NAME || 'embroidery-updates',
+    envId: process.env.SLACK_CHANNEL_EMB_ID,
+  },
+  {
+    display: 'delivery-updates',
+    defaultName: process.env.SLACK_CHANNEL_DELIVERY_NAME || 'delivery-updates',
+    envId: process.env.SLACK_CHANNEL_DELIVERY_ID,
+  },
+] as const;
 
 // ─── Slack channel resolution (cached across warm invocations) ──────────────
 // We fetch conversations.list once and remember which channel id maps to which
@@ -175,15 +198,17 @@ async function supabaseDelete(id: string): Promise<void> {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 // Named channels we actually care about — everything else is ignored so the
 // bot being invited into another channel by mistake doesn't flood Supabase.
+// Match order: an explicit env-var channel id wins over name-based matching,
+// so you can rename a channel in Slack without breaking the mirror.
 function isTrackedChannel(channelId: string, channels: ChannelMap[]): { tracked: boolean; name: string } {
+  for (const tc of TRACKED_CHANNELS) {
+    if (tc.envId && channelId === tc.envId) return { tracked: true, name: tc.display };
+  }
   const hit = channels.find(c => c.id === channelId);
   if (!hit) return { tracked: false, name: channelId };
-  const envPrint = process.env.SLACK_CHANNEL_PRINT_ID;
-  const envEmb = process.env.SLACK_CHANNEL_EMB_ID;
-  if (envPrint && channelId === envPrint) return { tracked: true, name: DEFAULT_PRINT_NAME };
-  if (envEmb && channelId === envEmb) return { tracked: true, name: DEFAULT_EMB_NAME };
-  if (hit.name === DEFAULT_PRINT_NAME) return { tracked: true, name: DEFAULT_PRINT_NAME };
-  if (hit.name === DEFAULT_EMB_NAME) return { tracked: true, name: DEFAULT_EMB_NAME };
+  for (const tc of TRACKED_CHANNELS) {
+    if (hit.name === tc.defaultName) return { tracked: true, name: tc.display };
+  }
   return { tracked: false, name: hit.name };
 }
 

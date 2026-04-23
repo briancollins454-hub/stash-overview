@@ -3,26 +3,55 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 /**
  * /api/slack-backfill
  *
- * Pulls the last N days of history from the two tracked channels (print-updates
- * and embroidery-updates) and upserts them into Supabase. Safe to call
- * repeatedly — it upserts on the natural key `channel_id:ts`, so duplicates
- * are collapsed.
+ * Pulls the last N days of history from all tracked channels (print-updates,
+ * embroidery-updates, delivery-updates) and upserts them into Supabase. Safe
+ * to call repeatedly — upserts on the natural key `channel_id:ts`, so
+ * duplicates are collapsed.
  *
  * Typical usage:
- *   - The Production page calls this automatically on first load if the
- *     Supabase table is empty for either channel (bootstrap).
- *   - An admin can also trigger it from a "Sync History" button.
+ *   - The Shop Floor page calls this automatically on first load if the
+ *     Supabase table is empty (bootstrap).
+ *   - An admin can also trigger it from the "Sync 3d" button on that page.
  *
  * Query params:
  *   - days (default 3, max 14) — how far back to pull.
- *   - channel — optional, one of "print" | "embroidery". Omit for both.
+ *   - channel — optional: "print" | "embroidery" | "delivery". Omit for all.
  */
 
 const SLACK_API = 'https://slack.com/api';
-const DEFAULT_PRINT_NAME = process.env.SLACK_CHANNEL_PRINT_NAME || 'print-updates';
-const DEFAULT_EMB_NAME = process.env.SLACK_CHANNEL_EMB_NAME || 'embroidery-updates';
 
-interface ChannelRef { id: string; name: string; display: 'print-updates' | 'embroidery-updates' }
+type ChannelDisplay = 'print-updates' | 'embroidery-updates' | 'delivery-updates';
+
+// Single source of truth for which Slack channels we mirror. Add another
+// entry here to onboard a new channel — the rest of this file adapts
+// automatically. Keep in lock-step with the same list in api/slack-events.ts
+// and the frontend in components/SlackFeeds.tsx.
+const TRACKED_CHANNELS: { display: ChannelDisplay; defaultName: string; envId: string | undefined }[] = [
+  {
+    display: 'print-updates',
+    defaultName: process.env.SLACK_CHANNEL_PRINT_NAME || 'print-updates',
+    envId: process.env.SLACK_CHANNEL_PRINT_ID,
+  },
+  {
+    display: 'embroidery-updates',
+    defaultName: process.env.SLACK_CHANNEL_EMB_NAME || 'embroidery-updates',
+    envId: process.env.SLACK_CHANNEL_EMB_ID,
+  },
+  {
+    display: 'delivery-updates',
+    defaultName: process.env.SLACK_CHANNEL_DELIVERY_NAME || 'delivery-updates',
+    envId: process.env.SLACK_CHANNEL_DELIVERY_ID,
+  },
+];
+
+// Short-code (used by the ?channel= query param) → internal display key.
+const CHANNEL_SHORTCODES: Record<string, ChannelDisplay> = {
+  print: 'print-updates',
+  embroidery: 'embroidery-updates',
+  delivery: 'delivery-updates',
+};
+
+interface ChannelRef { id: string; name: string; display: ChannelDisplay }
 
 async function resolveTrackedChannels(token: string): Promise<ChannelRef[]> {
   // Public and private channels are fetched separately so missing `groups:read`
@@ -46,15 +75,15 @@ async function resolveTrackedChannels(token: string): Promise<ChannelRef[]> {
     }
   } catch { /* groups:read not granted — safe to skip */ }
 
-  const envPrint = process.env.SLACK_CHANNEL_PRINT_ID;
-  const envEmb = process.env.SLACK_CHANNEL_EMB_ID;
-
   const out: ChannelRef[] = [];
   for (const c of raw) {
-    if (envPrint && c.id === envPrint) out.push({ id: c.id, name: c.name, display: 'print-updates' });
-    else if (envEmb && c.id === envEmb) out.push({ id: c.id, name: c.name, display: 'embroidery-updates' });
-    else if (!envPrint && c.name === DEFAULT_PRINT_NAME) out.push({ id: c.id, name: c.name, display: 'print-updates' });
-    else if (!envEmb && c.name === DEFAULT_EMB_NAME) out.push({ id: c.id, name: c.name, display: 'embroidery-updates' });
+    // env-var id override wins over name matching so a channel rename in
+    // Slack doesn't silently break the mirror.
+    const byEnv = TRACKED_CHANNELS.find(tc => tc.envId && c.id === tc.envId);
+    if (byEnv) { out.push({ id: c.id, name: c.name, display: byEnv.display }); continue; }
+
+    const byName = TRACKED_CHANNELS.find(tc => !tc.envId && c.name === tc.defaultName);
+    if (byName) { out.push({ id: c.id, name: c.name, display: byName.display }); }
   }
   return out;
 }
@@ -167,16 +196,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     const channels = await resolveTrackedChannels(botToken);
     if (channels.length === 0) {
-      res.status(404).json({ error: 'No tracked channels found. Is the bot invited to print-updates / embroidery-updates?' });
+      const names = TRACKED_CHANNELS.map(tc => tc.defaultName).join(' / ');
+      res.status(404).json({ error: `No tracked channels found. Is the bot invited to ${names}?` });
       return;
     }
 
     const resolveUser = await makeUserResolver(botToken);
     const summary: Record<string, number> = {};
 
+    // ?channel=print|embroidery|delivery limits to a single channel; any
+    // unknown shortcode is treated as "all" so callers can't accidentally
+    // process nothing by mistyping.
+    const filterDisplay: ChannelDisplay | null = CHANNEL_SHORTCODES[only] || null;
+
     for (const channel of channels) {
-      if (only === 'print' && channel.display !== 'print-updates') continue;
-      if (only === 'embroidery' && channel.display !== 'embroidery-updates') continue;
+      if (filterDisplay && channel.display !== filterDisplay) continue;
 
       const messages = await fetchHistory(botToken, channel.id, oldest);
 
