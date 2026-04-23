@@ -36,33 +36,47 @@ const fetchWithProxy = async (path: string, method: string, body?: any, prefer?:
     }
 };
 
-const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit = 1000, retries = 2): Promise<T[] | null> => {
+// Tables whose rows carry a fat JSON blob (order_data / job_data) are more
+// likely to hit Supabase's 8s statement timeout when paged at 1000 per
+// request, so we start them at a smaller page size.
+const HEAVY_JSON_TABLES: Record<string, number> = {
+    stash_orders: 500,
+    stash_deco_jobs: 500,
+};
+
+const fetchAllFromCloud = async <T>(table: string, select = '*', offset = 0, limit?: number, retries = 3): Promise<T[] | null> => {
+    const effectiveLimit = limit ?? HEAVY_JSON_TABLES[table] ?? 1000;
     try {
-        const path = `${table}?select=${select}&limit=${limit}&offset=${offset}`;
+        const path = `${table}?select=${select}&limit=${effectiveLimit}&offset=${offset}`;
         const res = await fetchWithProxy(path, 'GET');
-        
+
         const data = await res.json();
         if (!Array.isArray(data)) return [];
-        
-        // Recursive pagination if we hit the limit
-        if (data.length === limit && offset + limit < 100000) {
-            const nextBatch = await fetchAllFromCloud<T>(table, select, offset + limit, limit, retries);
+
+        // Recursive pagination if we hit the page limit.
+        if (data.length === effectiveLimit && offset + effectiveLimit < 100000) {
+            const nextBatch = await fetchAllFromCloud<T>(table, select, offset + effectiveLimit, effectiveLimit, retries);
             return [...data, ...(nextBatch || [])];
         }
-        
+
         return data;
     } catch (e: any) {
-        if (e.status === 404 || e.message.includes('404')) {
+        const msg: string = e?.message || String(e);
+        if (e?.status === 404 || msg.includes('404')) {
             console.warn(`Cloud table "${table}" not found.`);
             return null;
         }
-        // Retry on network/timeout errors
+        // On statement-timeout / 500 / network error: back off and halve the
+        // page size. Retries converge at 100 rows per request, which is well
+        // inside the 8s statement timeout even for fat JSON blobs.
         if (retries > 0) {
-            console.warn(`Cloud fetch ${table} failed, retrying (${retries} left)...`);
+            const nextLimit = Math.max(100, Math.floor(effectiveLimit / 2));
+            const looksLikeTimeout = msg.includes('statement timeout') || msg.includes('500');
+            console.warn(`Cloud fetch ${table} failed (${looksLikeTimeout ? 'timeout' : 'network'}), retrying (${retries} left) at limit=${nextLimit}...`);
             await new Promise(r => setTimeout(r, 1500));
-            return fetchAllFromCloud<T>(table, select, offset, limit, retries - 1);
+            return fetchAllFromCloud<T>(table, select, offset, nextLimit, retries - 1);
         }
-        console.error(`Cloud fetch ${table} failed after retries:`, e.message || e);
+        console.error(`Cloud fetch ${table} failed after retries:`, msg);
         return [];
     }
 };
