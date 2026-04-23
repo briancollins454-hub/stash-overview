@@ -23,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const username: string = rawUser;
   const password: string = rawPass;
 
-  const { action, endpoint, params, jobIds } = req.body || {};
+  const { action, endpoint, params, jobIds, probeOrderId, probeProductCode } = req.body || {};
 
   // Helper: fetch orders via date-range search and filter by requested IDs
   // Uses PARALLEL page fetches — all pages at once to beat Vercel 10s timeout
@@ -179,6 +179,139 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── Full-surface probe ──────────────────────────────────────────────
+  // Dumps the raw Deco payload with every documented `include_*` flag
+  // switched on, for one order and (optionally) one product, plus a
+  // handful of list-style endpoints. Intended for exploration: lets us
+  // see exactly which fields Deco actually returns for this tenant so we
+  // can decide what to wire into the UI. Response shape is deliberately
+  // raw (no parsing) — top-level keys are captured separately so the
+  // caller can glance at "what is available" without scrolling the full
+  // JSON.
+  if (action === 'probe') {
+    const dump: any = { timestamp: new Date().toISOString(), domain, sections: [] };
+
+    const runRaw = async (label: string, path: string, extraParams: Record<string, string>) => {
+      const section: any = { label, path, params: extraParams };
+      try {
+        const qp = new URLSearchParams({ username, password, skip_login_token: '1', ...extraParams });
+        const url = `https://${domain}/${path}?${qp.toString()}`;
+        const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(25000) });
+        const text = await resp.text();
+        section.httpStatus = resp.status;
+        section.contentType = resp.headers.get('content-type') || '';
+        try {
+          const parsed = JSON.parse(text);
+          section.topLevelKeys = Object.keys(parsed || {});
+          section.responseStatus = parsed.response_status || null;
+          // Keep raw payload; cap at ~250KB to stay under Vercel 4.5MB response limit
+          // when combined with the other sections.
+          section.raw = parsed;
+        } catch {
+          section.parseError = true;
+          section.bodySnippet = text.slice(0, 500);
+        }
+      } catch (e: any) {
+        section.error = e.message;
+      }
+      dump.sections.push(section);
+    };
+
+    // 1) Pull ONE order with EVERY include flag we know about, so staff
+    //    can see the full shape of a single order record.
+    const targetId = probeOrderId ? String(probeOrderId).trim() : null;
+    if (targetId) {
+      await runRaw('order-full-get', 'api/json/manage_orders/get', {
+        id: targetId,
+        include_workflow_data: '1',
+        include_user_assignments: '1',
+        include_custom_fields: '1',
+        include_sales_data: '1',
+        include_product_data: '1',
+        include_decoration_data: '1',
+        include_artwork_data: '1',
+        include_shipping_data: '1',
+        include_payment_data: '1',
+        include_notes: '1',
+        include_production_notes: '1',
+        include_files: '1',
+        include_history: '1',
+        include_vendor_data: '1',
+      });
+      await runRaw('order-full-find', 'api/json/manage_orders/find', {
+        field: '1', condition: '1', string: targetId, criteria: targetId, limit: '1',
+        include_workflow_data: '1',
+        include_user_assignments: '1',
+        include_custom_fields: '1',
+        include_sales_data: '1',
+        include_product_data: '1',
+        include_decoration_data: '1',
+        include_artwork_data: '1',
+        include_shipping_data: '1',
+        include_payment_data: '1',
+        include_notes: '1',
+        include_production_notes: '1',
+        include_files: '1',
+        include_history: '1',
+        include_vendor_data: '1',
+      });
+    } else {
+      // No specific id — sample the newest order in the last 14 days
+      const minDate = new Date(); minDate.setDate(minDate.getDate() - 14);
+      await runRaw('order-sample-latest', 'api/json/manage_orders/find', {
+        field: '1', condition: '4',
+        date1: minDate.toISOString().split('T')[0] + ' 00:00:00',
+        limit: '1', offset: '0',
+        include_workflow_data: '1',
+        include_user_assignments: '1',
+        include_custom_fields: '1',
+        include_sales_data: '1',
+        include_product_data: '1',
+        include_decoration_data: '1',
+        include_artwork_data: '1',
+        include_shipping_data: '1',
+        include_payment_data: '1',
+        include_notes: '1',
+        include_production_notes: '1',
+        include_files: '1',
+        include_history: '1',
+        include_vendor_data: '1',
+      });
+    }
+
+    // 2) One product with full detail, so we can see what `manage_products`
+    //    exposes beyond what we already pull for EAN lookup.
+    if (probeProductCode) {
+      await runRaw('product-full-find', 'api/json/manage_products/find', {
+        field: '3', condition: '1', string: String(probeProductCode).trim(), limit: '1',
+        include_variants: '1',
+        include_decoration_data: '1',
+        include_pricing_data: '1',
+      });
+    } else {
+      await runRaw('product-sample-latest', 'api/json/manage_products/find', {
+        limit: '1', offset: '0',
+        include_variants: '1',
+        include_decoration_data: '1',
+        include_pricing_data: '1',
+      });
+    }
+
+    // 3) Small structural endpoints — these are usually list-style and
+    //    tell us about status codes, vendors, staff, etc. Every probe is
+    //    wrapped in try/catch so a 404 on one doesn't kill the dump.
+    await runRaw('order-statuses', 'api/json/manage_orders/get_statuses', {});
+    await runRaw('product-categories', 'api/json/manage_products/get_categories', {});
+    await runRaw('vendors-list', 'api/json/manage_vendors/find', { limit: '25' });
+    await runRaw('staff-list', 'api/json/manage_staff/find', { limit: '25' });
+    await runRaw('customers-sample', 'api/json/manage_customers/find', { limit: '2' });
+    await runRaw('invoices-sample', 'api/json/manage_invoices/find', { limit: '2' });
+    await runRaw('shipping-carriers', 'api/json/manage_shipping/get_carriers', {});
+    await runRaw('payments-sample', 'api/json/manage_payments/find', { limit: '5' });
+
+    return res.status(200).json(dump);
+  }
+
   // Diagnostic: show exactly what the Deco API returns for a given ID
   if (action === 'diagnose' && jobIds?.length === 1) {
     const targetId = String(jobIds[0]).trim();
@@ -283,8 +416,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'endpoint is required' });
   }
 
-  // Only allow safe Deco API paths
-  if (!endpoint.startsWith('api/json/manage_orders/') && !endpoint.startsWith('api/json/manage_products/')) {
+  // Only allow the Deco "manage_*" JSON API surface — read/write proxy is
+  // still gated by Vercel-side credentials, but we don't want this proxy
+  // relaying arbitrary host paths (e.g. /admin/*). All production calls
+  // go through manage_orders / manage_products; the wider match is there
+  // so we can also hit manage_vendors / manage_staff / manage_customers /
+  // manage_invoices / manage_payments / manage_shipping when probing.
+  if (!/^api\/json\/manage_[a-z_]+\//.test(endpoint)) {
     return res.status(403).json({ error: 'API endpoint not allowed' });
   }
 
