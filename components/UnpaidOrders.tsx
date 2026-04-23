@@ -135,14 +135,22 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
         const customer = (j.customerName || '').toLowerCase();
         if (balance === 0 && customer.includes('stash')) return false;
 
-        // Rule 4 — exclude Gift of Kit ("GOK") promotional orders. These
+        // Rule 4 — exclude "expected £0 balance" order types. These
         // legitimately have a £0 invoice balance and no payment recorded,
         // so they'll otherwise match every other rule and pollute the list.
-        // Match either the word GOK (bounded, to avoid matching e.g.
-        // "Bangok") or the full phrase "gift of kit", across job name,
-        // customer name and notes — covers whichever field staff tag it on.
+        //
+        //   - GOK / "Gift of Kit" — promotional giveaways
+        //   - "Stash Shop" — partner/internal stores where invoicing is
+        //     handled outside Deco (e.g. "Devon Stash Shop 47925",
+        //     "CHGS Staff Stash Shop 46313")
+        //
+        // Match across job name, customer name and notes so we catch the
+        // tag wherever staff have attached it. GOK uses word boundaries
+        // so we don't false-match tokens like "Bangok".
         const haystack = `${j.jobName || ''}\u0001${j.customerName || ''}\u0001${j.notes || ''}`.toLowerCase();
-        if (/\bgok\b/.test(haystack) || haystack.includes('gift of kit')) return false;
+        if (/\bgok\b/.test(haystack)) return false;
+        if (haystack.includes('gift of kit')) return false;
+        if (haystack.includes('stash shop')) return false;
 
         // If both balance and total are zero AND there's no ship date, this
         // is almost certainly an empty/draft order, not an AR leak.
@@ -486,7 +494,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, and <span className="font-mono">GOK</span> / Gift of Kit orders.
+        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, and <span className="font-mono">Stash Shop</span> orders.
       </div>
     </div>
   );
