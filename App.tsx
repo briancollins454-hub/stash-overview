@@ -3131,6 +3131,7 @@ const App: React.FC = () => {
                     isDark={isDark}
                     settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                    currentUserEmail={isCustomUser ? (customUserData?.username || '') : (user?.email || '')}
                   />
                 </ErrorBoundary>
               </Suspense>
