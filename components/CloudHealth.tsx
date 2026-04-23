@@ -127,7 +127,9 @@ const TABLES: TableDef[] = [
   { table: 'stash_stock', label: 'Physical Stock' },
   { table: 'stash_returns', label: 'Return Stock' },
   { table: 'stash_reference_products', label: 'Reference Products' },
-  { table: 'stash_settings', label: 'Settings' },
+  // stash_settings was reserved for cloud-syncing API settings but never
+  // provisioned in Supabase, so polling it just produced a flood of 404s
+  // on every refresh. Re-add this entry if/when the table is created.
 ];
 
 const STALE_MS = 10 * 60 * 1000; // 10 minutes
