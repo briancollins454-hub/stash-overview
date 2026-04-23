@@ -3159,6 +3159,7 @@ const App: React.FC = () => {
                     decoJobs={rawDecoJobs}
                     isDark={isDark}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
+                    currentUserEmail={isCustomUser ? (customUserData?.username || '') : (user?.email || '')}
                   />
                 </ErrorBoundary>
               </Suspense>
