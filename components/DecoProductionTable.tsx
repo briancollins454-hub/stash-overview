@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import type { DecoJob, DecoItem } from '../types';
 import { Scissors, Timer, Hash, ChevronDown, ChevronUp, Search, Filter, Printer, RefreshCw, CalendarDays, FileDown, FileSpreadsheet, Settings2, Eye, EyeOff, Lock } from 'lucide-react';
 
@@ -318,7 +318,18 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     // Multi-select status filters. Empty set == "Active" (all not-shipped/completed/cancelled).
     const [statusFilters, setStatusFilters] = useState<Set<Exclude<StatusFilter, 'active'>>>(new Set());
-    const [typeFilter, setTypeFilter] = useState<string | null>(null);
+    // Decoration-type filter is multi-select — mirrors the status tab UX.
+    // Empty set = "All Types". Non-empty set = union of selected types
+    // (a job matches if it contains *any* of the selected decoration types).
+    const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set());
+    const toggleTypeFilter = useCallback((t: string) => {
+        setTypeFilters(prev => {
+            const next = new Set(prev);
+            if (next.has(t)) next.delete(t);
+            else next.add(t);
+            return next;
+        });
+    }, []);
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedJob, setExpandedJob] = useState<string | null>(null);
     const [hideIncomplete, setHideIncomplete] = useState(false);
@@ -577,9 +588,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             );
         }
 
-        // Type filter
-        if (typeFilter) {
-            list = list.filter(j => j.decoTypes.includes(typeFilter));
+        // Decoration-type filter (multi-select). Empty set = no filter.
+        if (typeFilters.size > 0) {
+            list = list.filter(j => j.decoTypes.some(t => typeFilters.has(t)));
         }
 
         // Sort
@@ -600,7 +611,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
 
         return list;
-    }, [enrichedJobs, hideIncomplete, statusFilters, typeFilter, searchTerm, sortKey, sortDir, dueFrom, dueTo, orderedFrom, orderedTo]);
+    }, [enrichedJobs, hideIncomplete, statusFilters, typeFilters, searchTerm, sortKey, sortDir, dueFrom, dueTo, orderedFrom, orderedTo]);
 
     const incompleteCount = useMemo(() => {
         let base = enrichedJobs;
@@ -832,10 +843,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         };
 
         // ──────────────────────────────────────────────────────────────────
-        // TYPE-SPECIFIC REPORT (when a decoration type filter is active)
+        // TYPE-SPECIFIC REPORT (when exactly one decoration type is selected).
+        // Multi-selecting 2+ types falls through to the generic all-types
+        // report so the PDF isn't split into confusing single-type sheets.
         // ──────────────────────────────────────────────────────────────────
-        if (typeFilter) {
-            const activeType = typeFilter;
+        if (typeFilters.size === 1) {
+            const activeType = Array.from(typeFilters)[0];
             const isEmbReport = activeType === 'EMB';
             const typeLabel = isEmbReport ? 'Embroidery' : activeType;
 
@@ -1491,9 +1504,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
 
         const lines: string[] = [];
 
-        // ── TYPE-SPECIFIC CSV ───────────────────────────────────────────
-        if (typeFilter) {
-            const activeType = typeFilter;
+        // ── TYPE-SPECIFIC CSV (only when exactly one type is selected) ─────
+        if (typeFilters.size === 1) {
+            const activeType = Array.from(typeFilters)[0];
             const isEmbReport = activeType === 'EMB';
             const typeLabel = isEmbReport ? 'Embroidery' : activeType;
 
@@ -1808,7 +1821,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         printWindow.document.write(`<h1>Deco Production Jobs</h1>`);
         printWindow.document.write(`<div class="subtitle">${escHtml(filtered.length)} jobs · ${escHtml(fmtK(totalValue))} pipeline · ${escHtml(fmtTime(totalMinutes))} est. · Printed ${escHtml(new Date().toLocaleString('en-GB'))}</div>`);
         const selectedStatusLabels = Array.from(statusFilters).map(k => STATUS_FILTER_LABELS[k].toUpperCase());
-        const filters = [selectedStatusLabels.join(' + '), typeFilter || '', searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
+        const selectedTypeLabel = Array.from(typeFilters).join(' + ');
+        const filters = [selectedStatusLabels.join(' + '), selectedTypeLabel, searchTerm ? `"${searchTerm}"` : ''].filter(Boolean);
         if (filters.length) printWindow.document.write(`<div class="filter-info">Filters: ${escHtml(filters.join(' · '))}</div>`);
         printWindow.document.write(`<table><thead><tr><th>Job</th><th>Customer</th><th>Job Name</th><th>Status</th><th>Type</th><th>Qty</th><th>EMB</th><th>Print</th><th>Stitches</th><th>Est. Time</th><th>Machine</th><th>Age</th><th>Due</th><th>Value</th><th>£/hr</th></tr></thead><tbody>`);
         filtered.forEach(job => {
@@ -2005,28 +2019,48 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                                 </button>
                             </div>
                         )}
-                        <button
-                            onClick={handleGenerateReport}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
-                            title={typeFilter
-                                ? `Generate ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production report — only ${typeFilter} work for the department. Preset: ${activePresetName}. Covers: ${scopeLabel}.`
-                                : `Generate full production PDF report. Preset: ${activePresetName}. Covers: ${scopeLabel}.`}
-                        >
-                            <FileDown className="w-3.5 h-3.5" />
-                            {visibleSelectedCount > 0
-                                ? `PDF (${visibleSelectedCount} selected)`
-                                : (typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} Report (PDF)` : 'Report (PDF)')}
-                        </button>
-                        <button
-                            onClick={handleDownloadCsv}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:text-blue-200 hover:bg-blue-500/20 transition-all"
-                            title={typeFilter
-                                ? `Download ${typeFilter === 'EMB' ? 'Embroidery' : typeFilter} production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`
-                                : `Download full production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`}
-                        >
-                            <FileSpreadsheet className="w-3.5 h-3.5" />
-                            {typeFilter ? `${typeFilter === 'EMB' ? 'EMB' : typeFilter} CSV` : 'CSV'}
-                        </button>
+                        {(() => {
+                            const singleType = typeFilters.size === 1 ? Array.from(typeFilters)[0] : null;
+                            const singleTypeLabel = singleType === 'EMB' ? 'Embroidery' : singleType;
+                            const multiTypeLabel = typeFilters.size > 1 ? Array.from(typeFilters).join(' + ') : null;
+                            return (
+                                <button
+                                    onClick={handleGenerateReport}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/20 transition-all"
+                                    title={singleType
+                                        ? `Generate ${singleTypeLabel} production report — only ${singleType} work for the department. Preset: ${activePresetName}. Covers: ${scopeLabel}.`
+                                        : multiTypeLabel
+                                            ? `Generate full production PDF report filtered to ${multiTypeLabel}. Preset: ${activePresetName}. Covers: ${scopeLabel}.`
+                                            : `Generate full production PDF report. Preset: ${activePresetName}. Covers: ${scopeLabel}.`}
+                                >
+                                    <FileDown className="w-3.5 h-3.5" />
+                                    {visibleSelectedCount > 0
+                                        ? `PDF (${visibleSelectedCount} selected)`
+                                        : singleType
+                                            ? `${singleType === 'EMB' ? 'EMB' : singleType} Report (PDF)`
+                                            : 'Report (PDF)'}
+                                </button>
+                            );
+                        })()}
+                        {(() => {
+                            const singleType = typeFilters.size === 1 ? Array.from(typeFilters)[0] : null;
+                            const singleTypeLabel = singleType === 'EMB' ? 'Embroidery' : singleType;
+                            const multiTypeLabel = typeFilters.size > 1 ? Array.from(typeFilters).join(' + ') : null;
+                            return (
+                                <button
+                                    onClick={handleDownloadCsv}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-blue-500/10 border border-blue-500/30 text-blue-300 hover:text-blue-200 hover:bg-blue-500/20 transition-all"
+                                    title={singleType
+                                        ? `Download ${singleTypeLabel} production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`
+                                        : multiTypeLabel
+                                            ? `Download CSV filtered to ${multiTypeLabel}. Covers: ${scopeLabel}.`
+                                            : `Download full production data as CSV (for editing in Excel / Sheets). Covers: ${scopeLabel}.`}
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                                    {singleType ? `${singleType === 'EMB' ? 'EMB' : singleType} CSV` : 'CSV'}
+                                </button>
+                            );
+                        })()}
                         <button
                             onClick={handlePrint}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase bg-white/5 border border-white/10 text-white/50 hover:text-white hover:bg-white/10 transition-all"
@@ -2102,13 +2136,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         </button>
                     )}
                 </div>
-                {/* Decoration type filters */}
+                {/* Decoration type filters (multi-select). */}
                 {allDecoTypes.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
                         <button
-                            onClick={() => setTypeFilter(null)}
+                            onClick={() => setTypeFilters(new Set())}
+                            title="Show all decoration types"
                             className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-wider transition-all ${
-                                typeFilter === null
+                                typeFilters.size === 0
                                     ? 'bg-white/10 border-white/30 text-white ring-1 ring-white/20'
                                     : 'bg-white/5 border-white/10 text-white/30 hover:text-white/60'
                             }`}
@@ -2116,11 +2151,12 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                         {allDecoTypes.map(t => {
                             const b = getDecoBadge(t);
                             const count = typeCounts[t] || 0;
-                            const isActive = typeFilter === t;
+                            const isActive = typeFilters.has(t);
                             return (
                                 <button
                                     key={t}
-                                    onClick={() => setTypeFilter(isActive ? null : t)}
+                                    onClick={() => toggleTypeFilter(t)}
+                                    title={isActive ? `Remove ${t} from filter` : `Add ${t} to filter`}
                                     className={`px-2 py-0.5 rounded border text-[8px] font-black uppercase tracking-wider transition-all ${
                                         isActive
                                             ? `${b.bg} ${b.text} ring-1 ring-current`
