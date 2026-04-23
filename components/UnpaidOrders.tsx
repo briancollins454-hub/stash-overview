@@ -15,6 +15,13 @@ interface Props {
 type SortKey = 'jobNumber' | 'customerName' | 'orderTotal' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status';
 type SortDir = 'asc' | 'desc';
 
+// Row shape after post-processing in the jobs memo.
+interface Row extends DecoJob {
+  daysSince: number;
+  isZeroPriced: boolean;
+  hasShipped: boolean;
+}
+
 // ─── Click-to-copy job number (same UX as Shipped Not Invoiced / Priority Board) ─
 const CopyableJobNum: React.FC<{ jobNumber: string; onNavigate?: () => void }> = ({ jobNumber, onNavigate }) => {
   const [copied, setCopied] = useState(false);
@@ -62,15 +69,16 @@ const CopyableJobNum: React.FC<{ jobNumber: string; onNavigate?: () => void }> =
  *
  *   1. Show orders where Deco has recorded **zero payments** (payments.length === 0).
  *   2. Hide orders that are fully paid (implied — payments.length > 0 && balance 0
- *      wouldn't match rule 1 anyway, but we also guard against stale/partial
- *      refunds leaving 0 balance + payment records).
+ *      wouldn't match rule 1 anyway).
  *   3. Exclude internal "stash" customers when the balance is also £0 — these
  *      are zero-priced company/internal orders and aren't real AR leaks.
  *
- * Two visible sub-groups are highlighted in the table:
- *   - **Zero-priced & shipped** (orderTotal===0, dateShipped set) → the most
- *     dangerous bucket: job went out the door without ever being priced.
- *   - **Priced but unpaid** (orderTotal>0, no payment) → standard AR miss.
+ * Results are segregated into two visually distinct sections:
+ *   - **Zero priced & shipped** (urgent) — order went out the door with £0
+ *     total, almost certainly unpriced. Amber card, shown first so it can't
+ *     be missed.
+ *   - **Priced but unpaid** — standard AR miss: price was set but no payment
+ *     has landed. Shown in the normal card below.
  */
 const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) => {
   const [search, setSearch] = useState('');
@@ -80,7 +88,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
   const [isLoading, setIsLoading] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [noCache, setNoCache] = useState(false);
-  const [onlyZeroPriced, setOnlyZeroPriced] = useState(false);
 
   const loadFromFinanceCache = useCallback(async () => {
     if (!isSupabaseReady()) { setNoCache(true); return; }
@@ -108,7 +115,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
     loadFromFinanceCache();
   }, [loadFromFinanceCache]);
 
-  const jobs = useMemo(() => {
+  const jobs: Row[] = useMemo(() => {
     return allJobs
       .filter(j => {
         // Rule 1 — no payment logged in Deco.
@@ -156,10 +163,14 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
       });
   }, [allJobs]);
 
-  const filtered = useMemo(() => {
+  // Apply search + sort once, then split into the two visible sections.
+  // A row counts as "zero priced" for segregation purposes when orderTotal
+  // is £0 — regardless of whether it's already shipped. Zero-and-shipped is
+  // the most dangerous variant but zero-and-not-yet-shipped is still worth
+  // surfacing separately from the straightforward "priced-but-unpaid" list.
+  const { zeroPricedRows, pricedRows } = useMemo(() => {
     const q = search.toLowerCase().trim();
     let list = jobs;
-    if (onlyZeroPriced) list = list.filter(j => j.isZeroPriced);
     if (q) {
       list = list.filter(j =>
         j.jobNumber.toLowerCase().includes(q) ||
@@ -168,7 +179,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
         j.jobName.toLowerCase().includes(q)
       );
     }
-    list = [...list].sort((a, b) => {
+    const sorter = (a: Row, b: Row) => {
       let av: any, bv: any;
       switch (sortKey) {
         case 'jobNumber': av = a.jobNumber; bv = b.jobNumber; break;
@@ -184,14 +195,19 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
       if (av < bv) return sortDir === 'asc' ? -1 : 1;
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
-    });
-    return list;
-  }, [jobs, search, sortKey, sortDir, onlyZeroPriced]);
+    };
+    const zeroPricedRows = list.filter(j => j.isZeroPriced).sort(sorter);
+    const pricedRows = list.filter(j => !j.isZeroPriced).sort(sorter);
+    return { zeroPricedRows, pricedRows };
+  }, [jobs, search, sortKey, sortDir]);
 
-  const totalOutstanding = useMemo(() => filtered.reduce((s, j) => s + (j.outstandingBalance || 0), 0), [filtered]);
-  const zeroPricedShippedCount = useMemo(
-    () => jobs.filter(j => j.isZeroPriced && j.hasShipped).length,
-    [jobs]
+  const zeroPricedOutstanding = useMemo(
+    () => zeroPricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
+    [zeroPricedRows]
+  );
+  const pricedOutstanding = useMemo(
+    () => pricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
+    [pricedRows]
   );
 
   const toggleSort = (key: SortKey) => {
@@ -206,16 +222,19 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
   };
 
   const exportCsv = () => {
-    const header = ['Job Number', 'PO Number', 'Customer', 'Job Name', 'Status', 'Order Total', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Zero Priced', 'Shipped'];
-    const rows = filtered.map(j => [
-      j.jobNumber, j.poNumber || '', j.customerName, j.jobName, j.status,
+    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Status', 'Order Total', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped'];
+    const toRow = (j: Row, section: string) => [
+      section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName, j.status,
       (j.orderTotal || 0).toFixed(2),
       (j.outstandingBalance || 0).toFixed(2),
       j.dateOrdered || '', j.dateShipped || '',
       j.daysSince.toString(),
-      j.isZeroPriced ? 'YES' : 'no',
       j.hasShipped ? 'YES' : 'no',
-    ]);
+    ];
+    const rows = [
+      ...zeroPricedRows.map(r => toRow(r, 'Zero priced')),
+      ...pricedRows.map(r => toRow(r, 'Priced but unpaid')),
+    ];
     const csv = [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -231,6 +250,109 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
   const textSecondary = isDark ? 'text-indigo-300' : 'text-gray-500';
   const borderColor = isDark ? 'border-white/10' : 'border-gray-200';
   const hoverRow = isDark ? 'hover:bg-white/5' : 'hover:bg-gray-50';
+
+  // ─── Shared table renderer ───────────────────────────────────────────────
+  // Both sections use the same column set — extracted so sort state stays
+  // consistent across them and we're not maintaining the layout in two
+  // places. The row highlight on the "zero-priced" section is applied on
+  // the wrapping card, not per-row, so the rows themselves stay clean.
+  const renderTable = (rows: Row[], variant: 'zero' | 'priced') => {
+    if (rows.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+          <p className={`text-sm font-medium ${textSecondary}`}>
+            {search
+              ? `No ${variant === 'zero' ? 'zero-priced' : 'priced'} orders match your search`
+              : variant === 'zero'
+                ? 'No zero-priced orders — every unpaid order has a price on it.'
+                : 'No other unpaid orders.'}
+          </p>
+        </div>
+      );
+    }
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className={`border-b ${borderColor} ${isDark ? 'bg-white/5' : 'bg-gray-50'}`}>
+              {([
+                ['jobNumber', 'Job #'],
+                ['customerName', 'Customer'],
+                ['', 'Job Name'],
+                ['status', 'Status'],
+                ['orderTotal', 'Order Total'],
+                ['outstandingBalance', 'Outstanding'],
+                ['dateOrdered', 'Ordered'],
+                ['dateShipped', 'Shipped'],
+                ['daysSince', 'Days'],
+              ] as [SortKey | '', string][]).map(([key, label]) => (
+                <th
+                  key={label}
+                  onClick={key ? () => toggleSort(key as SortKey) : undefined}
+                  className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${textSecondary} ${key ? 'cursor-pointer select-none hover:text-indigo-400' : ''}`}
+                >
+                  <span className="flex items-center gap-1">
+                    {label}
+                    {key && sortKey === key && <ArrowUpDown className="w-3 h-3 text-indigo-400" />}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(j => (
+              <tr
+                key={j.id || j.jobNumber}
+                className={`border-b ${borderColor} ${hoverRow} transition-colors`}
+              >
+                <td className="px-4 py-3">
+                  <CopyableJobNum
+                    jobNumber={j.jobNumber}
+                    onNavigate={onNavigateToOrder ? () => onNavigateToOrder(j.poNumber || j.jobNumber) : undefined}
+                  />
+                </td>
+                <td className={`px-4 py-3 font-medium ${textPrimary}`}>{j.customerName}</td>
+                <td className={`px-4 py-3 ${textSecondary} max-w-[200px] truncate`}>{j.jobName}</td>
+                <td className={`px-4 py-3 ${textSecondary}`}>
+                  <span className="flex items-center gap-1.5">
+                    {j.status}
+                    {variant === 'zero' && !j.hasShipped && (
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`} title="No ship date yet">
+                        not shipped
+                      </span>
+                    )}
+                  </span>
+                </td>
+                <td className={`px-4 py-3 font-semibold ${j.isZeroPriced ? 'text-amber-400' : textPrimary}`}>
+                  {fmt(j.orderTotal || 0)}
+                </td>
+                <td className={`px-4 py-3 font-bold ${(j.outstandingBalance || 0) > 0 ? 'text-rose-400' : textSecondary}`}>
+                  {fmt(j.outstandingBalance || 0)}
+                </td>
+                <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateOrdered)}</td>
+                <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateShipped)}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                    j.daysSince > 30
+                      ? 'bg-red-500/20 text-red-400'
+                      : j.daysSince > 14
+                        ? 'bg-amber-500/20 text-amber-400'
+                        : 'bg-slate-500/20 text-slate-300'
+                  }`}>
+                    {j.daysSince > 30 && <AlertTriangle className="w-3 h-3" />}
+                    {j.daysSince}d
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const totalCount = zeroPricedRows.length + pricedRows.length;
+  const combinedOutstanding = zeroPricedOutstanding + pricedOutstanding;
 
   return (
     <div className="space-y-4">
@@ -256,25 +378,16 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
           </button>
           <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
             <span className={`text-xs ${textSecondary}`}>Total Outstanding</span>
-            <p className="text-lg font-bold text-rose-500">{fmt(totalOutstanding)}</p>
+            <p className="text-lg font-bold text-rose-500">{fmt(combinedOutstanding)}</p>
           </div>
           <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
             <span className={`text-xs ${textSecondary}`}>Orders</span>
-            <p className={`text-lg font-bold ${textPrimary}`}>{filtered.length}</p>
+            <p className={`text-lg font-bold ${textPrimary}`}>{totalCount}</p>
           </div>
-          {zeroPricedShippedCount > 0 && (
-            <div className={`rounded-lg px-4 py-2 border border-amber-500/40 bg-amber-500/10`}>
-              <span className="text-xs text-amber-400 flex items-center gap-1">
-                <ShieldAlert className="w-3 h-3" />
-                Zero-priced &amp; shipped
-              </span>
-              <p className="text-lg font-bold text-amber-400">{zeroPricedShippedCount}</p>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Search + filters + Export */}
+      {/* Search + Export */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[240px] max-w-md">
           <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary}`} />
@@ -286,128 +399,85 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) 
             className={`w-full pl-9 pr-3 py-2 rounded-lg border ${borderColor} ${cardBg} ${textPrimary} text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none`}
           />
         </div>
-        <button
-          onClick={() => setOnlyZeroPriced(s => !s)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${onlyZeroPriced
-            ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-            : `${cardBg} ${borderColor} ${textSecondary} hover:bg-white/10`}`}
-          title="Show only orders where the total is £0.00 (most dangerous — probably never priced)"
-        >
-          <ShieldAlert className="w-3.5 h-3.5" />
-          {onlyZeroPriced ? 'Showing zero-priced only' : 'Filter to zero-priced'}
-        </button>
         <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
           <Download className="w-3.5 h-3.5" /> Export CSV
         </button>
       </div>
 
-      {/* Table */}
-      <div className={`${cardBg} rounded-xl border ${borderColor} overflow-hidden`}>
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <CircleDollarSign className={`w-12 h-12 ${textSecondary} opacity-40 mb-3`} />
-            <p className={`text-sm font-medium ${textSecondary}`}>
-              {search
-                ? 'No results matching your search'
-                : noCache
-                  ? 'Run a Full Sync from the Finance tab to populate this report'
-                  : 'All good — every active order has at least one payment recorded'}
-            </p>
+      {/* ─── SECTION 1: Zero priced (urgent) ─────────────────────────── */}
+      <div className={`rounded-xl border overflow-hidden ${zeroPricedRows.length > 0
+        ? 'border-amber-500/40 bg-amber-500/5'
+        : `${borderColor} ${cardBg}`}`}
+      >
+        <div className={`flex items-center justify-between gap-3 px-5 py-4 border-b ${zeroPricedRows.length > 0 ? 'border-amber-500/30' : borderColor}`}>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className={`w-5 h-5 ${zeroPricedRows.length > 0 ? 'text-amber-400' : textSecondary}`} />
+            <div>
+              <h3 className={`text-sm font-bold uppercase tracking-wider ${zeroPricedRows.length > 0 ? 'text-amber-400' : textSecondary}`}>
+                Zero priced &mdash; shipped without a price
+              </h3>
+              <p className={`text-xs ${textSecondary} mt-0.5`}>
+                Order total is &pound;0.00 and no payment has been recorded. Most dangerous bucket &mdash; likely never priced.
+              </p>
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className={`border-b ${borderColor} ${isDark ? 'bg-white/5' : 'bg-gray-50'}`}>
-                  {([
-                    ['jobNumber', 'Job #'],
-                    ['customerName', 'Customer'],
-                    ['', 'Job Name'],
-                    ['status', 'Status'],
-                    ['orderTotal', 'Order Total'],
-                    ['outstandingBalance', 'Outstanding'],
-                    ['dateOrdered', 'Ordered'],
-                    ['dateShipped', 'Shipped'],
-                    ['daysSince', 'Days'],
-                    ['', 'Flags'],
-                  ] as [SortKey | '', string][]).map(([key, label]) => (
-                    <th
-                      key={label}
-                      onClick={key ? () => toggleSort(key as SortKey) : undefined}
-                      className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${textSecondary} ${key ? 'cursor-pointer select-none hover:text-indigo-400' : ''}`}
-                    >
-                      <span className="flex items-center gap-1">
-                        {label}
-                        {key && sortKey === key && <ArrowUpDown className="w-3 h-3 text-indigo-400" />}
-                      </span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(j => {
-                  const zeroPricedShipped = j.isZeroPriced && j.hasShipped;
-                  return (
-                    <tr
-                      key={j.id || j.jobNumber}
-                      className={`border-b ${borderColor} ${hoverRow} transition-colors ${zeroPricedShipped ? (isDark ? 'bg-amber-500/5' : 'bg-amber-50/60') : ''}`}
-                    >
-                      <td className="px-4 py-3">
-                        <CopyableJobNum
-                          jobNumber={j.jobNumber}
-                          onNavigate={onNavigateToOrder ? () => onNavigateToOrder(j.poNumber || j.jobNumber) : undefined}
-                        />
-                      </td>
-                      <td className={`px-4 py-3 font-medium ${textPrimary}`}>{j.customerName}</td>
-                      <td className={`px-4 py-3 ${textSecondary} max-w-[200px] truncate`}>{j.jobName}</td>
-                      <td className={`px-4 py-3 ${textSecondary}`}>{j.status}</td>
-                      <td className={`px-4 py-3 font-semibold ${j.isZeroPriced ? 'text-amber-400' : textPrimary}`}>
-                        {fmt(j.orderTotal || 0)}
-                      </td>
-                      <td className={`px-4 py-3 font-bold ${(j.outstandingBalance || 0) > 0 ? 'text-rose-400' : textSecondary}`}>
-                        {fmt(j.outstandingBalance || 0)}
-                      </td>
-                      <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateOrdered)}</td>
-                      <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateShipped)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                          j.daysSince > 30
-                            ? 'bg-red-500/20 text-red-400'
-                            : j.daysSince > 14
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-slate-500/20 text-slate-300'
-                        }`}>
-                          {j.daysSince > 30 && <AlertTriangle className="w-3 h-3" />}
-                          {j.daysSince}d
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          {zeroPricedShipped && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-400" title="Order shipped but total is £0 — probably never priced">
-                              <ShieldAlert className="w-3 h-3" />
-                              Zero priced
-                            </span>
-                          )}
-                          {!j.hasShipped && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-200 text-slate-700'}`} title="No ship date — order may still be active">
-                              Not shipped
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className={`rounded-lg px-3 py-1.5 border ${zeroPricedRows.length > 0 ? 'border-amber-500/30 bg-amber-500/10' : `${borderColor} ${cardBg}`}`}>
+              <span className="text-[10px] uppercase text-amber-400 font-semibold block leading-none">Count</span>
+              <span className={`text-base font-bold ${zeroPricedRows.length > 0 ? 'text-amber-400' : textSecondary}`}>{zeroPricedRows.length}</span>
+            </div>
+            <div className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}>
+              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>Outstanding</span>
+              <span className={`text-base font-bold ${textPrimary}`}>{fmt(zeroPricedOutstanding)}</span>
+            </div>
           </div>
-        )}
+        </div>
+        {renderTable(zeroPricedRows, 'zero')}
       </div>
+
+      {/* ─── SECTION 2: Priced but unpaid (standard AR miss) ──────────── */}
+      <div className={`${cardBg} rounded-xl border ${borderColor} overflow-hidden`}>
+        <div className={`flex items-center justify-between gap-3 px-5 py-4 border-b ${borderColor}`}>
+          <div className="flex items-center gap-2">
+            <CircleDollarSign className={`w-5 h-5 ${pricedRows.length > 0 ? 'text-rose-400' : textSecondary}`} />
+            <div>
+              <h3 className={`text-sm font-bold uppercase tracking-wider ${textPrimary}`}>
+                Priced but unpaid
+              </h3>
+              <p className={`text-xs ${textSecondary} mt-0.5`}>
+                A price is on the order but Deco has no payment recorded &mdash; invoice may have been missed.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}>
+              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>Count</span>
+              <span className={`text-base font-bold ${textPrimary}`}>{pricedRows.length}</span>
+            </div>
+            <div className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}>
+              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>Outstanding</span>
+              <span className="text-base font-bold text-rose-400">{fmt(pricedOutstanding)}</span>
+            </div>
+          </div>
+        </div>
+        {renderTable(pricedRows, 'priced')}
+      </div>
+
+      {/* Empty state when both sections are empty (e.g. before first sync) */}
+      {totalCount === 0 && !isLoading && (
+        <div className={`${cardBg} rounded-xl border ${borderColor} flex flex-col items-center justify-center py-10`}>
+          <CircleDollarSign className={`w-10 h-10 ${textSecondary} opacity-40 mb-3`} />
+          <p className={`text-sm font-medium ${textSecondary}`}>
+            {noCache
+              ? 'Run a Full Sync from the Finance tab to populate this report'
+              : 'All good — every active order has at least one payment recorded'}
+          </p>
+        </div>
+      )}
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, and £0-balance internal <span className="font-mono">stash</span> customers.
+        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, and &pound;0-balance internal <span className="font-mono">stash</span> customers.
       </div>
     </div>
   );
