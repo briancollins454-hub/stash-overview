@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { reportBoundaryError } from '../services/debugLogger';
 
 interface Props {
     children: ReactNode;
@@ -20,6 +21,7 @@ class ErrorBoundary extends Component<Props, State> {
 
     componentDidCatch(error: Error, info: ErrorInfo) {
         console.error('[ErrorBoundary]', error, info.componentStack);
+        reportBoundaryError(error, info.componentStack || '');
         // Auto-reload on chunk load failures (stale deploy)
         if (error.message?.includes('dynamically imported module') || error.message?.includes('Failed to fetch')) {
             const lastReload = sessionStorage.getItem('chunk_reload');

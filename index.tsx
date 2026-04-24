@@ -5,6 +5,12 @@ import './app.css';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { installAuthFetchInterceptor } from './services/authInterceptor';
+import { installDebugLogger } from './services/debugLogger';
+
+// Debug logger FIRST so it can wrap window.fetch before the auth interceptor
+// does — then every request is traced through both layers. Opt-in only:
+// visit with `?debug=1` or run `localStorage.setItem('stash_debug','1')`.
+installDebugLogger();
 
 // Install BEFORE React renders so no /api/* request can go out before the
 // interceptor is active. Currently backends ignore these headers, so this
