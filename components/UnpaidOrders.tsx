@@ -105,6 +105,21 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
   const [authorised, setAuthorised] = useState<Record<string, AuthorisedRow>>({});
   const [isTogglingId, setIsTogglingId] = useState<string | null>(null);
 
+  // Multi-select on the Zero priced section. We keep the single-row
+  // "Authorise £0" button intact for one-off decisions; this set drives
+  // the bulk action bar that appears when >=1 row is ticked.
+  const [selectedZero, setSelectedZero] = useState<Set<string>>(new Set());
+  const [bulkAuthorising, setBulkAuthorising] = useState(false);
+  const toggleZeroSelected = useCallback((jobNumber: string) => {
+    setSelectedZero(prev => {
+      const next = new Set(prev);
+      if (next.has(jobNumber)) next.delete(jobNumber);
+      else next.add(jobNumber);
+      return next;
+    });
+  }, []);
+  const clearZeroSelection = useCallback(() => setSelectedZero(new Set()), []);
+
   const [collapsed, setCollapsed] = useState<Record<SectionKey, boolean>>({
     zero: false,
     priced: false,
@@ -198,6 +213,57 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
       setIsTogglingId(null);
     }
   }, [currentUserEmail, isTogglingId]);
+
+  // Bulk authorise: one confirmation, then fires each upsert in parallel.
+  // Optimistic UI — rows flip to the Authorised section immediately, and
+  // the selection clears. Any row that fails to upsert is rolled back and
+  // surfaces a console error (the rest still commit, consistent with
+  // existing single-row failure behaviour).
+  const bulkMarkAuthorised = useCallback(async () => {
+    if (!isSupabaseReady() || bulkAuthorising) return;
+    const jobNumbers = Array.from(selectedZero);
+    if (jobNumbers.length === 0) return;
+
+    const ok = window.confirm(
+      `Authorise ${jobNumbers.length} £0 invoice${jobNumbers.length === 1 ? '' : 's'}?\n\n` +
+      `This confirms each order is legitimately a £0 invoice (sample / promo / ` +
+      `internal). Rows will move to the "Authorised £0 invoice" section and be ` +
+      `visible to the rest of the team. You can undo individual rows later.`
+    );
+    if (!ok) return;
+
+    setBulkAuthorising(true);
+    const now = new Date().toISOString();
+
+    const optimistic: Record<string, AuthorisedRow> = {};
+    jobNumbers.forEach(jn => {
+      optimistic[jn] = { job_number: jn, authorised_at: now, authorised_by: currentUserEmail || null };
+    });
+    setAuthorised(prev => ({ ...prev, ...optimistic }));
+    clearZeroSelection();
+
+    const results = await Promise.allSettled(jobNumbers.map(jn => supabaseFetch(
+      'stash_zero_invoice_authorised',
+      'POST',
+      { job_number: jn, authorised_at: now, authorised_by: currentUserEmail || null, updated_at: now },
+      'resolution=merge-duplicates',
+    )));
+
+    const failed = results
+      .map((r, i) => (r.status === 'rejected' ? jobNumbers[i] : null))
+      .filter((x): x is string => !!x);
+
+    if (failed.length > 0) {
+      setAuthorised(prev => {
+        const next = { ...prev };
+        failed.forEach(jn => { delete next[jn]; });
+        return next;
+      });
+      console.error(`Bulk authorise: ${failed.length}/${jobNumbers.length} failed`, failed);
+    }
+
+    setBulkAuthorising(false);
+  }, [selectedZero, bulkAuthorising, currentUserEmail, clearZeroSelection]);
 
   const unmarkAuthorised = useCallback(async (jobNumber: string) => {
     if (!isSupabaseReady() || isTogglingId) return;
@@ -350,6 +416,22 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
     () => zeroPricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
     [zeroPricedRows]
   );
+
+  // Drop selected IDs that no longer appear in the zero-priced list (e.g.
+  // after a bulk authorise moved them to the Authorised section or a filter
+  // change hid them). Prevents the bulk bar from claiming rows that aren't
+  // visible / actionable.
+  useEffect(() => {
+    if (selectedZero.size === 0) return;
+    const validIds = new Set(zeroPricedRows.map(r => r.jobNumber));
+    let changed = false;
+    const next = new Set<string>();
+    selectedZero.forEach(id => {
+      if (validIds.has(id)) next.add(id);
+      else changed = true;
+    });
+    if (changed) setSelectedZero(next);
+  }, [zeroPricedRows, selectedZero]);
   const pricedOutstanding = useMemo(
     () => pricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
     [pricedRows]
@@ -595,11 +677,47 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
         </div>
       );
     }
+    // Multi-select state derived from the visible `rows` (which already
+    // respects the responsible-staff filter and sort). Applies to the
+    // zero-priced variant only.
+    const visibleIds = variant === 'zero' ? rows.map(r => r.jobNumber) : [];
+    const selectedVisibleCount = visibleIds.filter(id => selectedZero.has(id)).length;
+    const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+    const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
+    const toggleSelectAllVisible = () => {
+      if (allVisibleSelected) {
+        setSelectedZero(prev => {
+          const next = new Set(prev);
+          visibleIds.forEach(id => next.delete(id));
+          return next;
+        });
+      } else {
+        setSelectedZero(prev => {
+          const next = new Set(prev);
+          visibleIds.forEach(id => next.add(id));
+          return next;
+        });
+      }
+    };
+
     return (
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className={`border-b ${borderColor} ${isDark ? 'bg-white/5' : 'bg-gray-50'}`}>
+              {variant === 'zero' && (
+                <th className={`px-3 py-3 text-left ${textSecondary}`} style={{ width: 36 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible zero-priced rows"
+                    title={allVisibleSelected ? 'Deselect all' : 'Select all visible'}
+                    checked={allVisibleSelected}
+                    ref={el => { if (el) el.indeterminate = someVisibleSelected; }}
+                    onChange={toggleSelectAllVisible}
+                    className="w-4 h-4 cursor-pointer accent-emerald-500"
+                  />
+                </th>
+              )}
               {([
                 ['jobNumber', 'Job #'],
                 ['customerName', 'Customer'],
@@ -628,11 +746,23 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
           <tbody>
             {rows.map(j => {
               const toggling = isTogglingId === j.jobNumber;
+              const isSelected = variant === 'zero' && selectedZero.has(j.jobNumber);
               return (
                 <tr
                   key={j.id || j.jobNumber}
-                  className={`border-b ${borderColor} ${hoverRow} transition-colors ${variant === 'authorised' ? 'opacity-75' : ''}`}
+                  className={`border-b ${borderColor} ${hoverRow} transition-colors ${variant === 'authorised' ? 'opacity-75' : ''} ${isSelected ? (isDark ? 'bg-emerald-500/5' : 'bg-emerald-50') : ''}`}
                 >
+                  {variant === 'zero' && (
+                    <td className="px-3 py-3" style={{ width: 36 }}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select job ${j.jobNumber}`}
+                        checked={isSelected}
+                        onChange={() => toggleZeroSelected(j.jobNumber)}
+                        className="w-4 h-4 cursor-pointer accent-emerald-500"
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <CopyableJobNum
                       jobNumber={j.jobNumber}
@@ -893,6 +1023,39 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
         />
         {!collapsed.zero && (
           <div className={`border-t ${zeroPricedRows.length > 0 ? 'border-amber-500/30' : borderColor}`}>
+            {selectedZero.size > 0 && (
+              <div className={`flex flex-wrap items-center gap-3 px-4 py-2.5 border-b ${zeroPricedRows.length > 0 ? 'border-amber-500/30' : borderColor} ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold tracking-wider uppercase ${isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  {selectedZero.size} selected
+                </span>
+                <button
+                  onClick={bulkMarkAuthorised}
+                  disabled={bulkAuthorising}
+                  title={`Authorise ${selectedZero.size} £0 invoice${selectedZero.size === 1 ? '' : 's'} in one go`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold tracking-wider uppercase bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                >
+                  {bulkAuthorising ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Authorising...
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Authorise selected ({selectedZero.size})
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={clearZeroSelection}
+                  disabled={bulkAuthorising}
+                  className={`text-xs font-medium uppercase tracking-wider ${textSecondary} hover:text-rose-400 transition-colors disabled:opacity-50`}
+                >
+                  Clear
+                </button>
+              </div>
+            )}
             {renderTable(zeroPricedRows, 'zero')}
           </div>
         )}
