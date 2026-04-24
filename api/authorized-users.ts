@@ -227,9 +227,23 @@ async function requireSuperuser(req: VercelRequest): Promise<{ who: string }> {
 /* ─── Handler ──────────────────────────────────────────────────────── */
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // Restrict CORS to our own origins. The previous wildcard let any
+  // site in the world read responses from the browser. This endpoint
+  // must still be callable from the login page (before the user has a
+  // session), so we don't wire up requireAuth() here — the sensitive
+  // mutating actions below verify the Firebase ID token / custom
+  // session token inline instead.
+  const origin = req.headers.origin || '';
+  if (
+    origin === 'https://stashoverview.co.uk' ||
+    origin === 'https://www.stashoverview.co.uk' ||
+    origin === 'http://localhost:3000' ||
+    (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))
+  ) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const body = (req.body || {}) as Record<string, any>;

@@ -6,7 +6,16 @@ import {
   ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
   FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign
 } from 'lucide-react';
-import ExcelJS from 'exceljs';
+// exceljs is ~800 KB and only used inside exportDetailedCSV. Import
+// it dynamically so it isn't part of this chunk's initial payload —
+// that drops the FinancialDashboard chunk from ~1 MB to the ~220 KB
+// the rest of the dashboard actually needs for first render.
+type ExcelJSModule = typeof import('exceljs');
+let excelJsPromise: Promise<ExcelJSModule> | null = null;
+const loadExcelJS = (): Promise<ExcelJSModule> => {
+  if (!excelJsPromise) excelJsPromise = import('exceljs');
+  return excelJsPromise;
+};
 import { DecoJob, ShopifyOrder } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
 import { getItem, setItem } from '../services/localStore';
@@ -272,13 +281,18 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     }
   }, []);
 
-  // Check QB connection status on mount
+  // Check QB connection status on mount.
+  // Aborts on unmount so we don't setState after the component unmounts
+  // (React dev-mode warning and a tiny memory leak).
   useEffect(() => {
     if (settings.qboRealmId && settings.qboAccessToken) return;
-    fetch('/api/qbo-auth?action=status')
+    const ctrl = new AbortController();
+    fetch('/api/qbo-auth?action=status', { signal: ctrl.signal })
       .then(r => r.json())
       .then(data => { if (data.connected) setQbServerConfigured(true); })
-      .catch(() => {});
+      .catch(() => { /* aborted or network error — ignore */ });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle ?qbo=connected return from OAuth flow
@@ -290,9 +304,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     }
   }, []);
 
-  // Auto-fetch QB data when configured
+  // Auto-fetch QB data when QB is newly configured. We intentionally
+  // only depend on `qbConfigured` so we don't refetch mid-load; the
+  // guards against qbLastSynced/qbLoading only matter on the edge the
+  // effect actually fires (connection flip), so stale reads are fine.
   useEffect(() => {
     if (qbConfigured && !qbLastSynced && !qbLoading) fetchQBData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qbConfigured]);
 
   // --- A/P Aging by vendor ---
@@ -383,11 +401,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     ]);
   }, [saveToSupabase]);
 
-  // Load cached data on mount, then incremental sync in background
+  // Load cached data on mount, then incremental sync in background.
+  // Intentionally runs once — we don't want to re-load whenever
+  // settings change mid-session (the Refresh / Full Reload buttons
+  // handle explicit user-initiated reloads).
   useEffect(() => {
     if (hasLoaded || isLoading) return;
     loadCachedThenSync();
     return () => { abortRef.current?.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadCachedThenSync = useCallback(async () => {
@@ -814,6 +836,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   }, [filteredAccounts, selectedCustomers, priorityNotes]);
 
   const exportDetailedCSV = useCallback(async () => {
+    const ExcelJS = await loadExcelJS();
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Financial Detail');
 

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_lib/verifyAuth';
 
 /**
  * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
@@ -6,10 +7,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * POST /api/quickbooks
  * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'test-connection' | 'diagnose' }
  *
- * Credentials are resolved in order:
- *   1. Client-provided in request body (realmId, accessToken)
- *   2. Stored OAuth tokens in Supabase (from /api/qbo-auth flow)
- *   3. Raw env vars (QBO_REALM_ID, QBO_ACCESS_TOKEN)
+ * Credentials are resolved in order (production):
+ *   1. Stored OAuth tokens in Supabase (from /api/qbo-auth flow)
+ *   2. Raw env vars (QBO_REALM_ID, QBO_ACCESS_TOKEN)
+ *
+ * Client-supplied credentials in the request body are only honoured when
+ * `QBO_ALLOW_CLIENT_CREDS=true` is set (local dev / explicit opt-in).
+ * Otherwise an attacker with this endpoint's URL could point the proxy
+ * at arbitrary QuickBooks companies.
  */
 
 const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
@@ -101,13 +106,17 @@ async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: 
 }
 
 async function resolveConfig(body: Record<string, unknown>) {
-  // 1. Client-provided creds
+  const allowClientCreds = (process.env.QBO_ALLOW_CLIENT_CREDS || '').toLowerCase() === 'true';
+
+  // 1. Client-provided creds — only accepted when explicitly enabled.
   let realmId = (body.realmId as string)?.trim() || '';
   let accessToken = (body.accessToken as string)?.trim() || '';
-  const baseUrl = ((body.baseUrl as string)?.trim() || envFirst('QBO_BASE_URL', 'QUICKBOOKS_BASE_URL', 'QB_BASE_URL') || 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
-  const minorVersion = (body.minorVersion as string)?.trim() || envFirst('QBO_MINOR_VERSION') || '75';
+  const baseUrl = (((allowClientCreds ? (body.baseUrl as string)?.trim() : '') || envFirst('QBO_BASE_URL', 'QUICKBOOKS_BASE_URL', 'QB_BASE_URL') || 'https://quickbooks.api.intuit.com') as string).replace(/\/$/, '');
+  const minorVersion = (allowClientCreds ? (body.minorVersion as string)?.trim() : '') || envFirst('QBO_MINOR_VERSION') || '75';
 
-  if (realmId && accessToken) return { realmId, accessToken, baseUrl, minorVersion, source: 'client' as const };
+  if (allowClientCreds && realmId && accessToken) {
+    return { realmId, accessToken, baseUrl, minorVersion, source: 'client' as const };
+  }
 
   // 2. Stored OAuth tokens from Supabase
   const stored = await getStoredTokens();
@@ -146,9 +155,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (await requireAuth(req, res, { route: 'quickbooks' })) return;
 
   const body = (req.body || {}) as Record<string, unknown>;
   const action = body.action as string;

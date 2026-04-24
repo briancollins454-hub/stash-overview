@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_lib/verifyAuth';
 
 /**
  * /api/slack-backfill
@@ -176,6 +177,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
+
+  // CORS so the Shop Floor page can call this from the browser.
+  const origin = req.headers.origin || '';
+  if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
+
+  if (await requireAuth(req, res, { route: 'slack-backfill' })) return;
 
   // .trim() guards against trailing whitespace or newlines that sometimes
   // come along when pasting tokens into the Vercel env var UI — without this

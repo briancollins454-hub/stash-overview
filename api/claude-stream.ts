@@ -1,5 +1,7 @@
 export const config = { runtime: 'edge' };
 
+import { requireAuthEdge } from './_lib/verifyAuthEdge';
+
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
   const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
@@ -8,9 +10,12 @@ export default async function handler(req: Request) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
   corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
-  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
+  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Firebase-Id-Token';
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+
+  const authDecision = await requireAuthEdge(req, 'claude-stream', corsHeaders);
+  if (authDecision.reject) return authDecision.reject;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

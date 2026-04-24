@@ -551,52 +551,10 @@ export const saveProductMapping = async (settings: ApiSettings, shopify_pattern:
     }
 };
 
-/**
- * Fetch API settings from Supabase cloud (stash_settings table).
- * Now uses the server-side route — no credentials needed.
- */
-export const fetchCloudSettings = async (): Promise<Partial<ApiSettings> | null> => {
-    try {
-        const res = await fetchWithProxy('stash_settings?select=settings_data&id=eq.main&limit=1', 'GET');
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0 && data[0].settings_data) {
-            return data[0].settings_data as Partial<ApiSettings>;
-        }
-        return null;
-    } catch (e: any) {
-        console.warn('Cloud settings fetch failed:', e.message || e);
-        return null;
-    }
-};
-
-/**
- * Save API settings to Supabase cloud (stash_settings table).
- * Upserts a single row with id='main'.
- */
-export const saveCloudSettings = async (settings: ApiSettings): Promise<void> => {
-    try {
-        await trackSave('stash_settings', 1, async () => {
-            // Strip sensitive credentials before saving to cloud
-            const safeSettings = { ...settings };
-            delete (safeSettings as any).shopifyAccessToken;
-            delete (safeSettings as any).decoPassword;
-            delete (safeSettings as any).supabaseAnonKey;
-            delete (safeSettings as any).shipStationApiSecret;
-
-            await fetchWithProxy('stash_settings', 'POST', {
-                id: 'main',
-                settings_data: safeSettings,
-                updated_at: new Date().toISOString()
-            }, 'resolution=merge-duplicates');
-        });
-    } catch (e: any) {
-        if (e.status === 404 || e.message.includes('404')) {
-            console.warn('Cloud Settings Save: Table "stash_settings" not found.');
-        } else {
-            console.error('Cloud Settings Save Failed:', e.message || e);
-        }
-    }
-};
+// Note: fetchCloudSettings / saveCloudSettings were removed — they
+// pointed at a `stash_settings` table that was never created in
+// Supabase and had zero importers in the app. Removing stops
+// confusing future maintainers and unblocks clean typechecks.
 
 /* ---------- Deco Stitch Cache (Supabase) ---------- */
 export interface CloudStitchCache {

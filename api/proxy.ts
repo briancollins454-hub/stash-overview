@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_lib/verifyAuth';
 
 const ALLOWED_PROXY_DOMAINS = [
   '.myshopify.com',
@@ -24,11 +25,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
+
+  if (await requireAuth(req, res, { route: 'proxy' })) return;
 
   const { url, method, headers, body } = req.body || {};
 
@@ -67,6 +70,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error.name === 'AbortError') {
       return res.status(504).json({ error: 'Proxy timeout' });
     }
-    return res.status(500).json({ error: 'Proxy failed', details: error.message });
+    // Don't leak upstream error text to clients; log it server-side instead.
+    console.error('[proxy] fetch failed', error?.message || String(error));
+    return res.status(502).json({ error: 'Proxy failed' });
   }
 }

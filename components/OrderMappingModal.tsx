@@ -466,7 +466,11 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                             </thead>
                             <tbody className="divide-y divide-gray-200">
                                 {targetOrders.map((o) => (
-                                    o.items.filter(item => isEligibleForMapping(item.name, item.productType) && item.itemStatus !== 'fulfilled').map((sItem) => {
+                                    // Fragment keyed on order id so React can track outer rows
+                                    // when the orders array reorders (prior version produced
+                                    // console key warnings and occasional UI flicker).
+                                    <React.Fragment key={o.id}>
+                                    {o.items.filter(item => isEligibleForMapping(item.name, item.productType) && item.itemStatus !== 'fulfilled').map((sItem) => {
                                         const itemKey = sItem.id;
                                         const rawSelectedId = mappings[itemKey] || '';
                                         const isNoMap = rawSelectedId === '__NO_MAP__';
@@ -658,7 +662,8 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                                 </td>
                                             </tr>
                                         );
-                                    })
+                                    })}
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>

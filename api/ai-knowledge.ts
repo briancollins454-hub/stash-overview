@@ -2,6 +2,8 @@ export const config = { runtime: 'edge' };
 
 // ─── RAG: Store & Search Knowledge via Supabase ─────────────────
 
+import { requireAuthEdge } from './_lib/verifyAuthEdge';
+
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
   const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
@@ -10,10 +12,13 @@ export default async function handler(req: Request) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
   corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
-  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
+  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Firebase-Id-Token';
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405, corsHeaders);
+
+  const authDecision = await requireAuthEdge(req, 'ai-knowledge', corsHeaders);
+  if (authDecision.reject) return authDecision.reject;
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { requireAuth } from './_lib/verifyAuth';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
@@ -6,9 +7,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  if (await requireAuth(req, res, { route: 'deco' })) return;
 
   const rawDomain = process.env.DECO_DOMAIN;
   const rawUser = process.env.DECO_USERNAME;

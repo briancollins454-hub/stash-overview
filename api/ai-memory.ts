@@ -4,6 +4,8 @@ export const config = { runtime: 'edge' };
 // CRUD for observations, learned patterns, and entity knowledge.
 // Stores what the AI has seen, learned, and knows about people/environment.
 
+import { requireAuthEdge } from './_lib/verifyAuthEdge';
+
 type SupabaseHeaders = Record<string, string>;
 
 function getConfig(req: Request) {
@@ -11,7 +13,7 @@ function getConfig(req: Request) {
   const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
   const corsHeaders: Record<string, string> = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Firebase-Id-Token',
   };
   if (allowed.includes(origin) || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
@@ -42,6 +44,10 @@ export default async function handler(req: Request) {
   const { corsHeaders, supabaseUrl, supabaseKey } = getConfig(req);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+
+  const authDecision = await requireAuthEdge(req, 'ai-memory', corsHeaders);
+  if (authDecision.reject) return authDecision.reject;
+
   if (!supabaseUrl || !supabaseKey) return json({ error: 'Supabase not configured' }, corsHeaders, 501);
 
   try {

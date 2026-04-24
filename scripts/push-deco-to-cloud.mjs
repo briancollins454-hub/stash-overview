@@ -85,13 +85,19 @@ function parseDecoItems(job) {
       const rawProd = typeof line.production_status === 'number' ? line.production_status : 0;
       const hasShippedDate = !!line.shipped_date;
       const stage = hasShippedDate ? 'shipped' : rawProd >= 2 ? 'produced' : rawProd === 1 ? 'awaiting' : 'notReady';
+      const isProducedDerived = rawProd >= 2;
+      const isShippedDerived = hasShippedDate;
       items.push({
         productCode: line.product_code || '', vendorSku: line.sku || '',
         name: line.product_name || 'Item', ean: potentialEan,
         quantity: parseInt(line.qty) || 0,
-        status: line.production_status === 3 ? 'Shipped' : (line.production_status === 2 ? 'Produced' : 'Ordered'),
-        isReceived: true, isProduced: (line.production_status || 0) >= 2, isShipped: (line.production_status || 0) >= 3,
-        procurementStatus: 60, productionStatus: line.production_status >= 2 ? 80 : 20, shippingStatus: line.production_status === 3 ? 80 : 0,
+        status: isShippedDerived
+          ? 'Shipped'
+          : (isProducedDerived ? 'Produced' : (rawProd === 1 ? 'Awaiting Production' : 'Ordered')),
+        isReceived: true, isProduced: isProducedDerived, isShipped: isShippedDerived,
+        procurementStatus: 60,
+        productionStatus: isProducedDerived ? 80 : (rawProd === 1 ? 20 : 0),
+        shippingStatus: isShippedDerived ? 80 : 0,
         productionStage: stage,
         unitPrice: parseFloat(line.unit_price) || undefined,
         totalPrice: parseFloat(line.total_price) || undefined,

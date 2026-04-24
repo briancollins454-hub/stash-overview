@@ -251,19 +251,23 @@ const parseDecoItems = (job: any): DecoItem[] => {
                 : rawProd >= 2 ? 'produced'
                 : rawProd === 1 ? 'awaiting'
                 : 'notReady';
+            const isProducedDerived = rawProd >= 2;
+            const isShippedDerived = hasShippedDate;
             items.push({
                 productCode: line.product_code || '',
                 vendorSku: line.sku || '',
                 name: line.product_name || 'Item',
                 ean: potentialEan,
                 quantity: parseInt(line.qty) || 0,
-                status: line.production_status === 3 ? 'Shipped' : (line.production_status === 2 ? 'Produced' : 'Ordered'),
+                status: isShippedDerived
+                    ? 'Shipped'
+                    : (isProducedDerived ? 'Produced' : (rawProd === 1 ? 'Awaiting Production' : 'Ordered')),
                 isReceived: true,
-                isProduced: (line.production_status || 0) >= 2,
-                isShipped: (line.production_status || 0) >= 3,
+                isProduced: isProducedDerived,
+                isShipped: isShippedDerived,
                 procurementStatus: 60,
-                productionStatus: line.production_status >= 2 ? 80 : 20,
-                shippingStatus: line.production_status === 3 ? 80 : 0,
+                productionStatus: isProducedDerived ? 80 : (rawProd === 1 ? 20 : 0),
+                shippingStatus: isShippedDerived ? 80 : 0,
                 productionStage: stage,
                 unitPrice: parseFloat(line.unit_price) || undefined,
                 totalPrice: parseFloat(line.total_price) || undefined,
@@ -285,8 +289,15 @@ const parseDecoItems = (job: any): DecoItem[] => {
 
 const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
     const custName = job.billing_details?.company || `${job.billing_details?.firstname || ''} ${job.billing_details?.lastname || ''}`.trim() || "Unknown";
+    // Defensive stringification: Deco very occasionally returns a
+    // row with a missing/null order_id (API glitch, partial write).
+    // Previously `.toString()` would throw and kill the whole batch.
+    // Fall back to order_number, then a synthetic 'unknown-<n>' so
+    // one bad row can't take the rest down.
+    const orderId = job.order_id ?? job.order_number;
+    const idString = orderId != null ? String(orderId) : `unknown-${Math.random().toString(36).slice(2, 8)}`;
     return {
-        id: job.order_id.toString(), jobNumber: (job.order_number || job.order_id).toString(),
+        id: idString, jobNumber: (job.order_number || job.order_id || idString).toString(),
         poNumber: job.customer_po_number || '', jobName: job.job_name || 'Deco Job',
         customerName: custName, status: mapDecoStatus(job.order_status_name || job.order_status),
         dateOrdered: job.date_ordered, productionDueDate: job.date_scheduled,

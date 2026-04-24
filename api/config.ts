@@ -6,7 +6,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
   res.setHeader('Cache-Control', 'public, max-age=300'); // cache 5 min
 
   if (req.method === 'OPTIONS') return res.status(200).end();

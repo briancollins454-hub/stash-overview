@@ -15,9 +15,19 @@ export const initSupabase = (url: string, anonKey: string) => {
 
 export const isSupabaseReady = () => Boolean(supabaseUrl && supabaseKey);
 
+// Client-side Supabase query timeout. PostgREST's statement timeout is
+// usually 8s; giving the browser ~30s covers high-latency mobile links
+// but still aborts eventually so a stuck connection doesn't freeze
+// whatever UI flow awaited the promise forever.
+const SUPABASE_CLIENT_TIMEOUT_MS = 30_000;
+
 /**
  * Direct fetch to Supabase PostgREST — same path/method/body/prefer interface
  * as the old proxy, but without the Vercel middleman.
+ *
+ * Always times out eventually. If you need a longer window (e.g. a
+ * large bulk upsert), wrap your own AbortController and pass via
+ * Supabase's batching helpers — don't raise this global.
  */
 export const supabaseFetch = async (
   path: string,
@@ -39,11 +49,27 @@ export const supabaseFetch = async (
     headers['Prefer'] = prefer;
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SUPABASE_CLIENT_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e: any) {
+    clearTimeout(timer);
+    if (e?.name === 'AbortError') {
+      const err = new Error('Supabase request timed out') as any;
+      err.status = 408;
+      throw err;
+    }
+    throw e;
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));

@@ -3,6 +3,8 @@ export const config = { runtime: 'edge' };
 // ─── Multi-Agent AI Endpoint with Tool Use (OpenAI GPT-4.1) ──────
 // Supports: orchestrator routing, tool calls, streaming, agent specialization
 
+import { requireAuthEdge } from './_lib/verifyAuthEdge';
+
 interface ToolDef {
   type: 'function';
   function: {
@@ -115,9 +117,12 @@ export default async function handler(req: Request) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
   corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
-  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
+  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Firebase-Id-Token';
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+
+  const authDecision = await requireAuthEdge(req, 'ai-agent', corsHeaders);
+  if (authDecision.reject) return authDecision.reject;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return new Response(JSON.stringify({ error: 'API key not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

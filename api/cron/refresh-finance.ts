@@ -9,9 +9,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  *
  * Scheduled via vercel.json -> crons. Vercel sends
  *   Authorization: Bearer <CRON_SECRET>
- * on every cron invocation when CRON_SECRET is configured; this handler
- * enforces that when the env var is set, and falls back to open access
- * otherwise so the endpoint remains usable for a manual dry-run.
+ * on every cron invocation. This handler REQUIRES the env var to be set
+ * and the header to match — anonymous calls are refused so random
+ * callers on the internet can't burn our Deco quota or mutate the
+ * finance cache.
  */
 
 // ─── Lean finance job shape ─────────────────────────────────────────────
@@ -165,6 +166,12 @@ function mapOrder(job: any): LeanFinanceJob {
   };
 }
 
+// Single-page Deco timeout (ms). A hung page shouldn't freeze the whole
+// cron — better to drop that page and carry on with the rest. 25s gives
+// Deco's slowest real responses plenty of headroom while leaving room
+// for several retries inside the 60s function cap.
+const PAGE_TIMEOUT_MS = 25_000;
+
 async function fetchDecoPage(
   domain: string,
   username: string,
@@ -188,14 +195,20 @@ async function fetchDecoPage(
     include_sales_data: '1',
   });
   const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Deco HTTP ${res.status}`);
-  const data: any = await res.json();
-  const status = data?.response_status;
-  if (status && parseInt(status.code) !== 10001 && !Array.isArray(data.orders)) {
-    throw new Error(`Deco error ${status.code}: ${status.description || 'unknown'}`);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PAGE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`Deco HTTP ${res.status}`);
+    const data: any = await res.json();
+    const status = data?.response_status;
+    if (status && parseInt(status.code) !== 10001 && !Array.isArray(data.orders)) {
+      throw new Error(`Deco error ${status.code}: ${status.description || 'unknown'}`);
+    }
+    return { orders: data.orders || [], total: data.total || 0 };
+  } finally {
+    clearTimeout(timer);
   }
-  return { orders: data.orders || [], total: data.total || 0 };
 }
 
 // Pull the existing finance cache row from Supabase so we can merge
@@ -206,9 +219,12 @@ async function loadExistingCache(
   supabaseUrl: string,
   supabaseKey: string,
 ): Promise<LeanFinanceJob[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20_000);
   try {
     const url = `${supabaseUrl}/rest/v1/stash_finance_cache?id=eq.finance_jobs&select=data`;
     const res = await fetch(url, {
+      signal: ctrl.signal,
       headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
     });
     if (!res.ok) return [];
@@ -219,19 +235,24 @@ async function loadExistingCache(
     return [];
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CRON auth — Vercel sends Authorization: Bearer <CRON_SECRET> when the
-  // env var is configured. Reject anything that doesn't match so random
-  // callers on the internet can't burn our Deco quota.
+  // CRON auth — Vercel sends Authorization: Bearer <CRON_SECRET> on
+  // every scheduled invocation. REQUIRE the env var to be configured;
+  // without it the endpoint would be wide open and callable by anyone
+  // who knows the URL, letting them burn Deco quota and mutate the
+  // shared finance cache. Hard-fail instead of silently falling back.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers['authorization'] || '';
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+  if (!cronSecret) {
+    return res.status(503).json({ error: 'CRON_SECRET not configured' });
+  }
+  const auth = req.headers['authorization'] || '';
+  if (auth !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
   const domain = process.env.DECO_DOMAIN;
@@ -312,21 +333,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Upsert into stash_finance_cache via PostgREST. merge-duplicates on the
     // primary key (id='finance_jobs') behaves as an UPSERT.
     const upsertUrl = `${supabaseUrl}/rest/v1/stash_finance_cache`;
-    const upsertRes = await fetch(upsertUrl, {
-      method: 'POST',
-      headers: {
-        apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify({
-        id: 'finance_jobs',
-        data: merged,
-        last_synced: syncedAt,
-        updated_at: syncedAt,
-      }),
-    });
+    const upsertCtrl = new AbortController();
+    const upsertTimer = setTimeout(() => upsertCtrl.abort(), 20_000);
+    let upsertRes: Response;
+    try {
+      upsertRes = await fetch(upsertUrl, {
+        method: 'POST',
+        signal: upsertCtrl.signal,
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          id: 'finance_jobs',
+          data: merged,
+          last_synced: syncedAt,
+          updated_at: syncedAt,
+        }),
+      });
+    } finally {
+      clearTimeout(upsertTimer);
+    }
 
     if (!upsertRes.ok) {
       const text = await upsertRes.text();

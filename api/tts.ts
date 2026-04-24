@@ -3,6 +3,8 @@ export const config = { runtime: 'edge' };
 // ─── TTS: OpenAI (primary) + ElevenLabs (premium fallback) ───────
 // OpenAI TTS-1 for low-latency, natural voice. ElevenLabs if key exists for premium quality.
 
+import { requireAuthEdge } from './_lib/verifyAuthEdge';
+
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
   const allowed = ['https://stashoverview.co.uk', 'https://www.stashoverview.co.uk', 'http://localhost:3000'];
@@ -11,9 +13,12 @@ export default async function handler(req: Request) {
     corsHeaders['Access-Control-Allow-Origin'] = origin;
   }
   corsHeaders['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
-  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type';
+  corsHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Firebase-Id-Token';
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+
+  const authDecision = await requireAuthEdge(req, 'tts', corsHeaders);
+  if (authDecision.reject) return authDecision.reject;
 
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
