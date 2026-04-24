@@ -171,13 +171,14 @@ async function fetchDecoPage(
   password: string,
   offset: number,
   batch: number,
+  sinceDate: string,
 ): Promise<{ orders: any[]; total: number }> {
   const qp = new URLSearchParams({
     username,
     password,
     field: '1',
     condition: '4',
-    date1: '2020-01-01',
+    date1: sinceDate,
     limit: String(batch),
     offset: String(offset),
     skip_login_token: '1',
@@ -195,6 +196,30 @@ async function fetchDecoPage(
     throw new Error(`Deco error ${status.code}: ${status.description || 'unknown'}`);
   }
   return { orders: data.orders || [], total: data.total || 0 };
+}
+
+// Pull the existing finance cache row from Supabase so we can merge
+// rather than clobber. Returns an empty array on first run (or if the
+// row is missing / malformed) — merge still works because it'll just
+// be the recent pull on its own.
+async function loadExistingCache(
+  supabaseUrl: string,
+  supabaseKey: string,
+): Promise<LeanFinanceJob[]> {
+  try {
+    const url = `${supabaseUrl}/rest/v1/stash_finance_cache?id=eq.finance_jobs&select=data`;
+    const res = await fetch(url, {
+      headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+    });
+    if (!res.ok) return [];
+    const rows: any[] = await res.json();
+    if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data)) {
+      return rows[0].data as LeanFinanceJob[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -224,15 +249,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const startedAt = Date.now();
 
-  try {
-    // Page 1 gives us the grand total so we can parallel-fetch the rest.
-    const BATCH = 100; // Deco caps at 100 per request when include flags are on
-    const first = await fetchDecoPage(domain, username, password, 0, BATCH);
-    const total = first.total;
-    const allRaw: any[] = [...first.orders];
+  // How far back to pull fresh data from Deco. Most real-world changes
+  // (new orders, payments hitting invoiced jobs, items shipping) happen
+  // well inside 120 days. Older data is kept verbatim from what's
+  // already in Supabase so a 6-year order history doesn't get
+  // re-downloaded every single night.
+  const LOOKBACK_DAYS = 120;
+  const sinceDateObj = new Date();
+  sinceDateObj.setDate(sinceDateObj.getDate() - LOOKBACK_DAYS);
+  const sinceDate = sinceDateObj.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    // Fire remaining pages in parallel waves of 10 to be nice to Deco
-    // while keeping us under Vercel's 60s ceiling.
+  try {
+    // Kick off the Supabase read and the first Deco page together so
+    // neither blocks the other.
+    const existingPromise = loadExistingCache(supabaseUrl, supabaseKey);
+    const BATCH = 100; // Deco caps at 100 per request when include flags are on
+    const first = await fetchDecoPage(domain, username, password, 0, BATCH, sinceDate);
+    const total = first.total;
+    const recentRaw: any[] = [...first.orders];
+
+    // Remaining pages in parallel waves of 10 — typically only 2-4
+    // waves needed for a 120-day window vs. ~25 for the full history.
     const WAVE = 10;
     const pagesNeeded = Math.max(0, Math.ceil((total - first.orders.length) / BATCH));
     const offsets: number[] = [];
@@ -241,15 +278,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (let i = 0; i < offsets.length; i += WAVE) {
       const wave = offsets.slice(i, i + WAVE);
       const results = await Promise.all(
-        wave.map(off => fetchDecoPage(domain, username, password, off, BATCH).catch(err => {
+        wave.map(off => fetchDecoPage(domain, username, password, off, BATCH, sinceDate).catch(err => {
           console.warn(`[cron/refresh-finance] page @ offset=${off} failed:`, err?.message || err);
           return { orders: [], total: 0 };
         })),
       );
-      for (const r of results) allRaw.push(...r.orders);
+      for (const r of results) recentRaw.push(...r.orders);
     }
 
-    const lean = allRaw.map(mapOrder);
+    const recent: LeanFinanceJob[] = recentRaw.map(mapOrder);
+    const existing = await existingPromise;
+
+    // Merge: recent pull wins on overlap, older cached jobs pass through
+    // untouched, brand-new jobs get appended. Same behaviour as the
+    // client-side incrementalSync.
+    const recentByNumber = new Map(recent.map(j => [j.jobNumber, j]));
+    const seenNumbers = new Set<string>();
+    const merged: LeanFinanceJob[] = existing.map(j => {
+      seenNumbers.add(j.jobNumber);
+      return recentByNumber.get(j.jobNumber) || j;
+    });
+    let added = 0;
+    for (const j of recent) {
+      if (!seenNumbers.has(j.jobNumber)) {
+        merged.push(j);
+        added++;
+      }
+    }
+
+    const updated = recent.length - added;
     const syncedAt = new Date().toISOString();
 
     // Upsert into stash_finance_cache via PostgREST. merge-duplicates on the
@@ -265,7 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: JSON.stringify({
         id: 'finance_jobs',
-        data: lean,
+        data: merged,
         last_synced: syncedAt,
         updated_at: syncedAt,
       }),
@@ -280,8 +337,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const summary = {
       ok: true,
       syncedAt,
-      ordersPulled: allRaw.length,
-      ordersExpected: total,
+      lookbackDays: LOOKBACK_DAYS,
+      recentPulled: recent.length,
+      newlyAdded: added,
+      updatedInPlace: updated,
+      keptFromExisting: existing.length - updated,
+      totalInCache: merged.length,
       durationMs,
     };
     console.log('[cron/refresh-finance]', summary);
