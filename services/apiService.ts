@@ -467,7 +467,9 @@ export const fetchShopifyOrders = async (settings: ApiSettings, sinceDate?: stri
 export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgress?: (msg: string) => void): Promise<ShopifyOrder[]> => {
     if (!settings.useLiveData) return [];
     try {
-        // Shopify GraphQL: fulfillment_status:unshipped gets all orders not fully fulfilled, no date filter
+        // Shopify GraphQL: pull both fully-unshipped AND partially-fulfilled orders.
+        // `unshipped` alone misses partials (e.g. half-stock / half-MTO orders waiting
+        // on a restock) — those need to stay visible until the remaining items ship.
         let allRawOrders: any[] = [];
         let hasNextPage = true;
         let endCursor: string | null = null;
@@ -475,7 +477,7 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
         const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity unfulfilledQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
         while (hasNextPage && pageCount < 100) {
             if (onProgress) onProgress(`Unfulfilled: ${allRawOrders.length} orders — Page ${pageCount + 1}...`);
-            const variables = { cursor: endCursor, query: `fulfillment_status:unshipped status:open` };
+            const variables = { cursor: endCursor, query: `(fulfillment_status:unshipped OR fulfillment_status:partial) status:open` };
             const res = await fetchServerRoute('/api/shopify', { query, variables });
             if (res.status === 401) throw new Error('Shopify Token Invalid.');
             const json = await res.json();
