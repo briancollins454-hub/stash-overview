@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from '../lib/verifyAuth';
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
   if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
@@ -10,9 +8,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  if (await requireAuth(req, res, { route: 'deco' })) return;
-
   const rawDomain = process.env.DECO_DOMAIN;
   const rawUser = process.env.DECO_USERNAME;
   const rawPass = process.env.DECO_PASSWORD;

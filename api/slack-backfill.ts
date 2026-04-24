@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from '../lib/verifyAuth';
-
 /**
  * /api/slack-backfill
  *
@@ -184,9 +182,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
-
-  if (await requireAuth(req, res, { route: 'slack-backfill' })) return;
-
   // .trim() guards against trailing whitespace or newlines that sometimes
   // come along when pasting tokens into the Vercel env var UI — without this
   // the token looks fine in the dashboard but Slack returns invalid_auth.

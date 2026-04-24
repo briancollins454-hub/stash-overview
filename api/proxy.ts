@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from '../lib/verifyAuth';
-
 const ALLOWED_PROXY_DOMAINS = [
   '.myshopify.com',
   '.shopify.com',
@@ -30,9 +28,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
-  if (await requireAuth(req, res, { route: 'proxy' })) return;
-
   const { url, method, headers, body } = req.body || {};
 
   if (!url || typeof url !== 'string') {

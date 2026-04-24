@@ -1,6 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from '../lib/verifyAuth';
-
 /**
  * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
  *
@@ -158,9 +156,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-  if (await requireAuth(req, res, { route: 'quickbooks' })) return;
-
   const body = (req.body || {}) as Record<string, unknown>;
   const action = body.action as string;
 

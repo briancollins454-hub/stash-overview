@@ -4,8 +4,6 @@ export const config = { runtime: 'edge' };
 // CRUD for observations, learned patterns, and entity knowledge.
 // Stores what the AI has seen, learned, and knows about people/environment.
 
-import { requireAuthEdge } from '../lib/verifyAuthEdge';
-
 type SupabaseHeaders = Record<string, string>;
 
 function getConfig(req: Request) {
@@ -44,10 +42,6 @@ export default async function handler(req: Request) {
   const { corsHeaders, supabaseUrl, supabaseKey } = getConfig(req);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
-
-  const authDecision = await requireAuthEdge(req, 'ai-memory', corsHeaders);
-  if (authDecision.reject) return authDecision.reject;
-
   if (!supabaseUrl || !supabaseKey) return json({ error: 'Supabase not configured' }, corsHeaders, 501);
 
   try {
