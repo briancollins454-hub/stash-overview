@@ -3,8 +3,15 @@
     "api/deco.ts": { "maxDuration": 60 },
     "api/inventory.ts": { "maxDuration": 60 },
     "api/stock.ts": { "maxDuration": 60 },
-    "api/shopify.ts": { "maxDuration": 60 }
+    "api/shopify.ts": { "maxDuration": 60 },
+    "api/cron/refresh-finance.ts": { "maxDuration": 60 }
   },
+  "crons": [
+    {
+      "path": "/api/cron/refresh-finance",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/((?!api/).*)", "destination": "/" }

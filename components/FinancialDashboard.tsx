@@ -391,7 +391,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   }, []);
 
   const loadCachedThenSync = useCallback(async () => {
-    // Step 1: Try IndexedDB first (instant), then Supabase (cross-device)
+    // Step 1: Try IndexedDB first (instant), then Supabase (cross-device).
+    // If Supabase has a fresher `last_synced` than our local cache — which
+    // happens after the nightly Vercel cron rebuilds stash_finance_cache —
+    // we prefer the cloud copy so staff see up-to-date figures first thing
+    // without having to click Full Reload.
     let cached: DecoJob[] | null = null;
     let cachedTs: string | null = null;
 
@@ -406,16 +410,23 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       }
     } catch { /* IndexedDB miss */ }
 
-    // If no local cache, try Supabase (covers new device / cleared browser)
-    if (!cached) {
-      const cloud = await loadFromSupabase();
-      if (cloud) {
-        cached = cloud.data;
-        cachedTs = cloud.last_synced;
-        // Backfill IndexedDB so next load is instant
-        setItem(CACHE_KEY, cached);
-        setItem(CACHE_TS_KEY, cachedTs);
-      }
+    // Ask Supabase. If there's no local cache OR the cloud copy is newer,
+    // adopt it and backfill IndexedDB.
+    const cloud = await loadFromSupabase();
+    const cloudMs = cloud?.last_synced ? Date.parse(cloud.last_synced) : NaN;
+    const localMs = cachedTs ? Date.parse(cachedTs) : NaN;
+    const cloudIsFresher = cloud && Number.isFinite(cloudMs) && (!Number.isFinite(localMs) || cloudMs > localMs);
+
+    if (!cached && cloud) {
+      cached = cloud.data;
+      cachedTs = cloud.last_synced;
+      setItem(CACHE_KEY, cached);
+      setItem(CACHE_TS_KEY, cachedTs);
+    } else if (cloudIsFresher && cloud) {
+      cached = cloud.data;
+      cachedTs = cloud.last_synced;
+      setItem(CACHE_KEY, cached);
+      setItem(CACHE_TS_KEY, cachedTs);
     }
 
     if (cached && cached.length > 0) {
