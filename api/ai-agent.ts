@@ -3,7 +3,7 @@ export const config = { runtime: 'edge' };
 // ─── Multi-Agent AI Endpoint with Tool Use (OpenAI GPT-4.1) ──────
 // Supports: orchestrator routing, tool calls, streaming, agent specialization
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 interface ToolDef {
   type: 'function';

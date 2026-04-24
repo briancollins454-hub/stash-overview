@@ -4,7 +4,7 @@ export const config = { runtime: 'edge' };
 // CRUD for observations, learned patterns, and entity knowledge.
 // Stores what the AI has seen, learned, and knows about people/environment.
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 type SupabaseHeaders = Record<string, string>;
 

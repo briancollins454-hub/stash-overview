@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from './_lib/verifyAuth';
+import { requireAuth } from '../lib/verifyAuth';
 
 // ─── Firebase Firestore Config ──────────────────────────────────────────────
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'stash-shop-bridge';

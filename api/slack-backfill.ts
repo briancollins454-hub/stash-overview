@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuth } from './_lib/verifyAuth';
+import { requireAuth } from '../lib/verifyAuth';
 
 /**
  * /api/slack-backfill

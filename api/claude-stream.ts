@@ -1,6 +1,6 @@
 export const config = { runtime: 'edge' };
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';

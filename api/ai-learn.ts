@@ -8,7 +8,7 @@ export const config = { runtime: 'edge' };
 //   3. Notable observations worth remembering
 // Writes results to Supabase via /api/ai-memory.
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';

@@ -3,7 +3,7 @@ export const config = { runtime: 'edge' };
 // ─── TTS: OpenAI (primary) + ElevenLabs (premium fallback) ───────
 // OpenAI TTS-1 for low-latency, natural voice. ElevenLabs if key exists for premium quality.
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';

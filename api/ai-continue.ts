@@ -3,7 +3,7 @@ export const config = { runtime: 'edge' };
 // ─── Continue conversation after tool results (OpenAI GPT-4.1) ───
 // Client resolves tool calls locally, sends results back here for GPT to synthesize
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';

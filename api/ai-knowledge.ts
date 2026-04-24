@@ -2,7 +2,7 @@ export const config = { runtime: 'edge' };
 
 // ─── RAG: Store & Search Knowledge via Supabase ─────────────────
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';

@@ -5,7 +5,7 @@ export const config = { runtime: 'edge' };
 // gestures, body language, environment, interactions. Feeds the AI's
 // consciousness system for genuine spatial/social awareness.
 
-import { requireAuthEdge } from './_lib/verifyAuthEdge';
+import { requireAuthEdge } from '../lib/verifyAuthEdge';
 
 export default async function handler(req: Request) {
   const origin = req.headers.get('origin') || '';
