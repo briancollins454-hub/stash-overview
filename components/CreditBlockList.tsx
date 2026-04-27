@@ -100,7 +100,7 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder 
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [noCache, setNoCache] = useState(false);
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('oldestDays');
+  const [sortKey, setSortKey] = useState<SortKey>('overdueTotal');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
