@@ -79,12 +79,15 @@ const extractSP = (sp: any): string | undefined => {
 };
 
 const TIME_FRAMES = [
-  { id: 'all',    label: 'All',    min: null, max: null },
-  { id: '3-5d',   label: '3-5D',   min: 3,    max: 5 },
-  { id: '5-7d',   label: '5-7D',   min: 5,    max: 7 },
-  { id: '7-14d',  label: '7-14D',  min: 7,    max: 14 },
-  { id: '14-30d', label: '14-30D', min: 14,   max: 30 },
-  { id: '30-90d', label: '30-90D', min: 30,   max: 90 },
+  { id: 'all',    label: 'All',    min: null, max: null  },
+  { id: '3-5d',   label: '3-5D',   min: 3,    max: 5     },
+  { id: '5-7d',   label: '5-7D',   min: 5,    max: 7     },
+  { id: '7-14d',  label: '7-14D',  min: 7,    max: 14    },
+  { id: '14-30d', label: '14-30D', min: 14,   max: 30    },
+  { id: '30-90d', label: '30-90D', min: 30,   max: 90    },
+  // "Shouldn't ever exist in theory, but if any do we want to spot them
+  // immediately." Open-ended (max=null becomes Infinity in passesFilter).
+  { id: '90d+',   label: '90D+',   min: 90,   max: null  },
 ] as const;
 
 type TimeFrameId = typeof TIME_FRAMES[number]['id'];
@@ -367,11 +370,13 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
   const highCount = items.filter(r => r.urgency === 'high').length;
   const totalInStatus = allItems.length;
 
+  // Open-ended buckets (e.g. 90+) have a null max; render as "90+" rather than "90–null".
+  const rangeLabel = filterMax === null ? `${filterMin}+` : `${filterMin}–${filterMax}`;
   const filterHint = (filterMin === null && filterMax === null) ? '' : (
-    section.filterMetric === 'days_since_ordered' ? `Orders waiting ${filterMin}–${filterMax} days` :
-    section.filterMetric === 'days_until_due' ? `Due within ${filterMin}–${filterMax} days` :
-    section.filterMetric === 'days_past_due' ? `Waiting ${filterMin}–${filterMax} days to ship` :
-    section.filterMetric === 'days_since_ready' ? `Ready ${filterMin}–${filterMax} days awaiting dispatch` : ''
+    section.filterMetric === 'days_since_ordered' ? `Orders waiting ${rangeLabel} days` :
+    section.filterMetric === 'days_until_due' ? `Due within ${rangeLabel} days` :
+    section.filterMetric === 'days_past_due' ? `Waiting ${rangeLabel} days to ship` :
+    section.filterMetric === 'days_since_ready' ? `Ready ${rangeLabel} days awaiting dispatch` : ''
   );
 
   return (
