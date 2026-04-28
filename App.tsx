@@ -302,6 +302,28 @@ const App: React.FC = () => {
       return next;
     }, { replace: true });
   }, [setSearchParams, isTabAllowed]);
+
+  // Mobile auto-redirect: first time a phone-sized client lands on the
+  // dashboard with no explicit ?tab=, send them to the Mobile Summary
+  // page (if their account has access). Honoured once per session so a
+  // user who manually navigates away stays where they put themselves.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (searchParams.get('tab')) return; // explicit tab — respect it
+    if (!isTabAllowed('summary')) return;
+    try {
+      if (sessionStorage.getItem('mobileSummary.redirectedThisSession') === '1') return;
+      const isMobile = window.matchMedia('(max-width: 768px)').matches;
+      if (!isMobile) return;
+      sessionStorage.setItem('mobileSummary.redirectedThisSession', '1');
+      setActiveTab('summary');
+    } catch {
+      /* sessionStorage unavailable — skip the redirect rather than break boot */
+    }
+    // We deliberately only run this on first mount; subsequent navigation
+    // uses setActiveTab directly and should not be hijacked.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => {
       const defaults: ApiSettings = {
           useLiveData: true,
@@ -3268,6 +3290,7 @@ const App: React.FC = () => {
                   <MobileSummary
                     stats={stats}
                     unifiedOrders={unifiedOrders}
+                    decoJobs={rawDecoJobs}
                     holidayRanges={apiSettings.holidayRanges}
                     lastSyncTime={lastSyncTime}
                     syncStatusMsg={syncStatusMsg}
@@ -3286,6 +3309,12 @@ const App: React.FC = () => {
                         setShowFulfilled(false);
                         setActiveQuickFilter(filter as any);
                       }
+                    }}
+                    onJumpToTab={(tab) => {
+                      // Map mobile-summary section IDs to the real dashboard tab IDs.
+                      // The Credit Block List has its own dedicated tab.
+                      const target = tab === 'credit' ? 'credit-block' : tab;
+                      setActiveTab(target);
                     }}
                   />
                 </ErrorBoundary>
