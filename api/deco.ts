@@ -400,10 +400,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // Bulk fetch: fetch multiple jobs by ID
+  // Bulk fetch: fetch multiple jobs by ID.
+  //
+  // Two-pass strategy so we catch BOTH recent and very-old orders:
+  //   Pass 1 — `fetchOrdersByIds` does a parallel date-window scan
+  //            (last 200 days). One network burst, finds the bulk of
+  //            anything reasonably recent in a couple of seconds.
+  //   Pass 2 — Any IDs the scan didn't find fall through to a direct
+  //            per-ID lookup (`fetchOrderById`, no date gate). Catches
+  //            12-month+ old orders that fall outside Pass 1's window.
+  //
+  // Without Pass 2, status updates for old orders never propagate —
+  // e.g. a job placed Apr 2025, dispatched Apr 2026, would stay stuck
+  // on its 2025 status in the local cache forever because every fetch
+  // path was date-gated. The Priority Board's "Sync now" relies on this
+  // path picking up status changes for whatever the user is currently
+  // looking at, regardless of how old the order is.
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
-      const results = await fetchOrdersByIds(jobIds, false);
+      const firstPass = await fetchOrdersByIds(jobIds, false);
+      const missing = firstPass.filter(r => !r.order).map(r => r.jobId);
+
+      if (missing.length === 0) {
+        return res.status(200).json({ results: firstPass });
+      }
+
+      console.log(`[Deco API] Bulk pass-1 found ${firstPass.length - missing.length}/${firstPass.length}; ${missing.length} need direct lookup`);
+
+      // Run direct lookups in parallel batches. Concurrency 5 keeps us
+      // well under the per-IP throttle while still finishing 100 misses
+      // in roughly 20s, which fits comfortably in Vercel's 60s budget.
+      const CONCURRENCY = 5;
+      const directHits = new Map<string, any>();
+      for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        const slice = missing.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(
+          slice.map(id => fetchOrderById(id, false))
+        );
+        settled.forEach((r, idx) => {
+          if (r.status === 'fulfilled' && r.value) directHits.set(slice[idx], r.value);
+        });
+      }
+
+      const results = firstPass.map(r =>
+        r.order ? r : { jobId: r.jobId, order: directHits.get(r.jobId) || null }
+      );
+      const finalFound = results.filter(r => r.order).length;
+      console.log(`[Deco API] Bulk total: ${finalFound}/${results.length} (pass-1 + direct fallback)`);
+
       return res.status(200).json({ results });
     } catch (error: any) {
       return res.status(500).json({ error: 'Bulk fetch failed', details: error.message });
