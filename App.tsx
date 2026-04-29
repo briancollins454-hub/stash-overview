@@ -295,14 +295,20 @@ const App: React.FC = () => {
     if (tab !== 'dashboard' && !isTabAllowed(tab)) return 'dashboard';
     return tab;
   })();
-  const setActiveTab = useCallback((tab: string) => {
+  // Tab changes push a new URL by default so the browser back button walks
+  // back through the user's tab history rather than leaving the app entirely.
+  // Pass { replace: true } for programmatic redirects on first load (mobile
+  // auto-redirect, widget bootstrap, etc.) where adding a history entry would
+  // be confusing — back should take the user out, not bounce them between
+  // states they never explicitly chose.
+  const setActiveTab = useCallback((tab: string, opts?: { replace?: boolean }) => {
     if (tab !== 'dashboard' && !isTabAllowed(tab)) return; // Block navigation to disallowed tabs
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       if (tab === 'dashboard') next.delete('tab');
       else next.set('tab', tab);
       return next;
-    }, { replace: true });
+    }, { replace: opts?.replace ?? false });
   }, [setSearchParams, isTabAllowed]);
 
   // Mobile auto-redirect: first time a phone-sized client lands on the
@@ -318,7 +324,10 @@ const App: React.FC = () => {
       const isMobile = window.matchMedia('(max-width: 768px)').matches;
       if (!isMobile) return;
       sessionStorage.setItem('mobileSummary.redirectedThisSession', '1');
-      setActiveTab('summary');
+      // Replace, not push — back from the auto-redirected mobile summary
+      // should leave the app, not bounce the user back to the dashboard
+      // they never asked to see.
+      setActiveTab('summary', { replace: true });
     } catch {
       /* sessionStorage unavailable — skip the redirect rather than break boot */
     }
@@ -419,7 +428,9 @@ const App: React.FC = () => {
     if (id && id.includes('Order')) {
       setWidgetOrderId(id);
       setIsWidgetView(true);
-      setActiveTab('widget');
+      // Widget bootstrap from a deep link — don't add a history entry for it,
+      // back should leave the embedding page rather than land on the dashboard.
+      setActiveTab('widget', { replace: true });
     }
   }, [setActiveTab]);
 
