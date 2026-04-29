@@ -1829,6 +1829,37 @@ const App: React.FC = () => {
       return null;
   };
 
+  // Bulk-refresh a specific set of Deco job IDs.
+  //
+  // The standard sync (fetchDecoJobs) is gated to a 120-day window — orders
+  // older than that never get their status refreshed by a regular sync. That
+  // leaves jobs from older orders permanently stuck on whatever status they
+  // had the last time they were inside the window (e.g. an order from 14
+  // months ago dispatched yesterday in Deco still shows "Awaiting Shipping"
+  // here forever). This helper exists so callers like the Priority Board
+  // can explicitly refresh the IDs they're rendering — which is exactly the
+  // set the user is staring at and most cares about being current.
+  const refreshDecoJobsByIds = useCallback(async (jobIds: string[]) => {
+      if (!apiSettings.useLiveData) return;
+      const unique = Array.from(new Set(jobIds.filter(Boolean)));
+      if (unique.length === 0) return;
+      try {
+          const refreshed = await fetchBulkDecoJobs(apiSettings, unique);
+          if (refreshed.length === 0) return;
+          setRawDecoJobs(prev => {
+              const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+              for (const j of refreshed) jobMap.set(j.jobNumber, j);
+              const next = Array.from(jobMap.values());
+              setLocalItem('stash_raw_deco_jobs', next).catch(console.error);
+              return next;
+          });
+          // Push to cloud so other devices pick up the corrected statuses too.
+          saveCloudDecoJobs(apiSettings, refreshed).catch(e => console.warn('Failed to save bulk-refreshed jobs to cloud:', e));
+      } catch (e: any) {
+          console.warn('[refreshDecoJobsByIds] bulk fetch failed:', e?.message || e);
+      }
+  }, [apiSettings]);
+
   const handleBulkStatusSync = async () => {
     if (isBulkRefreshing || loading) return;
     
@@ -3367,6 +3398,7 @@ const App: React.FC = () => {
                     decoJobs={rawDecoJobs}
                     onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
                     onRefresh={() => loadData(false)}
+                    onBulkRefresh={refreshDecoJobsByIds}
                     lastSyncTime={lastSyncTime}
                     loading={loading}
                   />

@@ -15,7 +15,15 @@ interface Props {
   // button + freshness pill so the user can refresh Deco data without
   // bouncing back to the dashboard. Older callers that don't pass these
   // continue to work — the controls just don't render.
-  onRefresh?: () => void;
+  onRefresh?: () => Promise<void> | void;
+  // Targeted refresh for a specific list of Deco job IDs. Critical for the
+  // Priority Board specifically: the standard sync window is 120 days, so
+  // older orders that the board still shows (because their last-known
+  // status was non-shipped) never get their status refreshed otherwise.
+  // After the regular sync finishes we bulk-refresh the visible IDs here
+  // so stale "Awaiting Shipping" / "Awaiting Stock" entries flip to their
+  // true current status.
+  onBulkRefresh?: (jobIds: string[]) => Promise<void>;
   lastSyncTime?: number | null;
   loading?: boolean;
 }
@@ -244,7 +252,7 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
 
 /* ---------- Main component ---------- */
 
-export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, lastSyncTime, loading }: Props) {
+export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onBulkRefresh, lastSyncTime, loading }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
@@ -283,6 +291,35 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       return st !== 'shipped';
     }),
   [allJobs]);
+
+  // Local "bulk refreshing" state so the spinner stays on for the duration
+  // of (regular sync + targeted bulk refresh) rather than flipping off as
+  // soon as the cheaper part finishes.
+  const [bulkRefreshing, setBulkRefreshing] = useState(false);
+
+  // Sync handler: run the regular cross-app sync, then bulk-refresh just
+  // the IDs currently visible on this board so older-than-window jobs
+  // (which the standard 120-day fetch never touches) get their statuses
+  // brought up to date. We capture the IDs BEFORE the sync — that's the
+  // set the user is currently looking at and expects to see updated.
+  const handleSyncNow = async () => {
+    if (!onRefresh) return;
+    const visibleIds = active.map(j => j.id).filter(Boolean);
+    setBulkRefreshing(true);
+    try {
+      await onRefresh();
+      if (onBulkRefresh && visibleIds.length > 0) {
+        // Cap the burst so a board with thousands of historical entries
+        // doesn't spawn a giant Deco call. 250 covers practically every
+        // realistic Priority Board view; older entries will still get
+        // refreshed on subsequent syncs as they bubble up.
+        const capped = visibleIds.slice(0, 250);
+        await onBulkRefresh(capped);
+      }
+    } finally {
+      setBulkRefreshing(false);
+    }
+  };
 
   const allScored = useMemo(() =>
     active.map(j => calculatePriority(j, now)),
@@ -331,8 +368,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           {onRefresh && (
             <FreshnessControl
               lastSyncTime={lastSyncTime ?? null}
-              loading={!!loading}
-              onRefresh={onRefresh}
+              loading={!!loading || bulkRefreshing}
+              onRefresh={handleSyncNow}
             />
           )}
         </div>
