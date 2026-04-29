@@ -24,6 +24,11 @@ interface Props {
   // so stale "Awaiting Shipping" / "Awaiting Stock" entries flip to their
   // true current status.
   onBulkRefresh?: (jobIds: string[]) => Promise<void>;
+  // Per-row refresh — when provided, every row gets a small refresh icon
+  // that re-fetches just that one job. Lets the user un-stick a single
+  // row without re-syncing the whole board, and reports the new status
+  // back via the returned string so we can flash it as feedback.
+  onRefreshJob?: (jobNumber: string) => Promise<{ status?: string } | null | void>;
   lastSyncTime?: number | null;
   loading?: boolean;
 }
@@ -252,7 +257,7 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
 
 /* ---------- Main component ---------- */
 
-export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onBulkRefresh, lastSyncTime, loading }: Props) {
+export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onBulkRefresh, onRefreshJob, lastSyncTime, loading }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
@@ -302,9 +307,15 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   // (which the standard 120-day fetch never touches) get their statuses
   // brought up to date. We capture the IDs BEFORE the sync — that's the
   // set the user is currently looking at and expects to see updated.
+  //
+  // We pass jobNumber (the human-readable order number, e.g. "221964")
+  // rather than `id` (Deco's internal order_id). Deco's direct-lookup
+  // strategy (field=1, condition=1, string=<value>) reliably matches on
+  // order_number; passing the internal id can miss for older orders
+  // depending on the tenant's indexing.
   const handleSyncNow = async () => {
     if (!onRefresh) return;
-    const visibleIds = active.map(j => j.id).filter(Boolean);
+    const visibleIds = active.map(j => j.jobNumber || j.id).filter(Boolean);
     setBulkRefreshing(true);
     try {
       await onRefresh();
@@ -398,6 +409,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           expanded={expandedSection === sec.key}
           onToggle={() => toggleSection(sec.key)}
           onNavigate={onNavigateToOrder}
+          onRefreshJob={onRefreshJob}
           now={now}
           readyAtMap={readyAtMap}
         />
@@ -457,9 +469,70 @@ interface SectionCardProps {
   expanded: boolean;
   onToggle: () => void;
   onNavigate: (orderNum: string) => void;
+  onRefreshJob?: (jobNumber: string) => Promise<{ status?: string } | null | void>;
   now: Date;
   readyAtMap: ReadyAtMap;
 }
+
+/**
+ * Small per-row refresh button. Click it and we re-fetch just that one
+ * job from Deco (no date gate, direct ID lookup) and surface the new
+ * status as a 1.6s flash so the user can confirm the row has been
+ * un-stuck. Stops click propagation so it doesn't also trigger the
+ * row-level "navigate to order" handler.
+ */
+const RowRefreshButton: React.FC<{
+  jobNumber: string;
+  onRefreshJob: (jobNumber: string) => Promise<{ status?: string } | null | void>;
+}> = ({ jobNumber, onRefreshJob }) => {
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await onRefreshJob(jobNumber);
+      const status = res && typeof res === 'object' && 'status' in res ? (res.status as string | undefined) : undefined;
+      setFlash(status || 'Refreshed');
+      window.setTimeout(() => setFlash(null), 1600);
+    } catch {
+      setFlash('Failed');
+      window.setTimeout(() => setFlash(null), 1600);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={busy}
+      title={flash ? `New status: ${flash}` : `Refresh #${jobNumber} from Deco`}
+      className={`p-1 rounded transition-colors ${
+        flash
+          ? 'text-emerald-300 bg-emerald-500/10'
+          : 'text-white/30 hover:text-indigo-300 hover:bg-white/10'
+      } disabled:opacity-50 disabled:cursor-wait`}
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`}
+      >
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
+      </svg>
+    </button>
+  );
+};
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
   rose:   { header: 'text-rose-300',   border: 'border-rose-500/20',   badge: 'bg-rose-500/10 text-rose-400' },
@@ -471,7 +544,7 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap }: SectionCardProps) {
+function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefreshJob, now, readyAtMap }: SectionCardProps) {
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
@@ -549,7 +622,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
             <div className="px-5 py-6 text-center text-white/30 text-xs">No orders in this category{filterHint ? ' for this filter' : ''}.</div>
           ) : (
             <>
-              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
+              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px_28px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
                 <span>#</span>
                 <span>Order / Date</span>
                 <span>Customer / Job</span>
@@ -558,6 +631,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                 <span>Reason</span>
                 <span>Staff</span>
                 <span className="text-right">Value</span>
+                <span />
               </div>
               <div className="divide-y divide-white/[0.03]">
                 {items.map((item, i) => {
@@ -569,7 +643,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                   return (
                     <div
                       key={item.job.id}
-                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
+                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px_28px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => onNavigate(item.job.jobNumber)}
                     >
                       <span className="text-[10px] text-white/20 font-mono">{i + 1}</span>
@@ -590,6 +664,11 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                       </div>
                       <span className="text-[10px] text-white/40 truncate">{staff}</span>
                       <span className="text-[10px] text-white/30 text-right">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
+                      <div className="flex items-center justify-center">
+                        {onRefreshJob ? (
+                          <RowRefreshButton jobNumber={item.job.jobNumber} onRefreshJob={onRefreshJob} />
+                        ) : null}
+                      </div>
                     </div>
                   );
                 })}

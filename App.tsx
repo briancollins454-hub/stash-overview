@@ -3399,6 +3399,10 @@ const App: React.FC = () => {
                     onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
                     onRefresh={() => loadData(false)}
                     onBulkRefresh={refreshDecoJobsByIds}
+                    onRefreshJob={async (jobNum) => {
+                      const job = await handleRefreshJob(jobNum);
+                      return job ? { status: job.status } : null;
+                    }}
                     lastSyncTime={lastSyncTime}
                     loading={loading}
                   />
