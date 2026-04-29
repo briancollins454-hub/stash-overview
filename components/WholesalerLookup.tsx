@@ -70,7 +70,7 @@ const FIELD_LABELS: Record<string, string> = {
 // 1000 keeps progress responsive and never trips the 50s function cap.
 const UPSERT_CHUNK = 1000;
 
-// ─── CSV parsing ────────────────────────────────────────────────────────────
+// ─── CSV / XLSX parsing ─────────────────────────────────────────────────────
 
 const parseCsvLine = (text: string): string[] => {
     const re = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/;
@@ -83,6 +83,101 @@ const parseNumber = (raw: string | undefined | null): number | null => {
     if (!s) return null;
     const n = parseFloat(s);
     return Number.isFinite(n) ? n : null;
+};
+
+// ExcelJS is ~270 KB gzipped — lazy-load it so it only lands in the
+// browser when someone actually uploads an Excel feed. The promise is
+// cached so repeated uploads in one session don't refetch.
+type ExcelJSModule = typeof import('exceljs');
+let excelJsPromise: Promise<ExcelJSModule> | null = null;
+const loadExcelJS = (): Promise<ExcelJSModule> => {
+    if (!excelJsPromise) excelJsPromise = import('exceljs');
+    return excelJsPromise;
+};
+
+const isXlsx = (file: File): boolean => {
+    const name = file.name.toLowerCase();
+    return name.endsWith('.xlsx') || name.endsWith('.xlsm');
+};
+
+const isXls = (file: File): boolean => file.name.toLowerCase().endsWith('.xls');
+
+/**
+ * Load a CSV or XLSX file as a uniform { headers, rows } shape so the rest
+ * of the upload flow doesn't care which format the supplier sent. Returns
+ * cells as trimmed strings — number coercion happens later via parseNumber
+ * once the user's confirmed which column maps to stock / cost / RRP.
+ *
+ * For XLSX we read the first worksheet that actually has rows. Some
+ * supplier feeds put metadata or instructions on sheet 1 and the real data
+ * on sheet 2, so falling back is friendlier than silently failing.
+ */
+const loadRowsFromFile = async (file: File): Promise<{ headers: string[]; rows: string[][] }> => {
+    if (isXls(file)) {
+        throw new Error('Old .xls format isn\'t supported — please re-save as .xlsx or .csv from Excel.');
+    }
+
+    if (isXlsx(file)) {
+        const ExcelJS = await loadExcelJS();
+        const buffer = await file.arrayBuffer();
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(buffer);
+
+        // Walk worksheets in order until we find one with at least 2 rows
+        // (a header + at least one data row).
+        let usedSheet: import('exceljs').Worksheet | null = null;
+        workbook.eachSheet(ws => {
+            if (usedSheet) return;
+            if (ws.actualRowCount && ws.actualRowCount >= 2) {
+                usedSheet = ws;
+            }
+        });
+        if (!usedSheet) throw new Error('That spreadsheet has no rows we can read.');
+
+        // ExcelJS rows are 1-indexed; row(1) is typically the header. Pull
+        // every row's `.values` (also 1-indexed; index 0 is null) and coerce
+        // each cell to a trimmed string. Hyperlinks / rich text become their
+        // .text representation, dates become ISO strings.
+        const sheet: import('exceljs').Worksheet = usedSheet;
+        const cellToString = (v: unknown): string => {
+            if (v == null) return '';
+            if (typeof v === 'string') return v.trim();
+            if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+            if (v instanceof Date) return v.toISOString();
+            const obj = v as Record<string, unknown>;
+            if (typeof obj.text === 'string') return obj.text.trim();
+            if (Array.isArray(obj.richText)) return obj.richText.map((rt: { text?: string }) => rt.text || '').join('').trim();
+            if (typeof obj.result === 'string' || typeof obj.result === 'number') return String(obj.result);
+            if (typeof obj.hyperlink === 'string') return obj.hyperlink;
+            return String(v);
+        };
+
+        const allRows: string[][] = [];
+        sheet.eachRow({ includeEmpty: false }, (row) => {
+            const values = row.values as unknown[];
+            // values[0] is always null (1-indexed). Drop it and trim trailing
+            // empties so a column-count mismatch in row 1 doesn't lose data.
+            const cells = (values.slice(1) as unknown[]).map(cellToString);
+            // Strip trailing empties only — preserve interior empties so cell
+            // positions align with the header row.
+            while (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+            if (cells.length > 0) allRows.push(cells);
+        });
+
+        if (allRows.length < 2) throw new Error('Spreadsheet has a header but no data rows.');
+        const headers = allRows[0] || [];
+        const rows = allRows.slice(1);
+        return { headers, rows };
+    }
+
+    // Default: treat as CSV (UTF-8 text). Same parser the rest of the app
+    // uses; handles quoted commas via the regex split.
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (lines.length < 2) throw new Error('CSV is empty or has no data rows.');
+    const headers = parseCsvLine(lines[0] || '');
+    const rows = lines.slice(1).map(l => parseCsvLine(l));
+    return { headers, rows };
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -470,23 +565,20 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
 
     const effectiveWholesaler = wholesaler === '__custom__' ? customWholesaler.trim() : wholesaler;
 
-    const onPickFile = (f: File) => {
+    const onPickFile = async (f: File) => {
         setFile(f);
         setError(null);
         setSuccess(null);
-        const reader = new FileReader();
-        reader.onload = () => {
-            const text = String(reader.result || '');
-            const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-            if (lines.length === 0) {
-                setError('CSV is empty');
-                return;
-            }
-            const hdrs = parseCsvLine(lines[0] || '');
+        setHeaders([]);
+        setSampleRows([]);
+        try {
+            const { headers: hdrs, rows } = await loadRowsFromFile(f);
             setHeaders(hdrs);
-            setSampleRows(lines.slice(1, 4).map(l => parseCsvLine(l)));
+            setSampleRows(rows.slice(0, 3));
 
-            // Auto-detect column mappings from header names
+            // Auto-detect column mappings from header names — same alias
+            // table for CSV + XLSX since most suppliers use similar names
+            // regardless of file format.
             const auto: Record<string, string> = {
                 product_code: '', product_name: '', brand: '', colour: '', size: '',
                 stock_qty: '', cost_price: '', rrp: '',
@@ -502,13 +594,13 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
                 }
             }
             setMapping(auto);
-        };
-        reader.onerror = () => setError('Could not read CSV file');
-        reader.readAsText(f);
+        } catch (e: any) {
+            setError(e?.message || 'Could not read that file');
+        }
     };
 
     const startUpload = async () => {
-        if (!file) { setError('Pick a CSV first.'); return; }
+        if (!file) { setError('Pick a file first.'); return; }
         if (!effectiveWholesaler) { setError('Choose a wholesaler.'); return; }
         if (!mapping.product_code) { setError('Map the Product Code column — that\'s the only required field.'); return; }
         if (!isSupabaseReady()) { setError('Supabase not configured.'); return; }
@@ -518,20 +610,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
         setSuccess(null);
         setProgress({ done: 0, total: 0 });
         try {
-            const text = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(String(reader.result || ''));
-                reader.onerror = () => reject(reader.error || new Error('Read failed'));
-                reader.readAsText(file);
-            });
-
-            const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-            if (lines.length < 2) {
-                setError('CSV has no data rows.');
-                setUploading(false);
-                return;
-            }
-            const hdrs = parseCsvLine(lines[0] || '');
+            // Re-read the file from scratch so we work against the same source
+            // of truth even if the user picked a different file mid-flow.
+            const { headers: hdrs, rows: dataRows } = await loadRowsFromFile(file);
             const idx: Record<string, number> = {};
             for (const [field, hdr] of Object.entries(mapping)) {
                 idx[field] = hdr ? hdrs.indexOf(hdr) : -1;
@@ -539,9 +620,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
 
             const now = new Date().toISOString();
             const rows: any[] = [];
-            for (let i = 1; i < lines.length; i++) {
-                const cells = parseCsvLine(lines[i] || '');
-                const code = idx.product_code >= 0 ? cells[idx.product_code] : '';
+            for (const cells of dataRows) {
+                const code = idx.product_code >= 0 ? (cells[idx.product_code] || '') : '';
                 if (!code) continue; // skip rows without a code
                 rows.push({
                     wholesaler: effectiveWholesaler,
@@ -606,7 +686,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
                     <div className="p-2 rounded-lg bg-indigo-100 text-indigo-700"><FileSpreadsheet className="w-5 h-5" /></div>
                     <div>
                         <h2 className="font-black uppercase tracking-widest text-sm text-gray-900">Upload Wholesaler Feed</h2>
-                        <p className="text-[11px] text-gray-500 mt-0.5">CSV from your supplier portal — we'll auto-detect the columns.</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">CSV or Excel (.xlsx) from your supplier portal — we'll auto-detect the columns.</p>
                     </div>
                     <button onClick={onClose} className="ml-auto p-1.5 rounded hover:bg-gray-100 text-gray-500"><X className="w-4 h-4" /></button>
                 </div>
@@ -655,14 +735,14 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
 
                     {/* File picker */}
                     <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">CSV file</label>
+                        <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">Supplier file</label>
                         <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 text-sm text-gray-600">
                             <Upload className="w-4 h-4" />
-                            <span>{file ? file.name : 'Pick a CSV file…'}</span>
+                            <span>{file ? file.name : 'Pick a CSV or Excel file…'}</span>
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept=".csv,text/csv"
+                                accept=".csv,.xlsx,.xlsm,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                                 className="hidden"
                                 onChange={e => {
                                     const f = e.target.files?.[0];
@@ -670,6 +750,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose, onUploaded }) => {
                                 }}
                             />
                         </label>
+                        <p className="mt-1 text-[10px] text-gray-400">Supports .csv and .xlsx. If your supplier sends .xls, re-save it as .xlsx in Excel first.</p>
                     </div>
 
                     {/* Column mapping */}
