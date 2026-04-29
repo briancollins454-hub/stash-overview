@@ -23,14 +23,18 @@ import {
   ExternalLink,
   Loader2,
   AlertTriangle,
+  CloudDownload,
 } from 'lucide-react';
 
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
+import { fetchDecoFinancials } from '../services/apiService';
+import { ApiSettings } from './SettingsModal';
 
 interface Props {
   decoJobs: DecoJob[];
   isDark: boolean;
+  settings: ApiSettings;
   onNavigateToOrder?: (jobNumber: string) => void;
 }
 
@@ -94,9 +98,16 @@ const bucketColor = (days: number, isDark: boolean): string => {
   return isDark ? 'bg-yellow-900/40 text-yellow-300 border-yellow-500/40' : 'bg-yellow-100 text-yellow-700 border-yellow-300';
 };
 
-const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder }) => {
+const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder }) => {
   const [allJobs, setAllJobs] = useState<DecoJob[]>(decoJobs);
   const [isLoading, setIsLoading] = useState(false);
+  // See ShippedNotInvoiced / UnpaidOrders for the rationale — `isPulling`
+  // covers the heavier "ask Deco for the last 60 days" path so the new
+  // Pull-from-Deco button can show its own state and we can guard against
+  // double-clicks while a sync is in flight.
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
+  const [pullProgress, setPullProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [noCache, setNoCache] = useState(false);
   const [search, setSearch] = useState('');
@@ -129,6 +140,86 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder 
   }, []);
 
   useEffect(() => { loadFromCache(); }, [loadFromCache]);
+
+  // "Pull from Deco" — fetches the last 60 days fresh, merges into the
+  // shared finance cache, and reloads. Same merge semantics as the nightly
+  // cron / FinancialDashboard incrementalSync, so credit-control staff
+  // can confirm that an invoice paid an hour ago has actually fallen off
+  // the list without having to bounce off to the Finance tab.
+  const pullFreshFromDeco = useCallback(async () => {
+    if (isPulling || isLoading) return;
+    if (!settings.useLiveData) {
+      setPullError('Live data is disabled in Settings — can\'t reach Deco');
+      return;
+    }
+    if (!isSupabaseReady()) {
+      setPullError('Supabase not configured — data can\'t be cached');
+      return;
+    }
+    setIsPulling(true);
+    setPullError(null);
+    setPullProgress({ current: 0, total: 0 });
+    try {
+      const sinceYear = new Date().getFullYear();
+      const fresh = await fetchDecoFinancials(
+        settings,
+        sinceYear,
+        (current, total) => setPullProgress({ current, total }),
+      );
+
+      let existing: DecoJob[] = [];
+      try {
+        const res = await supabaseFetch(
+          'stash_finance_cache?id=eq.finance_jobs&select=data', 'GET'
+        );
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data)) {
+          existing = rows[0].data;
+        }
+      } catch { /* first-run / cache empty */ }
+
+      const recentByNumber = new Map(fresh.map(j => [j.jobNumber, j]));
+      const seen = new Set<string>();
+      const merged: DecoJob[] = existing.map(j => {
+        seen.add(j.jobNumber);
+        return recentByNumber.get(j.jobNumber) || j;
+      });
+      for (const j of fresh) {
+        if (!seen.has(j.jobNumber)) merged.push(j);
+      }
+
+      const lean = merged.map(j => ({
+        ...j,
+        items: (j.items || []).map(item => ({
+          name: item.name,
+          productCode: item.productCode,
+          vendorSku: item.vendorSku,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          isReceived: item.isReceived,
+          isProduced: item.isProduced,
+          isShipped: item.isShipped,
+        })),
+      }));
+      const syncedAt = new Date().toISOString();
+      await supabaseFetch(
+        'stash_finance_cache',
+        'POST',
+        { id: 'finance_jobs', data: lean, last_synced: syncedAt, updated_at: syncedAt },
+        'resolution=merge-duplicates'
+      );
+
+      setAllJobs(merged);
+      setLastSynced(syncedAt);
+      setNoCache(false);
+    } catch (e: any) {
+      setPullError(e?.message || 'Failed to pull from Deco');
+    } finally {
+      setIsPulling(false);
+      setPullProgress(null);
+    }
+  }, [isPulling, isLoading, settings]);
 
   /* ---------- Build overdue customer list ---------- */
   const customers = useMemo<CreditBlockedCustomer[]>(() => {
@@ -298,20 +389,53 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder 
             Credit Control
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          {lastSynced && (
-            <span className={`text-[10px] ${isDark ? 'text-indigo-400/70' : 'text-gray-500'}`}>
-              Synced: {new Date(lastSynced).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}
-            </span>
-          )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {lastSynced && (() => {
+            const ageMs = Date.now() - Date.parse(lastSynced);
+            const ageMins = Math.max(0, Math.round(ageMs / 60000));
+            const ageLabel = ageMins < 60
+              ? `${ageMins}m ago`
+              : ageMins < 60 * 24
+                ? `${Math.round(ageMins / 60)}h ago`
+                : `${Math.round(ageMins / 60 / 24)}d ago`;
+            const stale = ageMs > 4 * 60 * 60 * 1000;
+            const veryStale = ageMs > 24 * 60 * 60 * 1000;
+            const toneClasses = veryStale
+              ? 'bg-rose-500/10 text-rose-500 border-rose-500/30'
+              : stale
+                ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30';
+            return (
+              <>
+                <span className={`text-[10px] ${isDark ? 'text-indigo-400/70' : 'text-gray-500'}`}>
+                  Cached {new Date(lastSynced).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest ${toneClasses}`}>
+                  {ageLabel}
+                </span>
+              </>
+            );
+          })()}
+          <button
+            onClick={pullFreshFromDeco}
+            disabled={isPulling || isLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-colors border border-indigo-500/30 bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Fetch the last 60 days fresh from Deco and update the shared cache"
+          >
+            <CloudDownload className={`w-3 h-3 ${isPulling ? 'animate-pulse' : ''}`} />
+            {isPulling
+              ? (pullProgress && pullProgress.total > 0 ? `Pulling ${pullProgress.current}/${pullProgress.total}` : 'Pulling…')
+              : 'Pull from Deco'}
+          </button>
           <button
             onClick={loadFromCache}
-            disabled={isLoading}
+            disabled={isLoading || isPulling}
             className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider transition-colors border ${
               isDark
                 ? 'bg-[#232354] text-indigo-200 hover:text-white border-indigo-500/20 hover:border-indigo-500/40'
                 : 'bg-white text-gray-700 hover:text-gray-900 border-gray-200 hover:border-gray-400'
             } disabled:opacity-50`}
+            title="Re-read from the shared finance cache (fast, doesn't talk to Deco)"
           >
             {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
             Refresh
@@ -334,10 +458,15 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder 
         appears here.
       </p>
 
+      {pullError && (
+        <div className={`rounded-lg p-3 text-sm flex items-center gap-2 ${isDark ? 'bg-rose-500/10 border border-rose-500/30 text-rose-200' : 'bg-rose-50 border border-rose-200 text-rose-800'}`}>
+          <AlertTriangle className="w-4 h-4 shrink-0" /> {pullError}
+        </div>
+      )}
+
       {noCache && (
         <div className={`rounded-lg p-4 text-sm ${isDark ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200' : 'bg-amber-50 border border-amber-200 text-amber-800'}`}>
-          No cached finance data found. Open the Finance tab and run a sync to populate the cache,
-          then come back here.
+          No cached finance data found. Click "Pull from Deco" above, or run a sync from the Finance tab.
         </div>
       )}
 

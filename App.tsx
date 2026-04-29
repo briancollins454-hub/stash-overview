@@ -3169,6 +3169,7 @@ const App: React.FC = () => {
                   <CreditBlockList
                     decoJobs={rawDecoJobs}
                     isDark={isDark}
+                    settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
                   />
                 </ErrorBoundary>
@@ -3182,6 +3183,7 @@ const App: React.FC = () => {
                   <UnpaidOrders
                     decoJobs={rawDecoJobs}
                     isDark={isDark}
+                    settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
                     currentUserEmail={isCustomUser ? (customUserData?.username || '') : (user?.email || '')}
                   />

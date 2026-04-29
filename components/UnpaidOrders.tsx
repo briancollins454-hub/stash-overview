@@ -2,14 +2,17 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CircleDollarSign, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download,
   RefreshCw, Check, Copy, ShieldAlert, ChevronDown, ChevronRight, ShieldCheck, Undo2,
-  Printer, UserRound,
+  Printer, UserRound, CloudDownload,
 } from 'lucide-react';
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
+import { fetchDecoFinancials } from '../services/apiService';
+import { ApiSettings } from './SettingsModal';
 
 interface Props {
   decoJobs: DecoJob[];
   isDark: boolean;
+  settings: ApiSettings;
   onNavigateToOrder?: (orderNumber: string) => void;
   currentUserEmail?: string;
 }
@@ -90,7 +93,7 @@ const CopyableJobNum: React.FC<{ jobNumber: string; onNavigate?: () => void }> =
  * All three buckets are individually collapsible. Zero + Priced open by
  * default (active work); Authorised starts collapsed (reference bucket).
  */
-const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, currentUserEmail }) => {
+const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder, currentUserEmail }) => {
   const [search, setSearch] = useState('');
   // Default sort — newest shipped first. Empty dateShipped values fall to
   // the bottom in descending order, which is what we want (unshipped rows
@@ -99,6 +102,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [allJobs, setAllJobs] = useState<DecoJob[]>(decoJobs);
   const [isLoading, setIsLoading] = useState(false);
+  // Distinct from `isLoading` (which is a cache re-read) — `isPulling` covers
+  // the "ask Deco for the last 60 days" path so the button can show a
+  // dedicated state and we can guard against double-clicks.
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
+  const [pullProgress, setPullProgress] = useState<{ current: number; total: number } | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [noCache, setNoCache] = useState(false);
 
@@ -154,6 +163,88 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
       setIsLoading(false);
     }
   }, []);
+
+  // "Pull from Deco" — fetches the last 60 days fresh, merges into the
+  // shared finance cache, and reloads. Same merge semantics as the nightly
+  // cron / FinancialDashboard incrementalSync, so a user newly arriving
+  // here doesn't have to bounce off to the Finance tab to pick up orders
+  // produced or paid in the last few hours.
+  const pullFreshFromDeco = useCallback(async () => {
+    if (isPulling || isLoading) return;
+    if (!settings.useLiveData) {
+      setPullError('Live data is disabled in Settings — can\'t reach Deco');
+      return;
+    }
+    if (!isSupabaseReady()) {
+      setPullError('Supabase not configured — data can\'t be cached');
+      return;
+    }
+    setIsPulling(true);
+    setPullError(null);
+    setPullProgress({ current: 0, total: 0 });
+    try {
+      const sinceYear = new Date().getFullYear();
+      const fresh = await fetchDecoFinancials(
+        settings,
+        sinceYear,
+        (current, total) => setPullProgress({ current, total }),
+      );
+
+      let existing: DecoJob[] = [];
+      try {
+        const res = await supabaseFetch(
+          'stash_finance_cache?id=eq.finance_jobs&select=data', 'GET'
+        );
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length > 0 && Array.isArray(rows[0].data)) {
+          existing = rows[0].data;
+        }
+      } catch { /* first-run / cache empty */ }
+
+      const recentByNumber = new Map(fresh.map(j => [j.jobNumber, j]));
+      const seen = new Set<string>();
+      const merged: DecoJob[] = existing.map(j => {
+        seen.add(j.jobNumber);
+        return recentByNumber.get(j.jobNumber) || j;
+      });
+      for (const j of fresh) {
+        if (!seen.has(j.jobNumber)) merged.push(j);
+      }
+
+      // Match the lean projection FinancialDashboard / cron use so the
+      // cached row shape stays consistent regardless of who wrote it.
+      const lean = merged.map(j => ({
+        ...j,
+        items: (j.items || []).map(item => ({
+          name: item.name,
+          productCode: item.productCode,
+          vendorSku: item.vendorSku,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          isReceived: item.isReceived,
+          isProduced: item.isProduced,
+          isShipped: item.isShipped,
+        })),
+      }));
+      const syncedAt = new Date().toISOString();
+      await supabaseFetch(
+        'stash_finance_cache',
+        'POST',
+        { id: 'finance_jobs', data: lean, last_synced: syncedAt, updated_at: syncedAt },
+        'resolution=merge-duplicates'
+      );
+
+      setAllJobs(merged);
+      setLastSynced(syncedAt);
+      setNoCache(false);
+    } catch (e: any) {
+      setPullError(e?.message || 'Failed to pull from Deco');
+    } finally {
+      setIsPulling(false);
+      setPullProgress(null);
+    }
+  }, [isPulling, isLoading, settings]);
 
   const loadAuthorised = useCallback(async () => {
     if (!isSupabaseReady()) return;
@@ -917,18 +1008,67 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, onNavigateToOrder, cu
             <CircleDollarSign className="w-5 h-5 text-rose-500" />
             Unpaid Orders
           </h2>
-          <p className={`text-sm ${textSecondary} mt-0.5`}>
-            {isLoading ? 'Loading from cache...' : noCache
-              ? 'No data yet — run a Full Sync from the Finance tab first'
-              : lastSynced
-                ? `Data from Finance sync: ${new Date(lastSynced).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                : 'Orders with no payment recorded in Deco — catches pricing / invoicing slips'}
+          <p className={`text-sm ${textSecondary} mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5`}>
+            {(() => {
+              if (isPulling) {
+                return pullProgress && pullProgress.total > 0
+                  ? <span>Pulling from Deco… {pullProgress.current}/{pullProgress.total}</span>
+                  : <span>Pulling from Deco…</span>;
+              }
+              if (isLoading) return <span>Loading from cache…</span>;
+              if (noCache) return <span>No data yet — click "Pull from Deco" or run a sync from the Finance tab</span>;
+              if (!lastSynced) return <span>Orders with no payment recorded in Deco — catches pricing / invoicing slips</span>;
+
+              const ageMs = Date.now() - Date.parse(lastSynced);
+              const ageMins = Math.max(0, Math.round(ageMs / 60000));
+              const ageLabel = ageMins < 60
+                ? `${ageMins}m ago`
+                : ageMins < 60 * 24
+                  ? `${Math.round(ageMins / 60)}h ago`
+                  : `${Math.round(ageMins / 60 / 24)}d ago`;
+              const stale = ageMs > 4 * 60 * 60 * 1000;
+              const veryStale = ageMs > 24 * 60 * 60 * 1000;
+              const toneClasses = veryStale
+                ? 'bg-rose-500/10 text-rose-500 border-rose-500/30'
+                : stale
+                  ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                  : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30';
+              return (
+                <>
+                  <span>
+                    Cached {new Date(lastSynced).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest ${toneClasses}`}>
+                    {ageLabel}
+                  </span>
+                  {(stale || veryStale) && (
+                    <span className="text-[11px] text-amber-500">— click "Pull from Deco" to bring in newly produced orders</span>
+                  )}
+                </>
+              );
+            })()}
           </p>
+          {pullError && (
+            <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3" /> {pullError}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={loadFromFinanceCache} disabled={isLoading} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${isLoading ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Reload from Finance cache">
+          <button
+            onClick={pullFreshFromDeco}
+            disabled={isPulling || isLoading}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-xs font-bold uppercase tracking-widest text-indigo-500 hover:bg-indigo-500/20 transition-colors ${isPulling || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title="Fetch the last 60 days fresh from Deco and update the shared cache"
+          >
+            <CloudDownload className={`w-3.5 h-3.5 ${isPulling ? 'animate-pulse' : ''}`} />
+            {isPulling
+              ? (pullProgress && pullProgress.total > 0 ? `Pulling ${pullProgress.current}/${pullProgress.total}` : 'Pulling…')
+              : 'Pull from Deco'}
+          </button>
+          <button onClick={loadFromFinanceCache} disabled={isLoading || isPulling} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${(isLoading || isPulling) ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Re-read from the shared finance cache (fast, doesn't talk to Deco)">
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading...' : 'Refresh'}
+            {isLoading ? 'Loading…' : 'Refresh'}
           </button>
           <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
             <span className={`text-xs ${textSecondary}`}>Total Outstanding</span>
