@@ -13,11 +13,13 @@
  *   "79 days past due" for jobs that only became ready yesterday.
  *
  * Semantics:
- *   • First observation of ready status  → stamp readyAt
- *       - For "Completed" jobs we prefer `dateShipped` (which is
- *         actually `date_completed` for non-shipped completed jobs) so
- *         historical data is more accurate.
- *       - For "Ready for Shipping" we stamp `now` (no better signal).
+ *   • Ready status uses production-complete date whenever available.
+ *       - `dateShipped` is populated from `date_shipped || date_completed`
+ *         by the Deco mapper, so it is the best available anchor for
+ *         "Awaiting Shipping" age.
+ *       - If no completion date exists yet, we fall back to `now`.
+ *   • Existing cached anchors are backfilled if a better (earlier)
+ *     completion date appears later.
  *   • Leaves ready status (back to production / shipped / cancelled)
  *     → clear the stamp so next re-entry gets a fresh one.
  *   • Job no longer exists in the sync set → prune the stamp.
@@ -72,18 +74,26 @@ export const refreshReadyAtForJobs = async (jobs: DecoJob[]): Promise<ReadyAtMap
     if (!j?.id) continue;
     activeIds.add(j.id);
     const isReady = READY_STATUSES.has(j.status || '');
+    const completionIso = (() => {
+      if (!j.dateShipped) return null;
+      const d = new Date(j.dateShipped);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    })();
 
-    if (isReady && !map[j.id]) {
-      // First observation — try to anchor to the real completion date
-      // when we have one, otherwise stamp now.
-      let stamp = nowIso;
-      if (j.status === 'Completed' && j.dateShipped) {
-        const d = new Date(j.dateShipped);
-        if (!Number.isNaN(d.getTime())) stamp = d.toISOString();
+    if (isReady) {
+      if (!map[j.id]) {
+        map[j.id] = completionIso || nowIso;
+        dirty = true;
+      } else if (completionIso) {
+        const current = new Date(map[j.id]);
+        const completion = new Date(completionIso);
+        // Backfill to production-complete timestamp when cached value is later.
+        if (Number.isNaN(current.getTime()) || current.getTime() > completion.getTime()) {
+          map[j.id] = completionIso;
+          dirty = true;
+        }
       }
-      map[j.id] = stamp;
-      dirty = true;
-    } else if (!isReady && map[j.id]) {
+    } else if (map[j.id]) {
       delete map[j.id];
       dirty = true;
     }
