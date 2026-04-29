@@ -372,6 +372,15 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     return PRIORITY_SECTIONS.map(sec => {
       const items = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
       items.sort((a, b) => {
+        if (sec.filterMetric === 'days_since_ready') {
+          const readyDaysA = getMetricDays(a.job, sec, now, readyAtMap);
+          const readyDaysB = getMetricDays(b.job, sec, now, readyAtMap);
+          const safeReadyDaysA = readyDaysA ?? -1;
+          const safeReadyDaysB = readyDaysB ?? -1;
+
+          if (safeReadyDaysA !== safeReadyDaysB) return safeReadyDaysB - safeReadyDaysA;
+        }
+
         if (a.score > 0 && b.score > 0) return b.score - a.score;
         if (a.score > 0) return -1;
         if (b.score > 0) return 1;
@@ -381,7 +390,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       });
       return { ...sec, items };
     });
-  }, [allScored, now]);
+  }, [allScored, now, readyAtMap]);
 
   const coveredStatuses = new Set(PRIORITY_SECTIONS.flatMap(s => s.statuses));
   const uncategorised = useMemo(() =>
