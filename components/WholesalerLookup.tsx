@@ -222,6 +222,12 @@ const WholesalerLookup: React.FC = () => {
     const [freshnessLoaded, setFreshnessLoaded] = useState(false);
 
     const [filterWholesaler, setFilterWholesaler] = useState<string>('all');
+    // Colour filter is applied client-side against the already-fetched
+    // result set (rather than re-querying Supabase) so toggling between
+    // colours feels instant. Stored lower-cased so 'NAVY' / 'Navy' /
+    // 'navy' collapse into the same bucket — supplier feeds are wildly
+    // inconsistent on capitalisation.
+    const [filterColour, setFilterColour] = useState<string>('all');
     const [sortKey, setSortKey] = useState<'price' | 'stock' | 'wholesaler'>('price');
 
     const [uploadOpen, setUploadOpen] = useState(false);
@@ -309,10 +315,45 @@ const WholesalerLookup: React.FC = () => {
         return () => { cancelled = true; };
     }, [debounced, filterWholesaler]);
 
+    // Build the list of available colours from the *unfiltered* results so
+    // the dropdown stays stable while the user is toggling between colours.
+    // We key on lower-case so 'NAVY' / 'Navy' / 'navy' don't appear as
+    // separate options, but show the original casing of the first occurrence
+    // for friendlier display.
+    const availableColours = useMemo(() => {
+        const map = new Map<string, { display: string; count: number }>();
+        for (const r of results) {
+            const raw = (r.colour || '').trim();
+            if (!raw) continue;
+            const key = raw.toLowerCase();
+            const cur = map.get(key);
+            if (cur) cur.count += 1;
+            else map.set(key, { display: raw, count: 1 });
+        }
+        return Array.from(map.entries())
+            .map(([key, v]) => ({ key, display: v.display, count: v.count }))
+            .sort((a, b) => a.display.localeCompare(b.display));
+    }, [results]);
+
+    // If the currently-selected colour disappears (e.g. new search term, or
+    // user filtered down to a wholesaler that doesn't stock that colour),
+    // silently fall back to "all" so the page doesn't appear empty for no
+    // visible reason.
+    useEffect(() => {
+        if (filterColour === 'all') return;
+        if (!availableColours.some(c => c.key === filterColour)) {
+            setFilterColour('all');
+        }
+    }, [availableColours, filterColour]);
+
     // Group by product_code so each unique product gets one comparison block.
     const grouped = useMemo(() => {
+        const filtered = filterColour === 'all'
+            ? results
+            : results.filter(r => (r.colour || '').trim().toLowerCase() === filterColour);
+
         const groups = new Map<string, PriceRow[]>();
-        for (const r of results) {
+        for (const r of filtered) {
             const key = (r.product_code || 'unknown').trim().toLowerCase();
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key)!.push(r);
@@ -340,7 +381,7 @@ const WholesalerLookup: React.FC = () => {
         }));
         list.sort((a, b) => b.rows.length - a.rows.length);
         return list;
-    }, [results, sortKey]);
+    }, [results, sortKey, filterColour]);
 
     // ─── Render ────────────────────────────────────────────────────────────
 
@@ -425,6 +466,20 @@ const WholesalerLookup: React.FC = () => {
                     ))}
                 </select>
                 <select
+                    value={filterColour}
+                    onChange={e => setFilterColour(e.target.value)}
+                    disabled={availableColours.length === 0}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold uppercase tracking-wider text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={availableColours.length === 0 ? 'Run a search to see available colours' : 'Filter by colour'}
+                >
+                    <option value="all">
+                        {availableColours.length === 0 ? 'All Colours' : `All Colours (${results.filter(r => (r.colour || '').trim()).length})`}
+                    </option>
+                    {availableColours.map(c => (
+                        <option key={c.key} value={c.key}>{c.display} ({c.count})</option>
+                    ))}
+                </select>
+                <select
                     value={sortKey}
                     onChange={e => setSortKey(e.target.value as 'price' | 'stock' | 'wholesaler')}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-bold uppercase tracking-wider text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -461,6 +516,19 @@ const WholesalerLookup: React.FC = () => {
                     <div className="bg-white border border-dashed border-gray-300 rounded-xl p-10 text-center text-gray-500">
                         <p className="font-bold text-gray-700">No matches.</p>
                         <p className="text-xs mt-1">Either no wholesaler stocks "{debounced}" or you haven't uploaded that supplier's feed yet.</p>
+                    </div>
+                )}
+
+                {!searching && debounced.length >= 2 && results.length > 0 && grouped.length === 0 && filterColour !== 'all' && (
+                    <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-gray-500">
+                        <p className="font-bold text-gray-700">No results in that colour.</p>
+                        <p className="text-xs mt-1">"{debounced}" was found but not in <span className="font-semibold">{availableColours.find(c => c.key === filterColour)?.display || filterColour}</span>.</p>
+                        <button
+                            onClick={() => setFilterColour('all')}
+                            className="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[11px] font-bold uppercase tracking-widest hover:bg-indigo-700"
+                        >
+                            Show all colours
+                        </button>
                     </div>
                 )}
 
