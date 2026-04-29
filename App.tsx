@@ -3363,7 +3363,13 @@ const App: React.FC = () => {
             {activeTab === 'priority' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <ErrorBoundary fallbackTitle="Priority Board Error">
-                  <PriorityBoard decoJobs={rawDecoJobs} onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }} />
+                  <PriorityBoard
+                    decoJobs={rawDecoJobs}
+                    onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
+                    onRefresh={() => loadData(false)}
+                    lastSyncTime={lastSyncTime}
+                    loading={loading}
+                  />
                 </ErrorBoundary>
               </Suspense>
             )}

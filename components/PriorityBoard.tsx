@@ -11,6 +11,13 @@ import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore
 interface Props {
   decoJobs: DecoJob[];
   onNavigateToOrder: (orderNum: string) => void;
+  // Optional sync hooks. When provided, the header renders a "Sync now"
+  // button + freshness pill so the user can refresh Deco data without
+  // bouncing back to the dashboard. Older callers that don't pass these
+  // continue to work — the controls just don't render.
+  onRefresh?: () => void;
+  lastSyncTime?: number | null;
+  loading?: boolean;
 }
 
 const isCancelled = (j: DecoJob) =>
@@ -63,6 +70,72 @@ const CopyableJobNum: React.FC<{ jobNumber: string; className?: string }> = ({ j
     >
       {copied ? '\u2713 Copied' : `#${jobNumber}`}
     </span>
+  );
+};
+
+/**
+ * Live data freshness pill + refresh button. Re-renders every 30s so the
+ * "synced X ago" text doesn't go stale silently while the user is sat on
+ * the page. Tone is colour-coded by age — green ≤5min, amber ≤30min,
+ * rose otherwise — so a glance tells you whether the board is reflecting
+ * what's happening on the production floor right now or yesterday's snapshot.
+ */
+const FreshnessControl: React.FC<{
+  lastSyncTime: number | null;
+  loading: boolean;
+  onRefresh: () => void;
+}> = ({ lastSyncTime, loading, onRefresh }) => {
+  // Force re-render every 30s so "synced 3m ago" advances without manual nudge.
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force(n => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const ageMs = lastSyncTime ? Date.now() - lastSyncTime : null;
+  let tone = 'bg-rose-500/20 border-rose-400/40 text-rose-200';
+  let label = 'Never synced';
+  if (ageMs != null && ageMs >= 0) {
+    const mins = Math.floor(ageMs / 60_000);
+    if (mins < 1) label = 'Synced just now';
+    else if (mins < 60) label = `Synced ${mins}m ago`;
+    else if (mins < 60 * 24) label = `Synced ${Math.floor(mins / 60)}h ago`;
+    else label = `Synced ${Math.floor(mins / (60 * 24))}d ago`;
+    if (ageMs <= 5 * 60_000) tone = 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200';
+    else if (ageMs <= 30 * 60_000) tone = 'bg-amber-500/20 border-amber-400/40 text-amber-200';
+  }
+
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      <div
+        className={`px-2.5 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-widest ${tone}`}
+        title={lastSyncTime ? new Date(lastSyncTime).toLocaleString('en-GB') : 'Never synced'}
+      >
+        {label}
+      </div>
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={loading}
+        className="px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:bg-indigo-500/40 disabled:cursor-not-allowed text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+        title="Pull the latest jobs from Deco"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+        >
+          <path d="M3 12a9 9 0 1 0 3-6.7" />
+          <path d="M3 4v5h5" />
+        </svg>
+        {loading ? 'Syncing…' : 'Sync now'}
+      </button>
+    </div>
   );
 };
 
@@ -171,7 +244,7 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
 
 /* ---------- Main component ---------- */
 
-export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
+export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, lastSyncTime, loading }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
@@ -255,6 +328,13 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder }: Props) {
               {totalOrders} order{s(totalOrders)} &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
             </p>
           </div>
+          {onRefresh && (
+            <FreshnessControl
+              lastSyncTime={lastSyncTime ?? null}
+              loading={!!loading}
+              onRefresh={onRefresh}
+            />
+          )}
         </div>
         <div className="mt-4 flex gap-3 flex-wrap">
           {(['critical', 'high', 'medium', 'low'] as Urgency[]).map(u => {
