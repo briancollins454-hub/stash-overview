@@ -11,24 +11,20 @@ import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore
 interface Props {
   decoJobs: DecoJob[];
   onNavigateToOrder: (orderNum: string) => void;
-  // Optional sync hooks. When provided, the header renders a "Sync now"
-  // button + freshness pill so the user can refresh Deco data without
-  // bouncing back to the dashboard. Older callers that don't pass these
-  // continue to work — the controls just don't render.
+  // Optional sync hook. Runs the standard cross-app sync. The freshness
+  // pill in the header reflects when this last completed.
   onRefresh?: () => Promise<void> | void;
-  // Targeted refresh for a specific list of Deco job IDs. Critical for the
-  // Priority Board specifically: the standard sync window is 120 days, so
-  // older orders that the board still shows (because their last-known
-  // status was non-shipped) never get their status refreshed otherwise.
-  // After the regular sync finishes we bulk-refresh the visible IDs here
-  // so stale "Awaiting Shipping" / "Awaiting Stock" entries flip to their
-  // true current status.
-  onBulkRefresh?: (jobIds: string[]) => Promise<void>;
-  // Per-row refresh — when provided, every row gets a small refresh icon
-  // that re-fetches just that one job. Lets the user un-stick a single
-  // row without re-syncing the whole board, and reports the new status
-  // back via the returned string so we can flash it as feedback.
-  onRefreshJob?: (jobNumber: string) => Promise<{ status?: string } | null | void>;
+  // The big one. Pulls fresh Deco status for the supplied job numbers,
+  // updates local cache + AWAITS cloud save, and reports what's now
+  // shipped or cancelled so the caller can show feedback. Awaiting the
+  // cloud save is the critical bit — without it, a follow-up sync would
+  // read stale cloud data and resurrect rows we just cleared.
+  onClearCompleted?: (jobNumbers: string[]) => Promise<{
+    checked: number;
+    shipped: number;
+    cancelled: number;
+    failed: number;
+  }>;
   lastSyncTime?: number | null;
   loading?: boolean;
 }
@@ -257,7 +253,7 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
 
 /* ---------- Main component ---------- */
 
-export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onBulkRefresh, onRefreshJob, lastSyncTime, loading }: Props) {
+export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onClearCompleted, lastSyncTime, loading }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
@@ -297,38 +293,58 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     }),
   [allJobs]);
 
-  // Local "bulk refreshing" state so the spinner stays on for the duration
-  // of (regular sync + targeted bulk refresh) rather than flipping off as
-  // soon as the cheaper part finishes.
+  // Local working state — separates "general sync" from "clear completed"
+  // so each button shows its own spinner + status without confusion.
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  // Banner shown briefly after a clear-completed run so the user can see
+  // exactly what happened (X checked, Y removed). Auto-dismisses.
+  const [clearResult, setClearResult] = useState<{
+    checked: number; shipped: number; cancelled: number; failed: number;
+  } | null>(null);
 
-  // Sync handler: run the regular cross-app sync, then bulk-refresh just
-  // the IDs currently visible on this board so older-than-window jobs
-  // (which the standard 120-day fetch never touches) get their statuses
-  // brought up to date. We capture the IDs BEFORE the sync — that's the
-  // set the user is currently looking at and expects to see updated.
-  //
-  // We pass jobNumber (the human-readable order number, e.g. "221964")
-  // rather than `id` (Deco's internal order_id). Deco's direct-lookup
-  // strategy (field=1, condition=1, string=<value>) reliably matches on
-  // order_number; passing the internal id can miss for older orders
-  // depending on the tenant's indexing.
+  // Plain sync — same as the dashboard's quick sync. Useful for picking
+  // up brand-new orders or recent status changes. Doesn't touch old jobs
+  // outside the 120-day window.
   const handleSyncNow = async () => {
     if (!onRefresh) return;
-    const visibleIds = active.map(j => j.jobNumber || j.id).filter(Boolean);
     setBulkRefreshing(true);
+    try { await onRefresh(); }
+    finally { setBulkRefreshing(false); }
+  };
+
+  // The button users actually want for the "stuck old jobs" problem.
+  //
+  // Walks every job currently rendered on the board, asks Deco for the
+  // CURRENT status of each (via direct ID lookup — no date gate, so even
+  // year-old orders are reachable), updates local state, and AWAITS the
+  // cloud save so a follow-up sync from this or any other device can't
+  // resurrect cleared rows by reading stale cloud data on its way in.
+  //
+  // We pass jobNumber (the human-readable order number, e.g. "221964")
+  // rather than `id` (Deco's internal order_id) because Deco's
+  // direct-lookup matches reliably on order_number for any tenant.
+  const handleClearCompleted = async () => {
+    if (!onClearCompleted || clearing) return;
+    const visibleNums = active.map(j => j.jobNumber || j.id).filter(Boolean);
+    if (visibleNums.length === 0) return;
+    // Cap the burst — protects the Deco API on dashboards with very long
+    // historical tails. 250 is enough for any realistic Priority Board.
+    const capped = visibleNums.slice(0, 250);
+    setClearing(true);
+    setClearResult(null);
     try {
-      await onRefresh();
-      if (onBulkRefresh && visibleIds.length > 0) {
-        // Cap the burst so a board with thousands of historical entries
-        // doesn't spawn a giant Deco call. 250 covers practically every
-        // realistic Priority Board view; older entries will still get
-        // refreshed on subsequent syncs as they bubble up.
-        const capped = visibleIds.slice(0, 250);
-        await onBulkRefresh(capped);
-      }
+      const result = await onClearCompleted(capped);
+      setClearResult(result);
+      // Auto-dismiss banner after 8s — long enough to read, short enough
+      // to clear out before the next user action.
+      window.setTimeout(() => setClearResult(null), 8000);
+    } catch (e) {
+      console.error('[PriorityBoard] Clear completed failed:', e);
+      setClearResult({ checked: 0, shipped: 0, cancelled: 0, failed: capped.length });
+      window.setTimeout(() => setClearResult(null), 8000);
     } finally {
-      setBulkRefreshing(false);
+      setClearing(false);
     }
   };
 
@@ -376,13 +392,47 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
               {totalOrders} order{s(totalOrders)} &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
             </p>
           </div>
-          {onRefresh && (
-            <FreshnessControl
-              lastSyncTime={lastSyncTime ?? null}
-              loading={!!loading || bulkRefreshing}
-              onRefresh={handleSyncNow}
-            />
-          )}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {onClearCompleted && (
+              <button
+                type="button"
+                onClick={handleClearCompleted}
+                disabled={clearing || bulkRefreshing || loading}
+                title="Re-check every visible job's status against Deco. Anything now shipped or cancelled is removed and the change is saved to the cloud so it doesn't come back on the next sync."
+                className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-500/40 disabled:cursor-not-allowed text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={`w-3.5 h-3.5 ${clearing ? 'animate-spin' : ''}`}
+                >
+                  {clearing ? (
+                    <>
+                      <path d="M3 12a9 9 0 1 0 3-6.7" />
+                      <path d="M3 4v5h5" />
+                    </>
+                  ) : (
+                    <>
+                      <polyline points="20 6 9 17 4 12" />
+                    </>
+                  )}
+                </svg>
+                {clearing ? 'Clearing…' : 'Remove Completed'}
+              </button>
+            )}
+            {onRefresh && (
+              <FreshnessControl
+                lastSyncTime={lastSyncTime ?? null}
+                loading={!!loading || bulkRefreshing}
+                onRefresh={handleSyncNow}
+              />
+            )}
+          </div>
         </div>
         <div className="mt-4 flex gap-3 flex-wrap">
           {(['critical', 'high', 'medium', 'low'] as Urgency[]).map(u => {
@@ -400,6 +450,33 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
         </div>
       </div>
 
+      {/* Clear-completed result banner. Auto-dismisses after 8s. */}
+      {clearResult && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${
+          clearResult.failed > 0
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+            : (clearResult.shipped + clearResult.cancelled) > 0
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+              : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
+        }`}>
+          {clearResult.failed > 0 ? (
+            <>Couldn&apos;t reach Deco for {clearResult.failed} job{clearResult.failed === 1 ? '' : 's'}. Try again in a moment.</>
+          ) : (clearResult.shipped + clearResult.cancelled) > 0 ? (
+            <>
+              Cleared <span className="font-bold">{clearResult.shipped + clearResult.cancelled}</span>{' '}
+              completed job{(clearResult.shipped + clearResult.cancelled) === 1 ? '' : 's'} from {clearResult.checked} checked
+              {' — '}
+              {clearResult.shipped > 0 && <>{clearResult.shipped} shipped</>}
+              {clearResult.shipped > 0 && clearResult.cancelled > 0 && ', '}
+              {clearResult.cancelled > 0 && <>{clearResult.cancelled} cancelled</>}.
+              <span className="text-white/50"> Saved to cloud — won&apos;t come back on next sync.</span>
+            </>
+          ) : (
+            <>Re-checked {clearResult.checked} job{clearResult.checked === 1 ? '' : 's'}. Nothing&apos;s flipped to shipped or cancelled in Deco yet.</>
+          )}
+        </div>
+      )}
+
       {/* Status sections */}
       {sections.map(sec => (
         <SectionCard
@@ -409,7 +486,6 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           expanded={expandedSection === sec.key}
           onToggle={() => toggleSection(sec.key)}
           onNavigate={onNavigateToOrder}
-          onRefreshJob={onRefreshJob}
           now={now}
           readyAtMap={readyAtMap}
         />
@@ -469,70 +545,9 @@ interface SectionCardProps {
   expanded: boolean;
   onToggle: () => void;
   onNavigate: (orderNum: string) => void;
-  onRefreshJob?: (jobNumber: string) => Promise<{ status?: string } | null | void>;
   now: Date;
   readyAtMap: ReadyAtMap;
 }
-
-/**
- * Small per-row refresh button. Click it and we re-fetch just that one
- * job from Deco (no date gate, direct ID lookup) and surface the new
- * status as a 1.6s flash so the user can confirm the row has been
- * un-stuck. Stops click propagation so it doesn't also trigger the
- * row-level "navigate to order" handler.
- */
-const RowRefreshButton: React.FC<{
-  jobNumber: string;
-  onRefreshJob: (jobNumber: string) => Promise<{ status?: string } | null | void>;
-}> = ({ jobNumber, onRefreshJob }) => {
-  const [busy, setBusy] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
-
-  const handleClick = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    try {
-      const res = await onRefreshJob(jobNumber);
-      const status = res && typeof res === 'object' && 'status' in res ? (res.status as string | undefined) : undefined;
-      setFlash(status || 'Refreshed');
-      window.setTimeout(() => setFlash(null), 1600);
-    } catch {
-      setFlash('Failed');
-      window.setTimeout(() => setFlash(null), 1600);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      title={flash ? `New status: ${flash}` : `Refresh #${jobNumber} from Deco`}
-      className={`p-1 rounded transition-colors ${
-        flash
-          ? 'text-emerald-300 bg-emerald-500/10'
-          : 'text-white/30 hover:text-indigo-300 hover:bg-white/10'
-      } disabled:opacity-50 disabled:cursor-wait`}
-    >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={`w-3 h-3 ${busy ? 'animate-spin' : ''}`}
-      >
-        <path d="M3 12a9 9 0 1 0 3-6.7" />
-        <path d="M3 4v5h5" />
-      </svg>
-    </button>
-  );
-};
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
   rose:   { header: 'text-rose-300',   border: 'border-rose-500/20',   badge: 'bg-rose-500/10 text-rose-400' },
@@ -544,7 +559,7 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefreshJob, now, readyAtMap }: SectionCardProps) {
+function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap }: SectionCardProps) {
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
@@ -622,7 +637,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefr
             <div className="px-5 py-6 text-center text-white/30 text-xs">No orders in this category{filterHint ? ' for this filter' : ''}.</div>
           ) : (
             <>
-              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px_28px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
+              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
                 <span>#</span>
                 <span>Order / Date</span>
                 <span>Customer / Job</span>
@@ -631,7 +646,6 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefr
                 <span>Reason</span>
                 <span>Staff</span>
                 <span className="text-right">Value</span>
-                <span />
               </div>
               <div className="divide-y divide-white/[0.03]">
                 {items.map((item, i) => {
@@ -643,7 +657,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefr
                   return (
                     <div
                       key={item.job.id}
-                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px_28px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
+                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
                       onClick={() => onNavigate(item.job.jobNumber)}
                     >
                       <span className="text-[10px] text-white/20 font-mono">{i + 1}</span>
@@ -664,11 +678,6 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, onRefr
                       </div>
                       <span className="text-[10px] text-white/40 truncate">{staff}</span>
                       <span className="text-[10px] text-white/30 text-right">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
-                      <div className="flex items-center justify-center">
-                        {onRefreshJob ? (
-                          <RowRefreshButton jobNumber={item.job.jobNumber} onRefreshJob={onRefreshJob} />
-                        ) : null}
-                      </div>
                     </div>
                   );
                 })}

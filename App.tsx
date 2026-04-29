@@ -1829,35 +1829,71 @@ const App: React.FC = () => {
       return null;
   };
 
-  // Bulk-refresh a specific set of Deco job IDs.
+  // Re-check the supplied job numbers against Deco and surface what's now
+  // shipped / cancelled, persisting the refreshed status to BOTH local
+  // cache and cloud before resolving.
   //
-  // The standard sync (fetchDecoJobs) is gated to a 120-day window — orders
-  // older than that never get their status refreshed by a regular sync. That
-  // leaves jobs from older orders permanently stuck on whatever status they
-  // had the last time they were inside the window (e.g. an order from 14
-  // months ago dispatched yesterday in Deco still shows "Awaiting Shipping"
-  // here forever). This helper exists so callers like the Priority Board
-  // can explicitly refresh the IDs they're rendering — which is exactly the
-  // set the user is staring at and most cares about being current.
-  const refreshDecoJobsByIds = useCallback(async (jobIds: string[]) => {
-      if (!apiSettings.useLiveData) return;
-      const unique = Array.from(new Set(jobIds.filter(Boolean)));
-      if (unique.length === 0) return;
+  // Why this exists: the standard sync (fetchDecoJobs) is gated to a
+  // 120-day date window. Orders placed before that — even if dispatched
+  // yesterday — never get their status refreshed by a normal sync, so
+  // they stay stuck on whatever status they had the last time they were
+  // inside the window. The Priority Board needs a way to walk every
+  // visible row, ask Deco "what's the real status now?", and have that
+  // answer durable enough that a follow-up sync won't undo it.
+  //
+  // The cloud save is AWAITED, not fire-and-forget. Earlier versions of
+  // this code returned the moment local state was updated, but a click
+  // of "Sync now" immediately afterwards would read stale cloud data
+  // and resurrect the cleared rows. Awaiting closes that race.
+  const clearCompletedDecoJobs = useCallback(async (jobNumbers: string[]) => {
+      const result = { checked: 0, shipped: 0, cancelled: 0, failed: 0 };
+      if (!apiSettings.useLiveData) return result;
+      const unique = Array.from(new Set(jobNumbers.filter(Boolean)));
+      if (unique.length === 0) return result;
+      result.checked = unique.length;
+
+      let refreshed: DecoJob[] = [];
       try {
-          const refreshed = await fetchBulkDecoJobs(apiSettings, unique);
-          if (refreshed.length === 0) return;
-          setRawDecoJobs(prev => {
-              const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-              for (const j of refreshed) jobMap.set(j.jobNumber, j);
-              const next = Array.from(jobMap.values());
-              setLocalItem('stash_raw_deco_jobs', next).catch(console.error);
-              return next;
-          });
-          // Push to cloud so other devices pick up the corrected statuses too.
-          saveCloudDecoJobs(apiSettings, refreshed).catch(e => console.warn('Failed to save bulk-refreshed jobs to cloud:', e));
+          refreshed = await fetchBulkDecoJobs(apiSettings, unique);
       } catch (e: any) {
-          console.warn('[refreshDecoJobsByIds] bulk fetch failed:', e?.message || e);
+          console.warn('[clearCompletedDecoJobs] bulk fetch failed:', e?.message || e);
+          result.failed = unique.length;
+          return result;
       }
+
+      if (refreshed.length === 0) {
+          result.failed = unique.length;
+          return result;
+      }
+      result.failed = unique.length - refreshed.length;
+
+      for (const j of refreshed) {
+          const st = (j.status || '').toLowerCase();
+          if (st === 'shipped') result.shipped += 1;
+          // Cancelled is signalled by either status text or paymentStatus = '7'.
+          else if (st === 'cancelled' || j.paymentStatus === '7') result.cancelled += 1;
+      }
+
+      setRawDecoJobs(prev => {
+          const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+          for (const j of refreshed) jobMap.set(j.jobNumber, j);
+          const next = Array.from(jobMap.values());
+          setLocalItem('stash_raw_deco_jobs', next).catch(console.error);
+          return next;
+      });
+
+      // CRITICAL: await the cloud save. Without this, the next loadData()
+      // can race ahead and read stale cloud data, undoing the clear.
+      try {
+          await saveCloudDecoJobs(apiSettings, refreshed);
+      } catch (e: any) {
+          console.warn('[clearCompletedDecoJobs] cloud save failed:', e?.message || e);
+          // Local state still updated; just warn the caller they may
+          // see ghosts again on next sync until cloud catches up.
+          result.failed = Math.max(result.failed, 1);
+      }
+
+      return result;
   }, [apiSettings]);
 
   const handleBulkStatusSync = async () => {
@@ -3398,11 +3434,7 @@ const App: React.FC = () => {
                     decoJobs={rawDecoJobs}
                     onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
                     onRefresh={() => loadData(false)}
-                    onBulkRefresh={refreshDecoJobsByIds}
-                    onRefreshJob={async (jobNum) => {
-                      const job = await handleRefreshJob(jobNum);
-                      return job ? { status: job.status } : null;
-                    }}
+                    onClearCompleted={clearCompletedDecoJobs}
                     lastSyncTime={lastSyncTime}
                     loading={loading}
                   />
