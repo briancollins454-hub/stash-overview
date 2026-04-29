@@ -1845,7 +1845,10 @@ const App: React.FC = () => {
   // this code returned the moment local state was updated, but a click
   // of "Sync now" immediately afterwards would read stale cloud data
   // and resurrect the cleared rows. Awaiting closes that race.
-  const clearCompletedDecoJobs = useCallback(async (jobNumbers: string[]) => {
+  const clearCompletedDecoJobs = useCallback(async (
+      jobNumbers: string[],
+      onProgress?: (current: number, total: number) => void,
+  ) => {
       const result = { checked: 0, shipped: 0, cancelled: 0, failed: 0 };
       if (!apiSettings.useLiveData) return result;
       const unique = Array.from(new Set(jobNumbers.filter(Boolean)));
@@ -1854,7 +1857,7 @@ const App: React.FC = () => {
 
       let refreshed: DecoJob[] = [];
       try {
-          refreshed = await fetchBulkDecoJobs(apiSettings, unique);
+          refreshed = await fetchBulkDecoJobs(apiSettings, unique, onProgress);
       } catch (e: any) {
           console.warn('[clearCompletedDecoJobs] bulk fetch failed:', e?.message || e);
           result.failed = unique.length;

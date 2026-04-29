@@ -695,27 +695,59 @@ export const searchDecoByName = async (settings: ApiSettings, name: string): Pro
 };
 
 // Bulk fetch multiple Deco jobs by ID in a single server call
-export const fetchBulkDecoJobs = async (settings: ApiSettings, jobIds: string[]): Promise<DecoJob[]> => {
+export const fetchBulkDecoJobs = async (
+    settings: ApiSettings,
+    jobIds: string[],
+    onProgress?: (current: number, total: number) => void,
+): Promise<DecoJob[]> => {
     if (!settings.useLiveData || jobIds.length === 0) return [];
-    try {
-        const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds });
-        const json = await res.json();
-        const results = json.results || [];
-        return results.filter((r: any) => r.order).map((r: any) => {
-            const job = r.order;
-            const items = parseDecoItems(job);
-            return buildDecoJob(job, items);
-        });
-    } catch (e: any) {
-        console.error('Bulk Deco fetch failed, falling back to individual:', e.message);
-        // Fallback to individual fetches
-        const results: DecoJob[] = [];
-        for (const id of jobIds) {
-            const job = await fetchSingleDecoJob(settings, id);
-            if (job) results.push(job);
-        }
-        return results;
+
+    // The /api/deco bulk action caps at 60 IDs per request to keep each
+    // call well inside Vercel's 60s budget. Chunk here so callers don't
+    // have to know about the cap and we stay reliable on big boards.
+    const CHUNK = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < jobIds.length; i += CHUNK) {
+        chunks.push(jobIds.slice(i, i + CHUNK));
     }
+
+    const fetchOneChunk = async (chunk: string[]): Promise<DecoJob[]> => {
+        try {
+            const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds: chunk });
+            const json = await res.json();
+            const results = json.results || [];
+            return results.filter((r: any) => r.order).map((r: any) => {
+                const job = r.order;
+                const items = parseDecoItems(job);
+                return buildDecoJob(job, items);
+            });
+        } catch (e: any) {
+            console.warn(`[fetchBulkDecoJobs] chunk of ${chunk.length} failed (${e.message}); falling back to per-ID with concurrency`);
+            // Per-ID fallback runs WITH concurrency rather than a sequential
+            // for-loop. The old code was looping `for (const id of jobIds)` and
+            // awaiting each fetchSingleDecoJob — for 150 ids that's a 5+
+            // minute serial nightmare. Concurrency 4 gets us through ~50 ids
+            // in roughly 15s without burying the Deco API.
+            const PER_ID_CONCURRENCY = 4;
+            const out: DecoJob[] = [];
+            for (let i = 0; i < chunk.length; i += PER_ID_CONCURRENCY) {
+                const slice = chunk.slice(i, i + PER_ID_CONCURRENCY);
+                const settled = await Promise.allSettled(slice.map(id => fetchSingleDecoJob(settings, id)));
+                settled.forEach(r => { if (r.status === 'fulfilled' && r.value) out.push(r.value); });
+            }
+            return out;
+        }
+    };
+
+    const all: DecoJob[] = [];
+    let done = 0;
+    for (const chunk of chunks) {
+        const part = await fetchOneChunk(chunk);
+        all.push(...part);
+        done += chunk.length;
+        if (onProgress) onProgress(done, jobIds.length);
+    }
+    return all;
 };
 
 export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: string): Promise<ShopifyOrder | null> => {

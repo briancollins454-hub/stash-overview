@@ -404,21 +404,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   //
   // Two-pass strategy so we catch BOTH recent and very-old orders:
   //   Pass 1 — `fetchOrdersByIds` does a parallel date-window scan
-  //            (last 200 days). One network burst, finds the bulk of
-  //            anything reasonably recent in a couple of seconds.
-  //   Pass 2 — Any IDs the scan didn't find fall through to a direct
-  //            per-ID lookup (`fetchOrderById`, no date gate). Catches
+  //            (last 200 days). One network burst, finds anything
+  //            reasonably recent in a couple of seconds.
+  //   Pass 2 — IDs Pass 1 didn't find drop to a focused direct lookup
+  //            (`fetchOrderByIdFast`, only the proven field=1+cond=1
+  //            strategy, ~1 call per ID). No date gate, catches
   //            12-month+ old orders that fall outside Pass 1's window.
   //
-  // Without Pass 2, status updates for old orders never propagate —
-  // e.g. a job placed Apr 2025, dispatched Apr 2026, would stay stuck
-  // on its 2025 status in the local cache forever because every fetch
-  // path was date-gated. The Priority Board's "Sync now" relies on this
-  // path picking up status changes for whatever the user is currently
-  // looking at, regardless of how old the order is.
+  // Pass 2 is deliberately leaner than the multi-strategy fetchOrderById:
+  // for the priority-board "what's the current status of these specific
+  // jobs" use case, we only need order_id matching. Trying all 5
+  // strategies for every missing ID was blowing Vercel's 60s budget on
+  // boards with ~150+ stuck rows and producing 504s.
+  //
+  // Hard cap of 60 IDs per request — caller is expected to chunk. With
+  // 60 misses worst-case at concurrency 8 → ~8 batches × ~1.5s ≈ 12s,
+  // safely inside budget even with one slow request.
   if (action === 'bulk' && Array.isArray(jobIds)) {
     try {
-      const firstPass = await fetchOrdersByIds(jobIds, false);
+      const MAX_IDS = 60;
+      const trimmed = jobIds.slice(0, MAX_IDS);
+      if (jobIds.length > MAX_IDS) {
+        console.log(`[Deco API] Bulk truncated ${jobIds.length} → ${MAX_IDS} (caller should chunk)`);
+      }
+
+      const firstPass = await fetchOrdersByIds(trimmed, false);
       const missing = firstPass.filter(r => !r.order).map(r => r.jobId);
 
       if (missing.length === 0) {
@@ -427,16 +437,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       console.log(`[Deco API] Bulk pass-1 found ${firstPass.length - missing.length}/${firstPass.length}; ${missing.length} need direct lookup`);
 
-      // Run direct lookups in parallel batches. Concurrency 5 keeps us
-      // well under the per-IP throttle while still finishing 100 misses
-      // in roughly 20s, which fits comfortably in Vercel's 60s budget.
-      const CONCURRENCY = 5;
+      // Lean direct-lookup variant — single strategy (field=1, condition=1,
+      // string=<id>) with a 5s per-call timeout. No fall-through chain.
+      const fastDirect = async (orderId: string): Promise<any | null> => {
+        try {
+          const qp = new URLSearchParams({
+            username, password,
+            field: '1', condition: '1',
+            string: orderId.trim(), criteria: orderId.trim(), limit: '5',
+            include_workflow_data: '1', skip_login_token: '1',
+          });
+          const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+          const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+          const text = await resp.text();
+          if (text.startsWith('<')) return null;
+          const data = JSON.parse(text);
+          const orders = data.orders || [];
+          if (orders.length === 0) return null;
+          return orders.find((o: any) => orderMatchesId(o, orderId.trim())) || null;
+        } catch {
+          return null;
+        }
+      };
+
+      const CONCURRENCY = 8;
       const directHits = new Map<string, any>();
       for (let i = 0; i < missing.length; i += CONCURRENCY) {
         const slice = missing.slice(i, i + CONCURRENCY);
-        const settled = await Promise.allSettled(
-          slice.map(id => fetchOrderById(id, false))
-        );
+        const settled = await Promise.allSettled(slice.map(id => fastDirect(id)));
         settled.forEach((r, idx) => {
           if (r.status === 'fulfilled' && r.value) directHits.set(slice[idx], r.value);
         });
@@ -446,7 +474,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         r.order ? r : { jobId: r.jobId, order: directHits.get(r.jobId) || null }
       );
       const finalFound = results.filter(r => r.order).length;
-      console.log(`[Deco API] Bulk total: ${finalFound}/${results.length} (pass-1 + direct fallback)`);
+      console.log(`[Deco API] Bulk total: ${finalFound}/${results.length} (pass-1 + fast-direct fallback)`);
 
       return res.status(200).json({ results });
     } catch (error: any) {

@@ -19,7 +19,14 @@ interface Props {
   // shipped or cancelled so the caller can show feedback. Awaiting the
   // cloud save is the critical bit — without it, a follow-up sync would
   // read stale cloud data and resurrect rows we just cleared.
-  onClearCompleted?: (jobNumbers: string[]) => Promise<{
+  //
+  // Optional progress callback fires after each chunk so the UI can show
+  // "Checked 50 / 150" rather than a blind spinner that looks frozen on
+  // long boards.
+  onClearCompleted?: (
+    jobNumbers: string[],
+    onProgress?: (current: number, total: number) => void,
+  ) => Promise<{
     checked: number;
     shipped: number;
     cancelled: number;
@@ -297,6 +304,10 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   // so each button shows its own spinner + status without confusion.
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // Live progress while clearing — { current, total } where current is
+  // the number of IDs Deco has answered for so far. Lets the button show
+  // "Clearing 50 / 150" rather than a blind spinner.
+  const [clearProgress, setClearProgress] = useState<{ current: number; total: number } | null>(null);
   // Banner shown briefly after a clear-completed run so the user can see
   // exactly what happened (X checked, Y removed). Auto-dismisses.
   const [clearResult, setClearResult] = useState<{
@@ -333,8 +344,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     const capped = visibleNums.slice(0, 250);
     setClearing(true);
     setClearResult(null);
+    setClearProgress({ current: 0, total: capped.length });
     try {
-      const result = await onClearCompleted(capped);
+      const result = await onClearCompleted(capped, (current, total) => {
+        setClearProgress({ current, total });
+      });
       setClearResult(result);
       // Auto-dismiss banner after 8s — long enough to read, short enough
       // to clear out before the next user action.
@@ -345,6 +359,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       window.setTimeout(() => setClearResult(null), 8000);
     } finally {
       setClearing(false);
+      setClearProgress(null);
     }
   };
 
@@ -422,7 +437,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                     </>
                   )}
                 </svg>
-                {clearing ? 'Clearing…' : 'Remove Completed'}
+                {clearing
+                  ? clearProgress
+                    ? `Clearing ${clearProgress.current}/${clearProgress.total}…`
+                    : 'Clearing…'
+                  : 'Remove Completed'}
               </button>
             )}
             {onRefresh && (
