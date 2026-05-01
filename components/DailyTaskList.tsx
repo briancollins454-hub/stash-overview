@@ -68,6 +68,32 @@ function tabForTask(row: DailyTaskRow): string {
   return TAB_FOR_SOURCE[row.source_page] || 'dashboard';
 }
 
+function errStatus(e: unknown): number | undefined {
+  if (e && typeof e === 'object' && 'status' in e && typeof (e as { status: unknown }).status === 'number') {
+    return (e as { status: number }).status;
+  }
+  return undefined;
+}
+
+/** PostgREST 404 / PGRST205 when `stash_daily_tasks` was never migrated. */
+function isDailyTasksTableMissing(e: unknown): boolean {
+  const st = errStatus(e);
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    st === 404
+    || msg.includes('schema cache')
+    || msg.includes('stash_daily_tasks')
+    || msg.includes('pgrst205')
+  );
+}
+
+function friendlyDailyTasksError(e: unknown): string {
+  if (isDailyTasksTableMissing(e)) {
+    return 'Daily tasks need the Supabase table `stash_daily_tasks`. In the Supabase dashboard → SQL Editor, run `migrations/stash_daily_tasks.sql` from the Stash repo on this project, then reload.';
+  }
+  return e instanceof Error ? e.message : 'Couldn\'t load tasks';
+}
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 const DailyTaskList: React.FC<Props> = ({
@@ -89,7 +115,8 @@ const DailyTaskList: React.FC<Props> = ({
 
   const load = useCallback(async () => {
     if (!isSupabaseReady()) {
-      setError('Supabase isn\'t configured.');
+      setError('Supabase isn\'t configured yet — wait a moment and use refresh, or check API keys in settings.');
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -101,15 +128,28 @@ const DailyTaskList: React.FC<Props> = ({
       );
       const data: DailyTaskRow[] = await res.json();
       setRows(Array.isArray(data) ? data : []);
-    } catch (e: any) {
-      setError(e?.message || 'Couldn\'t load tasks');
+    } catch (e: unknown) {
+      setError(friendlyDailyTasksError(e));
       setRows([]);
     } finally {
       setLoading(false);
     }
   }, [taskDate]);
 
-  useEffect(() => { load(); }, [load]);
+  /** Load when the date changes; retry once Supabase is initialised (config can load after first paint). */
+  useEffect(() => {
+    if (isSupabaseReady()) {
+      load();
+      return;
+    }
+    const t = window.setInterval(() => {
+      if (isSupabaseReady()) {
+        window.clearInterval(t);
+        load();
+      }
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [load]);
 
   const nextSortOrder = useMemo(() => {
     if (rows.length === 0) return 0;
@@ -203,13 +243,16 @@ const DailyTaskList: React.FC<Props> = ({
     try {
       let order = nextSortOrder;
       let imported = 0;
+      let postAttempts = 0;
+      let firstError: unknown = null;
 
       const post = async (payload: Record<string, unknown>) => {
+        postAttempts++;
         try {
           await supabaseFetch('stash_daily_tasks', 'POST', payload);
           imported++;
-        } catch {
-          /* duplicate key / RLS */
+        } catch (e: unknown) {
+          if (!firstError) firstError = e;
         }
       };
 
@@ -258,6 +301,16 @@ const DailyTaskList: React.FC<Props> = ({
       }
 
       await load();
+      if (imported === 0 && postAttempts > 0 && isDailyTasksTableMissing(firstError)) {
+        alert(friendlyDailyTasksError(firstError));
+        return;
+      }
+      if (imported === 0 && postAttempts > 0 && firstError) {
+        alert(
+          `Could not save tasks: ${firstError instanceof Error ? firstError.message : String(firstError)}`,
+        );
+        return;
+      }
       if (imported === 0) {
         alert(
           suggestions.length === 0
