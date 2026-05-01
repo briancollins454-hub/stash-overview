@@ -3374,7 +3374,7 @@ const App: React.FC = () => {
                 <ErrorBoundary fallbackTitle="Daily Tasks Error">
                   <DailyTaskList
                     decoJobs={rawDecoJobs}
-                    currentUser={{ id: user?.id ?? null, email: user?.email ?? null }}
+                    currentUser={{ id: user?.uid ?? null, email: user?.email ?? null }}
                     onNavigateTab={setActiveTab}
                     onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
                   />

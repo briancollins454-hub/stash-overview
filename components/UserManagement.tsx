@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock, ToggleLeft, ToggleRight } from 'lucide-react';
+import { APP_TAB_DEFINITIONS, APP_TAB_IDS, getDefaultTabsForRole } from '../constants/tabPermissions';
 import SeniorManagementAccess from './SeniorManagementAccess';
 
 export interface AppUser {
@@ -37,48 +38,14 @@ const ROLES = [
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
 ];
 
-// Keep this list in lock-step with the validTabs list in App.tsx and with
-// DEFAULT_TABS on the server (api/users.ts). If you add a tab to one, add
-// it here too so admins can grant/revoke access per user.
-// Intentionally omitted: 'guide' (one-time setup wizard) and 'widget' (the
-// embedded Shopify Admin block — auto-activated, never user-facing).
-const ALL_TABS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'briefing', label: 'Briefing' },
-  { id: 'command', label: 'Live' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'kanban', label: 'Kanban' },
-  { id: 'intelligence', label: 'Intel' },
-  { id: 'production', label: 'Production' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'operations', label: 'Ops' },
-  { id: 'stock', label: 'Stock' },
-  { id: 'inventory', label: 'Inventory' },
-  { id: 'efficiency', label: 'Efficiency' },
-  { id: 'mto', label: 'MTO' },
-  { id: 'deco', label: 'Deco' },
-  { id: 'revenue', label: 'Revenue' },
-  { id: 'sales', label: 'Sales' },
-  { id: 'shipped-not-invoiced', label: 'Unbilled' },
-  { id: 'credit-block', label: 'Credit Block' },
-  { id: 'digest', label: 'Digest' },
-  { id: 'autolink', label: 'Linker' },
-  { id: 'fulfill', label: 'Fulfill' },
-  { id: 'analyst', label: 'Analyst' },
-  { id: 'finance', label: 'Finance' },
-  { id: 'users', label: 'Users' },
-  { id: 'cloud-health', label: 'Cloud Health' },
-  { id: 'manual', label: 'Manual' },
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'settings', label: 'Settings' },
-];
+/** Tab labels + ids — single source: `constants/tabPermissions.ts` (sync with App.tsx `validTabs`). */
+const ALL_TABS = APP_TAB_DEFINITIONS;
 
-const DEFAULT_TABS: Record<string, string[]> = {
-  superuser: ALL_TABS.map(t => t.id),
-  admin: ALL_TABS.filter(t => t.id !== 'settings').map(t => t.id),
-  manager: ['dashboard','briefing','command','priority','kanban','production','operations','stock','inventory','mto','deco','fulfill','manual'],
-  viewer: ['dashboard','reports','revenue'],
-};
+function sanitizeAllowedTabs(tabs: string[] | undefined): string[] {
+  if (!tabs?.length) return [];
+  const allowed = new Set(APP_TAB_IDS);
+  return tabs.filter(id => allowed.has(id));
+}
 
 function getRoleMeta(role: string) {
   return ROLES.find(r => r.value === role) || ROLES[3];
@@ -109,7 +76,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('viewer');
-  const [allowedTabs, setAllowedTabs] = useState<string[]>(DEFAULT_TABS.viewer);
+  const [allowedTabs, setAllowedTabs] = useState<string[]>(() => getDefaultTabsForRole('viewer'));
 
   // Build auth params to pass to every API call
   const authParams = token ? { token } : firebaseIdToken ? { firebaseIdToken } : {};
@@ -135,7 +102,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
     setUsername('');
     setPassword('');
     setRole('viewer');
-    setAllowedTabs(DEFAULT_TABS.viewer);
+    setAllowedTabs(getDefaultTabsForRole('viewer'));
     setShowAddForm(false);
     setEditingUser(null);
   };
@@ -209,7 +176,8 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
     setUsername(user.username);
     setPassword('');
     setRole(user.role);
-    setAllowedTabs(user.allowed_tabs || DEFAULT_TABS[user.role] || DEFAULT_TABS.viewer);
+    const cleaned = sanitizeAllowedTabs(user.allowed_tabs);
+    setAllowedTabs(cleaned.length ? cleaned : getDefaultTabsForRole(user.role));
     setShowAddForm(false);
   };
 
@@ -320,7 +288,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                       key={r.value}
                       type="button"
                       disabled={disabled}
-                      onClick={() => { setRole(r.value); setAllowedTabs(DEFAULT_TABS[r.value] || DEFAULT_TABS.viewer); }}
+                      onClick={() => { setRole(r.value); setAllowedTabs(getDefaultTabsForRole(r.value)); }}
                       className={`px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-all flex items-center gap-1.5 ${
                         role === r.value
                           ? `${r.bg} ${r.color} border-current`
@@ -358,9 +326,9 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                   })}
                 </div>
                 <div className="flex gap-2 mt-2">
-                  <button type="button" onClick={() => setAllowedTabs(ALL_TABS.map(t => t.id))} className="text-[8px] font-bold uppercase tracking-widest text-indigo-400 hover:text-indigo-300">Select All</button>
+                  <button type="button" onClick={() => setAllowedTabs([...APP_TAB_IDS])} className="text-[8px] font-bold uppercase tracking-widest text-indigo-400 hover:text-indigo-300">Select All</button>
                   <button type="button" onClick={() => setAllowedTabs([])} className="text-[8px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-400">Clear All</button>
-                  <button type="button" onClick={() => setAllowedTabs(DEFAULT_TABS[role] || DEFAULT_TABS.viewer)} className="text-[8px] font-bold uppercase tracking-widest text-amber-400 hover:text-amber-300">Reset to Default</button>
+                  <button type="button" onClick={() => setAllowedTabs(getDefaultTabsForRole(role))} className="text-[8px] font-bold uppercase tracking-widest text-amber-400 hover:text-amber-300">Reset to Default</button>
                 </div>
               </div>
             )}

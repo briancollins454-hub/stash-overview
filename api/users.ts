@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { APP_TAB_IDS, getDefaultTabsForRole } from '../constants/tabPermissions';
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
 
 // ─── Firebase Firestore Config ──────────────────────────────────────────────
@@ -79,22 +80,18 @@ function toFirestoreFields(data: Record<string, any>): Record<string, any> {
   return fields;
 }
 
-// Default tab access per role
-// Keep in sync with ALL_TABS in components/UserManagement.tsx and with
-// validTabs in App.tsx. When adding a new tab, add it here too so
-// freshly-created admin/superuser accounts get it by default.
-const DEFAULT_TABS: Record<string, string[]> = {
-  superuser: ['dashboard','briefing','command','priority','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','sales','shipped-not-invoiced','digest','autolink','fulfill','analyst','finance','users','cloud-health','manual','alerts','settings'],
-  admin: ['dashboard','briefing','command','priority','kanban','intelligence','production','reports','operations','stock','inventory','efficiency','mto','deco','revenue','sales','shipped-not-invoiced','digest','autolink','fulfill','analyst','finance','users','cloud-health','manual','alerts'],
-  manager: ['dashboard','briefing','command','priority','kanban','production','operations','stock','inventory','mto','deco','fulfill','manual'],
-  viewer: ['dashboard','reports','revenue'],
-};
+function sanitizeTabIds(tabs: string[]): string[] {
+  const ok = new Set(APP_TAB_IDS);
+  return tabs.filter(id => ok.has(id));
+}
 
 function fromFirestoreDoc(doc: any): FirestoreUser {
   const f = doc.fields || {};
   const name = (doc.name || '').split('/').pop() || '';
   const role = f.role?.stringValue || 'viewer';
   const tabValues = f.allowed_tabs?.arrayValue?.values;
+  const rawTabs = tabValues ? tabValues.map((v: any) => v.stringValue) : getDefaultTabsForRole(role);
+  const cleaned = sanitizeTabIds(rawTabs);
   return {
     id: name,
     first_name: f.first_name?.stringValue || '',
@@ -105,7 +102,7 @@ function fromFirestoreDoc(doc: any): FirestoreUser {
     is_active: f.is_active?.booleanValue !== false,
     created_at: f.created_at?.stringValue || '',
     created_by: f.created_by?.stringValue || '',
-    allowed_tabs: tabValues ? tabValues.map((v: any) => v.stringValue) : (DEFAULT_TABS[role] || DEFAULT_TABS.viewer),
+    allowed_tabs: cleaned.length ? cleaned : getDefaultTabsForRole(role),
   };
 }
 
@@ -330,7 +327,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(409).json({ error: 'Username already exists' });
         }
         const passwordHash = hashPassword(password);
-        const allowedTabs = Array.isArray(data.allowedTabs) ? data.allowedTabs : (DEFAULT_TABS[role] || DEFAULT_TABS.viewer);
+        const allowedTabsRaw = Array.isArray(data.allowedTabs) ? data.allowedTabs : getDefaultTabsForRole(role);
+        let allowedTabs = sanitizeTabIds(allowedTabsRaw);
+        if (allowedTabs.length === 0) allowedTabs = getDefaultTabsForRole(role);
         await firestoreCreate({
           first_name: firstName,
           last_name: lastName,
@@ -369,7 +368,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (caller.role !== 'superuser') {
             return res.status(403).json({ error: 'Only superusers can change tab permissions' });
           }
-          updates.allowed_tabs = allowedTabs;
+          const cleaned = sanitizeTabIds(allowedTabs);
+          if (cleaned.length === 0) {
+            return res.status(400).json({ error: 'Select at least one valid tab' });
+          }
+          updates.allowed_tabs = cleaned;
         }
 
         if (Object.keys(updates).length === 0) {
