@@ -1,6 +1,84 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { APP_TAB_IDS, getDefaultTabsForRole } from './lib/tabPermissions';
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
+
+// ─── Tab permissions (inline — keep in sync with `constants/tabPermissions.ts`) ───
+// Vercel serverless must not depend on extra modules under api/; bundling misses them.
+const APP_TAB_IDS: readonly string[] = [
+  'dashboard',
+  'briefing',
+  'daily-tasks',
+  'summary',
+  'command',
+  'priority',
+  'kanban',
+  'operations',
+  'fulfill',
+  'autolink',
+  'production',
+  'shop-floor',
+  'deco',
+  'mto',
+  'stock',
+  'inventory',
+  'wholesale',
+  'issues',
+  'intelligence',
+  'reports',
+  'efficiency',
+  'analyst',
+  'revenue',
+  'sales',
+  'finance',
+  'shipped-not-invoiced',
+  'credit-block',
+  'unpaid-orders',
+  'digest',
+  'users',
+  'cloud-health',
+  'manual',
+  'alerts',
+  'settings',
+];
+
+const MANAGER_TAB_IDS: readonly string[] = [
+  'dashboard',
+  'briefing',
+  'command',
+  'daily-tasks',
+  'summary',
+  'priority',
+  'kanban',
+  'operations',
+  'production',
+  'shop-floor',
+  'deco',
+  'mto',
+  'stock',
+  'inventory',
+  'wholesale',
+  'issues',
+  'fulfill',
+  'autolink',
+  'manual',
+  'alerts',
+];
+
+const VIEWER_TAB_IDS: readonly string[] = ['dashboard', 'briefing', 'summary', 'reports', 'revenue', 'sales'];
+
+function getDefaultTabsForRole(role: string): string[] {
+  switch (role) {
+    case 'superuser':
+      return [...APP_TAB_IDS];
+    case 'admin':
+      return APP_TAB_IDS.filter(id => id !== 'settings');
+    case 'manager':
+      return [...MANAGER_TAB_IDS];
+    case 'viewer':
+      return [...VIEWER_TAB_IDS];
+    default:
+      return [...VIEWER_TAB_IDS];
+  }
+}
 
 // ─── Firebase Firestore Config ──────────────────────────────────────────────
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'stash-shop-bridge';
@@ -81,7 +159,7 @@ function toFirestoreFields(data: Record<string, any>): Record<string, any> {
 }
 
 function sanitizeTabIds(tabs: string[]): string[] {
-  const ok = new Set(APP_TAB_IDS);
+  const ok = new Set<string>(APP_TAB_IDS);
   return tabs.filter(id => ok.has(id));
 }
 

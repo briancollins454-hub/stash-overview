@@ -38,7 +38,7 @@ const ROLES = [
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
 ];
 
-/** Tab labels + ids — single source: `api/lib/tabPermissions.ts` (re-exported from `constants/tabPermissions`). */
+/** Tab labels + ids — `constants/tabPermissions.ts` (server mirrors ids in `api/users.ts`). */
 const ALL_TABS = APP_TAB_DEFINITIONS;
 
 function sanitizeAllowedTabs(tabs: string[] | undefined): string[] {
