@@ -53,7 +53,8 @@ export function buildPriorityImportSuggestions(jobs: DecoJob[], limit = 20): Pri
     const sectionTitle = sec?.title || job.status || 'Priority';
     out.push({
       jobNumber: job.jobNumber,
-      title: `#${job.jobNumber} · ${job.customerName || 'Job'} — ${sectionTitle} (${pr.urgency})`,
+      // Short stored label; the daily list UI expands this from live Deco (status, dates, score).
+      title: `#${job.jobNumber} · ${job.customerName || 'Unknown customer'}`,
       sectionKey: sec?.key || 'other',
       sectionTitle,
       urgency: pr.urgency,
@@ -70,15 +71,15 @@ export const FINANCE_CHECKLIST_SUGGESTIONS: ReadonlyArray<{
   title: string;
   tab: string;
 }> = [
-  { source_page: 'finance_credit', source_ref: 'open_tab', title: 'Review: Credit block list', tab: 'credit-block' },
-  { source_page: 'finance_unpaid', source_ref: 'open_tab', title: 'Review: Unpaid orders', tab: 'unpaid-orders' },
-  { source_page: 'finance_sni', source_ref: 'open_tab', title: 'Review: Shipped not invoiced', tab: 'shipped-not-invoiced' },
+  { source_page: 'finance_credit', source_ref: 'open_tab', title: 'Finance: Credit block — review held accounts', tab: 'credit-block' },
+  { source_page: 'finance_unpaid', source_ref: 'open_tab', title: 'Finance: Unpaid orders — chase / allocate payments', tab: 'unpaid-orders' },
+  { source_page: 'finance_sni', source_ref: 'open_tab', title: 'Finance: Shipped not invoiced — raise missing invoices', tab: 'shipped-not-invoiced' },
 ];
 
 export const PRODUCTION_ISSUES_SUGGESTION = {
   source_page: 'production_issues',
   source_ref: 'open_tab',
-  title: 'Review: Production issue log (open items)',
+  title: 'Production: Issue log — work open issues (each has order / detail there)',
   tab: 'issues',
 } as const;
 

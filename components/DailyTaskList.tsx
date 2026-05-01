@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
+import { calculatePriority, URGENCY_STYLE, type Urgency } from '../services/priorityEngine';
 import {
   buildPriorityImportSuggestions,
   FINANCE_CHECKLIST_SUGGESTIONS,
@@ -56,12 +57,12 @@ const TAB_FOR_SOURCE: Record<string, string> = {
 };
 
 const SOURCE_LABEL: Record<string, string> = {
-  manual: 'Manual',
-  priority: 'Priority',
-  finance_sni: 'Finance',
-  finance_credit: 'Finance',
-  finance_unpaid: 'Finance',
-  production_issues: 'Issues',
+  manual: 'Your note',
+  priority: 'Deco job',
+  finance_sni: 'Finance · invoicing',
+  finance_credit: 'Finance · credit',
+  finance_unpaid: 'Finance · payment',
+  production_issues: 'Issue log',
 };
 
 function tabForTask(row: DailyTaskRow): string {
@@ -92,6 +93,128 @@ function friendlyDailyTasksError(e: unknown): string {
     return 'Daily tasks need the Supabase table `stash_daily_tasks`. In the Supabase dashboard → SQL Editor, run `migrations/stash_daily_tasks.sql` from the Stash repo on this project, then reload.';
   }
   return e instanceof Error ? e.message : 'Couldn\'t load tasks';
+}
+
+function fmtShortDate(iso?: string): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function fmtMoney(n?: number): string | null {
+  if (n == null || Number.isNaN(n)) return null;
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(n);
+  } catch {
+    return `£${Math.round(n)}`;
+  }
+}
+
+const FINANCE_HELP: Record<string, string> = {
+  finance_credit: 'Open Credit block — clear or adjust holds so jobs can move.',
+  finance_unpaid: 'Open Unpaid orders — chase payment or match receipts.',
+  finance_sni: 'Open Shipped not invoiced — raise invoices for dispatched work.',
+};
+
+function TaskRowContext({
+  row,
+  job,
+}: {
+  row: DailyTaskRow;
+  job: DecoJob | undefined;
+}) {
+  const now = new Date();
+
+  if (row.source_page === 'priority' && row.source_ref) {
+    if (job) {
+      const pr = calculatePriority(job, now);
+      const urgency = pr.urgency in URGENCY_STYLE ? pr.urgency as Urgency : 'low';
+      const st = URGENCY_STYLE[urgency];
+      const due = job.dateDue || job.productionDueDate;
+      const subtotal = fmtMoney(job.orderTotal ?? job.billableAmount);
+      return (
+        <div className="mt-2 space-y-2 border-t border-gray-100 dark:border-white/10 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:text-xs text-gray-600 dark:text-gray-400">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Customer</span>
+              <p className="font-medium text-gray-900 dark:text-gray-100">{job.customerName || '—'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Deco job #</span>
+              <p className="font-mono font-semibold text-gray-900 dark:text-gray-100">{job.jobNumber}</p>
+            </div>
+            {job.poNumber ? (
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">PO / reference</span>
+                <p className="font-mono text-gray-800 dark:text-gray-200">{job.poNumber}</p>
+              </div>
+            ) : null}
+            {job.jobName && job.jobName.trim() !== (job.customerName || '').trim() ? (
+              <div className="sm:col-span-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Job name</span>
+                <p className="text-gray-800 dark:text-gray-200">{job.jobName}</p>
+              </div>
+            ) : null}
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Production status</span>
+              <p className="text-gray-800 dark:text-gray-200">{job.status || '—'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Ship / due</span>
+              <p className="text-gray-800 dark:text-gray-200">{fmtShortDate(due) || '—'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Ordered</span>
+              <p className="text-gray-800 dark:text-gray-200">{fmtShortDate(job.dateOrdered) || '—'}</p>
+            </div>
+            {subtotal ? (
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Order value</span>
+                <p className="text-gray-800 dark:text-gray-200">{subtotal}</p>
+              </div>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <span className={`px-2 py-0.5 rounded-md font-bold uppercase tracking-wide ${st.pill}`}>
+              {pr.urgency} · score {pr.score}
+            </span>
+            {pr.reason ? (
+              <span className="text-gray-600 dark:text-gray-400">{pr.reason}</span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/95 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-lg px-2 py-1.5">
+        This line is tied to job <span className="font-mono font-bold">{row.source_ref}</span>, but that job isn&apos;t in the current Deco list (sync, shipped, or removed). The text above is what was saved when the task was added.
+      </p>
+    );
+  }
+
+  if (row.source_page === 'manual') {
+    return (
+      <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+        Manual reminder — use the note below for detail or handover.
+      </p>
+    );
+  }
+
+  const fin = FINANCE_HELP[row.source_page];
+  if (fin) {
+    return <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-400">{fin}</p>;
+  }
+
+  if (row.source_page === 'production_issues') {
+    return (
+      <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-400">
+        Opens the production issue log — each issue there has its own order reference and notes.
+      </p>
+    );
+  }
+
+  return null;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -161,6 +284,12 @@ const DailyTaskList: React.FC<Props> = ({
     const base = hideDone ? rows.filter(r => !r.completed) : [...rows];
     return sortDailyTaskRowsForDisplay(base, decoJobs);
   }, [rows, hideDone, decoJobs]);
+
+  const jobByNumber = useMemo(() => {
+    const m = new Map<string, DecoJob>();
+    for (const j of decoJobs) m.set(String(j.jobNumber), j);
+    return m;
+  }, [decoJobs]);
 
   const addManual = async () => {
     const title = newTitle.trim();
@@ -335,7 +464,7 @@ const DailyTaskList: React.FC<Props> = ({
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-3 sm:p-4 md:p-6 space-y-4">
+    <div className="max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-4">
       <div className="flex items-start gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <div className="p-2 rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
@@ -344,7 +473,7 @@ const DailyTaskList: React.FC<Props> = ({
           <div>
             <h1 className="text-lg sm:text-xl font-black uppercase tracking-widest text-gray-900 dark:text-white">Daily task list</h1>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-              Rows sort automatically: hottest Deco jobs first (same engine as the priority board), then credit / unpaid / invoicing checks, then the issue log, then your manual lines.
+              Each <strong className="font-semibold text-gray-600 dark:text-gray-300">Deco job</strong> row shows order #, customer, PO, status, dates, and priority score from live data. Finance rows link to the right tab. Order is hottest jobs first, then finance checks, issue log, then your notes.
             </p>
           </div>
         </div>
@@ -410,7 +539,7 @@ const DailyTaskList: React.FC<Props> = ({
           value={newTitle}
           onChange={e => setNewTitle(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && addManual()}
-          placeholder="Add a task…"
+          placeholder="Add your own task (e.g. call supplier — mention PO or order #)…"
           className="flex-1 px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2a2a55] text-gray-900 dark:text-white text-sm"
         />
         <button
@@ -436,7 +565,19 @@ const DailyTaskList: React.FC<Props> = ({
         </div>
       ) : (
         <ul className="space-y-2">
-          {displayRows.map(row => (
+          {displayRows.map(row => {
+            const job =
+              row.source_page === 'priority' && row.source_ref
+                ? jobByNumber.get(String(row.source_ref))
+                : undefined;
+            const primaryTitle =
+              row.source_page === 'priority' && row.source_ref && job
+                ? `#${job.jobNumber} · ${job.customerName || 'Customer'}`
+                : row.title;
+            const legacyTitle =
+              row.source_page === 'priority' && job && row.title.trim() !== primaryTitle.trim();
+
+            return (
             <li
               key={row.id}
               className={`rounded-xl border p-3 sm:p-4 transition-colors ${
@@ -454,9 +595,16 @@ const DailyTaskList: React.FC<Props> = ({
                 />
                 <div className="flex-1 min-w-0 space-y-2">
                   <div className="flex items-start justify-between gap-2 flex-wrap">
-                    <span className={`text-sm font-semibold ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
-                      {row.title}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className={`text-sm sm:text-base font-bold leading-snug block ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+                        {primaryTitle}
+                      </span>
+                      {legacyTitle ? (
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 block">
+                          Earlier label: {row.title}
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300">
                         {SOURCE_LABEL[row.source_page] || row.source_page}
@@ -477,7 +625,7 @@ const DailyTaskList: React.FC<Props> = ({
                           onClick={() => openOrderIfAny(row)}
                           className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 hover:underline"
                         >
-                          Order
+                          Find order
                         </button>
                       )}
                       <button
@@ -490,6 +638,7 @@ const DailyTaskList: React.FC<Props> = ({
                       </button>
                     </div>
                   </div>
+                  <TaskRowContext row={row} job={job} />
                   <div>
                     <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">Hold-up / note</label>
                     <textarea
@@ -510,7 +659,8 @@ const DailyTaskList: React.FC<Props> = ({
                 </div>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </div>
