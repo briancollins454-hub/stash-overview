@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays, CheckSquare, ClipboardList, Copy, Check, ExternalLink, Loader2, Plus, RefreshCw,
-  Sparkles, Trash2, AlertTriangle,
+  Sparkles, Trash2, AlertTriangle, UserRound,
 } from 'lucide-react';
 import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
@@ -68,6 +68,15 @@ const SOURCE_LABEL: Record<string, string> = {
 
 function tabForTask(row: DailyTaskRow): string {
   return TAB_FOR_SOURCE[row.source_page] || 'dashboard';
+}
+
+/** Staff view: all Deco jobs, or filter to one responsible name / unassigned. */
+const STAFF_VIEW_ALL = 'all';
+const STAFF_VIEW_UNASSIGNED = '__unassigned__';
+
+function priorityRowStaffBucket(job: DecoJob | undefined): string {
+  if (!job) return STAFF_VIEW_UNASSIGNED;
+  return displayStaffName(job.salesPerson) || STAFF_VIEW_UNASSIGNED;
 }
 
 function errStatus(e: unknown): number | undefined {
@@ -386,6 +395,8 @@ const DailyTaskList: React.FC<Props> = ({
   const [newTitle, setNewTitle] = useState('');
   const [importing, setImporting] = useState(false);
   const [hideDone, setHideDone] = useState(false);
+  /** Narrow list to one Deco responsible person (finance / manual rows only show when All). */
+  const [staffViewFilter, setStaffViewFilter] = useState<string>(STAFF_VIEW_ALL);
   const holdDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   const createdBy = currentUser.email || currentUser.name || null;
@@ -444,6 +455,30 @@ const DailyTaskList: React.FC<Props> = ({
     for (const j of decoJobs) m.set(String(j.jobNumber), j);
     return m;
   }, [decoJobs]);
+
+  const staffNamesOnFile = useMemo(() => {
+    const s = new Set<string>();
+    for (const j of decoJobs) {
+      const n = displayStaffName(j.salesPerson);
+      if (n) s.add(n);
+    }
+    for (const r of rows) {
+      if (r.source_page !== 'priority' || !r.source_ref) continue;
+      const j = jobByNumber.get(String(r.source_ref));
+      const n = displayStaffName(j?.salesPerson);
+      if (n) s.add(n);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [decoJobs, rows, jobByNumber]);
+
+  const filteredDisplayRows = useMemo(() => {
+    if (staffViewFilter === STAFF_VIEW_ALL) return displayRows;
+    return displayRows.filter(row => {
+      if (row.source_page !== 'priority') return false;
+      const job = row.source_ref ? jobByNumber.get(String(row.source_ref)) : undefined;
+      return priorityRowStaffBucket(job) === staffViewFilter;
+    });
+  }, [displayRows, staffViewFilter, jobByNumber]);
 
   const addManual = async () => {
     const title = newTitle.trim();
@@ -629,7 +664,7 @@ const DailyTaskList: React.FC<Props> = ({
           <div>
             <h1 className="text-lg sm:text-xl font-black uppercase tracking-widest text-gray-900 dark:text-white">Daily task list</h1>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-              Each <strong className="font-semibold text-gray-600 dark:text-gray-300">Deco job</strong> row shows who to speak to (sales / responsible from Deco), then customer, PO, status, dates, and priority score. Finance rows link to the right tab. Order is hottest jobs first, then finance checks, issue log, then your notes.
+              Each <strong className="font-semibold text-gray-600 dark:text-gray-300">Deco job</strong> row shows who to speak to (sales / responsible from Deco). Use <strong className="font-semibold text-gray-600 dark:text-gray-300">View</strong> to focus on one person&apos;s jobs. With a person selected, finance checklists and manual notes are hidden so you only see their Deco queue.
             </p>
           </div>
         </div>
@@ -659,6 +694,30 @@ const DailyTaskList: React.FC<Props> = ({
           <input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} />
           Hide completed
         </label>
+        <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+          <UserRound className="w-4 h-4 shrink-0 text-indigo-500" />
+          View
+          <select
+            value={staffViewFilter}
+            onChange={e => setStaffViewFilter(e.target.value)}
+            className="max-w-[11rem] sm:max-w-[14rem] px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2a2a55] text-gray-900 dark:text-white text-sm font-medium"
+            title="Show only Deco jobs owned by this person in Deco"
+          >
+            <option value={STAFF_VIEW_ALL}>All staff</option>
+            <option value={STAFF_VIEW_UNASSIGNED}>Unassigned</option>
+            {staffNamesOnFile.map(name => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {staffViewFilter !== STAFF_VIEW_ALL ? (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400">
+            {filteredDisplayRows.length} job{filteredDisplayRows.length !== 1 ? 's' : ''}
+            {staffViewFilter === STAFF_VIEW_UNASSIGNED ? ' (no owner in Deco)' : ''}
+          </span>
+        ) : null}
       </div>
 
       {error && (
@@ -719,9 +778,13 @@ const DailyTaskList: React.FC<Props> = ({
             ? 'All tasks done for this day — toggle off "Hide completed" to see them.'
             : 'No tasks yet — import from priority/finance or add your own.'}
         </div>
+      ) : filteredDisplayRows.length === 0 ? (
+        <div className="text-center py-14 text-gray-500 dark:text-gray-400 border border-dashed border-amber-300/80 dark:border-amber-700/50 rounded-xl bg-amber-50/40 dark:bg-amber-950/20 px-4">
+          No Deco jobs for this view on this day — choose <strong className="text-gray-700 dark:text-gray-300">All staff</strong> to see finance checks and everyone&apos;s tasks, or pick another name.
+        </div>
       ) : (
         <ul className="space-y-2">
-          {displayRows.map(row => {
+          {filteredDisplayRows.map(row => {
             const job =
               row.source_page === 'priority' && row.source_ref
                 ? jobByNumber.get(String(row.source_ref))
