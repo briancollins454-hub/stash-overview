@@ -6,6 +6,7 @@ import {
 import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
 import { calculatePriority, URGENCY_STYLE, type Urgency } from '../services/priorityEngine';
+import { displayStaffName } from '../services/staffDisplay';
 import {
   buildPriorityImportSuggestions,
   FINANCE_CHECKLIST_SUGGESTIONS,
@@ -133,9 +134,14 @@ function TaskRowContext({
       const st = URGENCY_STYLE[urgency];
       const due = job.dateDue || job.productionDueDate;
       const subtotal = fmtMoney(job.orderTotal ?? job.billableAmount);
+      const staff = displayStaffName(job.salesPerson);
       return (
         <div className="mt-2 space-y-2 border-t border-gray-100 dark:border-white/10 pt-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:text-xs text-gray-600 dark:text-gray-400">
+            <div className="sm:col-span-2 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-500/20 px-2.5 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Speak to (responsible in Deco)</span>
+              <p className="font-semibold text-indigo-950 dark:text-indigo-100 mt-0.5">{staff || 'Not assigned — check Deco order / sales owner'}</p>
+            </div>
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Customer</span>
               <p className="font-medium text-gray-900 dark:text-gray-100">{job.customerName || '—'}</p>
@@ -473,7 +479,7 @@ const DailyTaskList: React.FC<Props> = ({
           <div>
             <h1 className="text-lg sm:text-xl font-black uppercase tracking-widest text-gray-900 dark:text-white">Daily task list</h1>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-              Each <strong className="font-semibold text-gray-600 dark:text-gray-300">Deco job</strong> row shows order #, customer, PO, status, dates, and priority score from live data. Finance rows link to the right tab. Order is hottest jobs first, then finance checks, issue log, then your notes.
+              Each <strong className="font-semibold text-gray-600 dark:text-gray-300">Deco job</strong> row shows who to speak to (sales / responsible from Deco), then customer, PO, status, dates, and priority score. Finance rows link to the right tab. Order is hottest jobs first, then finance checks, issue log, then your notes.
             </p>
           </div>
         </div>
