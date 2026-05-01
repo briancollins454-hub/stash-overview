@@ -38,7 +38,7 @@ const ROLES = [
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
 ];
 
-/** Tab labels + ids — single source: `constants/tabPermissions.ts` (sync with App.tsx `validTabs`). */
+/** Tab labels + ids — single source: `api/lib/tabPermissions.ts` (re-exported from `constants/tabPermissions`). */
 const ALL_TABS = APP_TAB_DEFINITIONS;
 
 function sanitizeAllowedTabs(tabs: string[] | undefined): string[] {
@@ -57,6 +57,11 @@ async function usersApi(body: Record<string, any>) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const text = await resp.text();
+    throw new Error(text.slice(0, 240).trim() || `Request failed (${resp.status})`);
+  }
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error || 'Request failed');
   return data;

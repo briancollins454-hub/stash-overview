@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { APP_TAB_IDS, getDefaultTabsForRole } from '../constants/tabPermissions';
+import { APP_TAB_IDS, getDefaultTabsForRole } from './lib/tabPermissions';
 import { scryptSync, randomBytes, timingSafeEqual, createHmac } from 'crypto';
 
 // ─── Firebase Firestore Config ──────────────────────────────────────────────
