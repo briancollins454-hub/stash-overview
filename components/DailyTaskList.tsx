@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
-import { calculatePriority, URGENCY_STYLE, type Urgency } from '../services/priorityEngine';
+import { calculatePriority, URGENCY_STYLE, type Urgency, type PriorityResult } from '../services/priorityEngine';
 import { displayStaffName } from '../services/staffDisplay';
 import {
   buildPriorityImportSuggestions,
@@ -118,6 +118,53 @@ const FINANCE_HELP: Record<string, string> = {
   finance_sni: 'Open Shipped not invoiced — raise invoices for dispatched work.',
 };
 
+const FINANCE_WHY_INTRO: Record<string, string> = {
+  finance_credit:
+    'Added when you used Pull from system — it’s a standing finance sweep so credit holds don’t stall jobs silently.',
+  finance_unpaid:
+    'Added when you used Pull from system — cash collection issues shouldn’t sit unattended.',
+  finance_sni:
+    'Added when you used Pull from system — shipped work should be invoiced on time for cashflow.',
+};
+
+function priorityIssueExplanation(job: DecoJob, pr: PriorityResult): { summary: string; factors: string[] } {
+  const factors = pr.matchedRules.filter(Boolean);
+  if (factors.length === 0) {
+    return {
+      summary: `Still an active Deco job (${job.status || 'unknown status'}). It appears on today’s list because it ranked in your pulled queue with priority score ${pr.score} (${pr.urgency}) — often due dates, value, or balance rules.`,
+      factors: [],
+    };
+  }
+  return {
+    summary: `Ranked by the same rules as the Priority Board (total score ${pr.score}, ${pr.urgency}). These are the concrete signals — that’s why it needs attention today.`,
+    factors,
+  };
+}
+
+function DailyListWhySection({
+  summary,
+  bullets,
+}: {
+  summary: string;
+  bullets?: string[];
+}) {
+  return (
+    <div className="sm:col-span-2 rounded-lg border border-violet-200 dark:border-violet-500/35 bg-violet-50/70 dark:bg-violet-950/35 px-2.5 py-2.5">
+      <span className="text-[10px] font-black uppercase tracking-widest text-violet-700 dark:text-violet-400">
+        Why it&apos;s on today&apos;s list
+      </span>
+      <p className="text-[13px] text-gray-800 dark:text-gray-100 mt-1.5 leading-snug">{summary}</p>
+      {bullets && bullets.length > 0 ? (
+        <ul className="mt-2 space-y-1 text-[12px] text-gray-700 dark:text-gray-300 list-disc pl-4 marker:text-violet-500">
+          {bullets.map((b, i) => (
+            <li key={i}>{b}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 async function copyTextSafe(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -181,9 +228,11 @@ function TaskRowContext({
       const due = job.dateDue || job.productionDueDate;
       const subtotal = fmtMoney(job.orderTotal ?? job.billableAmount);
       const staff = displayStaffName(job.salesPerson);
+      const issueExpl = priorityIssueExplanation(job, pr);
       return (
         <div className="mt-2 space-y-2 border-t border-gray-100 dark:border-white/10 pt-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:text-xs text-gray-600 dark:text-gray-400">
+            <DailyListWhySection summary={issueExpl.summary} bullets={issueExpl.factors.length ? issueExpl.factors : undefined} />
             <div className="sm:col-span-2 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-500/20 px-2.5 py-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">Speak to (responsible in Deco)</span>
               <p className="font-semibold text-indigo-950 dark:text-indigo-100 mt-0.5">{staff || 'Not assigned — check Deco order / sales owner'}</p>
@@ -232,40 +281,65 @@ function TaskRowContext({
               {pr.urgency} · score {pr.score}
             </span>
             {pr.reason ? (
-              <span className="text-gray-600 dark:text-gray-400">{pr.reason}</span>
+              <span className="text-gray-500 dark:text-gray-500" title="Primary rule from scorer">
+                Top signal: {pr.reason}
+              </span>
             ) : null}
           </div>
         </div>
       );
     }
     return (
-      <div className="mt-2 text-xs text-amber-800 dark:text-amber-300/95 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-lg px-2 py-1.5 space-y-2">
-        <p>
-          This line is tied to job <span className="font-mono font-bold">{row.source_ref}</span>, but that job isn&apos;t in the current Deco list (sync, shipped, or removed). The text above is what was saved when the task was added.
-        </p>
-        {row.source_ref ? <JobNumberCopyButton jobNumber={String(row.source_ref)} /> : null}
+      <div className="mt-2 space-y-2">
+        <DailyListWhySection
+          summary="This row was saved for an older pull or manual add. We can’t recompute the live priority reason until Deco sync includes this job again."
+          bullets={[
+            'Usually means the job shipped, was cancelled, or hasn’t appeared in the latest Deco fetch.',
+            'Use Copy # below if you still need the order number elsewhere.',
+          ]}
+        />
+        <div className="text-xs text-amber-800 dark:text-amber-300/95 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-lg px-2 py-1.5 space-y-2">
+          <p>
+            Tied to job <span className="font-mono font-bold">{row.source_ref}</span> — not in the current Deco list.
+          </p>
+          {row.source_ref ? <JobNumberCopyButton jobNumber={String(row.source_ref)} /> : null}
+        </div>
       </div>
     );
   }
 
   if (row.source_page === 'manual') {
     return (
-      <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-        Manual reminder — use the note below for detail or handover.
-      </p>
+      <div className="mt-2 space-y-2">
+        <DailyListWhySection
+          summary="You added this line yourself for this date — it isn’t driven by the Deco priority scorer."
+          bullets={['Use the hold-up note below if someone else needs context.']}
+        />
+      </div>
     );
   }
 
   const fin = FINANCE_HELP[row.source_page];
-  if (fin) {
-    return <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-400">{fin}</p>;
+  const finWhy = FINANCE_WHY_INTRO[row.source_page];
+  if (fin && finWhy) {
+    return (
+      <div className="mt-2 space-y-2">
+        <DailyListWhySection summary={finWhy} bullets={[fin]} />
+      </div>
+    );
   }
 
   if (row.source_page === 'production_issues') {
     return (
-      <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-400">
-        Opens the production issue log — each issue there has its own order reference and notes.
-      </p>
+      <div className="mt-2 space-y-2">
+        <DailyListWhySection
+          summary="Added when you used Pull from system — a rolling reminder so open production issues don’t get forgotten."
+          bullets={[
+            'Each real issue lives on the Issue log tab with its own order # and detail.',
+            'Use this row to batch-review; drill into the tab for specifics.',
+          ]}
+        />
+      </div>
     );
   }
 
