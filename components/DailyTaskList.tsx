@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CalendarDays, CheckSquare, ClipboardList, ExternalLink, Loader2, Plus, RefreshCw,
+  CalendarDays, CheckSquare, ClipboardList, Copy, Check, ExternalLink, Loader2, Plus, RefreshCw,
   Sparkles, Trash2, AlertTriangle,
 } from 'lucide-react';
 import type { DecoJob } from '../types';
@@ -118,6 +118,52 @@ const FINANCE_HELP: Record<string, string> = {
   finance_sni: 'Open Shipped not invoiced — raise invoices for dispatched work.',
 };
 
+async function copyTextSafe(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      return true;
+    } finally {
+      document.body.removeChild(ta);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/** One-click copy Deco order/job number (plain digits — paste into search or chat). */
+function JobNumberCopyButton({ jobNumber, className = '' }: { jobNumber: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async e => {
+        e.stopPropagation();
+        const ok = await copyTextSafe(jobNumber);
+        if (ok) {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        }
+      }}
+      title={copied ? 'Copied to clipboard' : `Copy order number ${jobNumber}`}
+      className={`inline-flex items-center gap-1 shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors border border-gray-200 dark:border-gray-600 bg-white dark:bg-[#2a2a55] text-gray-700 dark:text-gray-200 hover:bg-violet-50 hover:border-violet-300 dark:hover:bg-violet-950/40 dark:hover:border-violet-600 ${copied ? 'border-emerald-400 text-emerald-700 dark:text-emerald-400' : ''} ${className}`}
+    >
+      {copied ? <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-3 h-3 opacity-70" />}
+      {copied ? 'Copied' : 'Copy #'}
+    </button>
+  );
+}
+
 function TaskRowContext({
   row,
   job,
@@ -148,7 +194,7 @@ function TaskRowContext({
             </div>
             <div>
               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Deco job #</span>
-              <p className="font-mono font-semibold text-gray-900 dark:text-gray-100">{job.jobNumber}</p>
+              <p className="font-mono font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{job.jobNumber}</p>
             </div>
             {job.poNumber ? (
               <div>
@@ -193,9 +239,12 @@ function TaskRowContext({
       );
     }
     return (
-      <p className="mt-2 text-xs text-amber-800 dark:text-amber-300/95 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-lg px-2 py-1.5">
-        This line is tied to job <span className="font-mono font-bold">{row.source_ref}</span>, but that job isn&apos;t in the current Deco list (sync, shipped, or removed). The text above is what was saved when the task was added.
-      </p>
+      <div className="mt-2 text-xs text-amber-800 dark:text-amber-300/95 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/50 rounded-lg px-2 py-1.5 space-y-2">
+        <p>
+          This line is tied to job <span className="font-mono font-bold">{row.source_ref}</span>, but that job isn&apos;t in the current Deco list (sync, shipped, or removed). The text above is what was saved when the task was added.
+        </p>
+        {row.source_ref ? <JobNumberCopyButton jobNumber={String(row.source_ref)} /> : null}
+      </div>
     );
   }
 
@@ -602,9 +651,14 @@ const DailyTaskList: React.FC<Props> = ({
                 <div className="flex-1 min-w-0 space-y-2">
                   <div className="flex items-start justify-between gap-2 flex-wrap">
                     <div className="min-w-0 flex-1">
-                      <span className={`text-sm sm:text-base font-bold leading-snug block ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
-                        {primaryTitle}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-sm sm:text-base font-bold leading-snug ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+                          {primaryTitle}
+                        </span>
+                        {row.source_page === 'priority' && row.source_ref ? (
+                          <JobNumberCopyButton jobNumber={String(row.source_ref)} />
+                        ) : null}
+                      </div>
                       {legacyTitle ? (
                         <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 block">
                           Earlier label: {row.title}
