@@ -9,6 +9,7 @@ import {
   buildPriorityImportSuggestions,
   FINANCE_CHECKLIST_SUGGESTIONS,
   PRODUCTION_ISSUES_SUGGESTION,
+  sortDailyTaskRowsForDisplay,
 } from '../services/dailyTaskSuggestions';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -30,7 +31,7 @@ export interface DailyTaskRow {
 
 interface Props {
   decoJobs: DecoJob[];
-  currentUser: { name: string; email: string };
+  currentUser: { id?: string | null; name?: string | null; email?: string | null };
   onNavigateTab: (tabId: string) => void;
   /** Optional: jump to dashboard with order search when a task carries a job # */
   onNavigateToOrder?: (orderNum: string) => void;
@@ -115,10 +116,11 @@ const DailyTaskList: React.FC<Props> = ({
     return Math.max(...rows.map(r => r.sort_order)) + 1;
   }, [rows]);
 
-  const visibleRows = useMemo(() => {
-    if (!hideDone) return rows;
-    return rows.filter(r => !r.completed);
-  }, [rows, hideDone]);
+  /** Highest-pressure work first: live job scores, then finance, issues, manual. */
+  const displayRows = useMemo(() => {
+    const base = hideDone ? rows.filter(r => !r.completed) : [...rows];
+    return sortDailyTaskRowsForDisplay(base, decoJobs);
+  }, [rows, hideDone, decoJobs]);
 
   const addManual = async () => {
     const title = newTitle.trim();
@@ -193,22 +195,28 @@ const DailyTaskList: React.FC<Props> = ({
     return s;
   }, [rows]);
 
-  const importPriorityTop = async () => {
+  /** One pass: top scored jobs → finance checks → issue log (skips duplicates). */
+  const importFromSystem = async () => {
     if (!isSupabaseReady()) return;
-    const suggestions = buildPriorityImportSuggestions(decoJobs, 20);
-    if (suggestions.length === 0) {
-      alert('No active priority jobs to import — sync Deco first.');
-      return;
-    }
+    const suggestions = buildPriorityImportSuggestions(decoJobs, 25);
     setImporting(true);
     try {
       let order = nextSortOrder;
-      let attempted = 0;
+      let imported = 0;
+
+      const post = async (payload: Record<string, unknown>) => {
+        try {
+          await supabaseFetch('stash_daily_tasks', 'POST', payload);
+          imported++;
+        } catch {
+          /* duplicate key / RLS */
+        }
+      };
+
       for (const s of suggestions) {
         const key = `priority:${s.jobNumber}`;
         if (existingKeys.has(key)) continue;
-        attempted++;
-        const payload = {
+        await post({
           task_date: taskDate,
           title: s.title,
           source_page: 'priority',
@@ -217,29 +225,13 @@ const DailyTaskList: React.FC<Props> = ({
           completed: false,
           hold_note: null,
           created_by: createdBy,
-        };
-        try {
-          await supabaseFetch('stash_daily_tasks', 'POST', payload);
-        } catch {
-          /* duplicate or RLS — ignore */
-        }
+        });
       }
-      await load();
-      if (attempted === 0) alert('Those jobs are already on today\'s list.');
-    } finally {
-      setImporting(false);
-    }
-  };
 
-  const importFinanceChecklist = async () => {
-    if (!isSupabaseReady()) return;
-    setImporting(true);
-    try {
-      let order = nextSortOrder;
       for (const item of FINANCE_CHECKLIST_SUGGESTIONS) {
         const key = `${item.source_page}:${item.source_ref}`;
         if (existingKeys.has(key)) continue;
-        const payload = {
+        await post({
           task_date: taskDate,
           title: item.title,
           source_page: item.source_page,
@@ -248,15 +240,12 @@ const DailyTaskList: React.FC<Props> = ({
           completed: false,
           hold_note: null,
           created_by: createdBy,
-        };
-        try {
-          await supabaseFetch('stash_daily_tasks', 'POST', payload);
-        } catch { /* duplicate */ }
+        });
       }
+
       const pi = PRODUCTION_ISSUES_SUGGESTION;
-      const pik = `${pi.source_page}:${pi.source_ref}`;
-      if (!existingKeys.has(pik)) {
-        await supabaseFetch('stash_daily_tasks', 'POST', {
+      if (!existingKeys.has(`${pi.source_page}:${pi.source_ref}`)) {
+        await post({
           task_date: taskDate,
           title: pi.title,
           source_page: pi.source_page,
@@ -265,9 +254,17 @@ const DailyTaskList: React.FC<Props> = ({
           completed: false,
           hold_note: null,
           created_by: createdBy,
-        }).catch(() => {});
+        });
       }
+
       await load();
+      if (imported === 0) {
+        alert(
+          suggestions.length === 0
+            ? 'No scored jobs to add (sync Deco) or every checklist row is already on this date.'
+            : 'Every pulled item was already on today\'s list.',
+        );
+      }
     } finally {
       setImporting(false);
     }
@@ -294,7 +291,7 @@ const DailyTaskList: React.FC<Props> = ({
           <div>
             <h1 className="text-lg sm:text-xl font-black uppercase tracking-widest text-gray-900 dark:text-white">Daily task list</h1>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-              Check items off as you go, note blockers on each line, pull in priority jobs and finance reminders.
+              Rows sort automatically: hottest Deco jobs first (same engine as the priority board), then credit / unpaid / invoicing checks, then the issue log, then your manual lines.
             </p>
           </div>
         </div>
@@ -341,24 +338,15 @@ const DailyTaskList: React.FC<Props> = ({
           <button
             type="button"
             disabled={importing || loading}
-            onClick={importPriorityTop}
+            onClick={importFromSystem}
             className="px-3 py-2 rounded-lg bg-violet-600 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5"
           >
             {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckSquare className="w-3.5 h-3.5" />}
-            Top priority jobs (20)
-          </button>
-          <button
-            type="button"
-            disabled={importing || loading}
-            onClick={importFinanceChecklist}
-            className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
-            Finance + issue log checklist
+            Pull from system (priority order)
           </button>
         </div>
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
-          Imports skip rows already on this date. Add your own tasks below anytime.
+          Adds up to 25 scored jobs (most urgent first), then finance reviews, then the production issue log. Skips anything already on this date. Your manual tasks stay at the bottom unless you tick them off.
         </p>
       </div>
 
@@ -387,7 +375,7 @@ const DailyTaskList: React.FC<Props> = ({
         <div className="flex justify-center py-16 text-gray-500 gap-2">
           <Loader2 className="w-5 h-5 animate-spin" /> Loading…
         </div>
-      ) : visibleRows.length === 0 ? (
+      ) : displayRows.length === 0 ? (
         <div className="text-center py-14 text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
           {hideDone && rows.some(r => r.completed)
             ? 'All tasks done for this day — toggle off "Hide completed" to see them.'
@@ -395,7 +383,7 @@ const DailyTaskList: React.FC<Props> = ({
         </div>
       ) : (
         <ul className="space-y-2">
-          {visibleRows.map(row => (
+          {displayRows.map(row => (
             <li
               key={row.id}
               className={`rounded-xl border p-3 sm:p-4 transition-colors ${
