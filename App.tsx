@@ -91,6 +91,7 @@ const VoiceAssistant = lazyRetry(() => import('./components/VoiceAssistant'));
 const CloudHealth = lazyRetry(() => import('./components/CloudHealth'));
 const MobileSummary = lazyRetry(() => import('./components/MobileSummary'));
 const ProductionIssueLog = lazyRetry(() => import('./components/ProductionIssueLog'));
+const DailyTaskList = lazyRetry(() => import('./components/DailyTaskList'));
 const WholesalerLookup = lazyRetry(() => import('./components/WholesalerLookup'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
@@ -280,7 +281,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2539,7 +2540,7 @@ const App: React.FC = () => {
             <div className="hidden lg:flex items-center gap-1 min-w-0 flex-1" ref={navDropRef}>
                 <div className="flex items-center gap-1">
                 {/* Direct tabs — daily drivers */}
-                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'summary', label: '📱 SUMMARY' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
+                {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'daily-tasks', label: '📋 DAILY' }, { id: 'summary', label: '📱 SUMMARY' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
                     <button key={tab.id} onClick={() => { setActiveTab(tab.id); setNavDropdown(null); }} className={`px-3 py-2 rounded text-[10px] font-bold tracking-widest transition-all uppercase ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white shadow-inner' : 'text-indigo-200 hover:text-white hover:bg-white/5'}`}>{tab.label}</button>
                 ))}
                 {/* Grouped dropdowns */}
@@ -2635,7 +2636,7 @@ const App: React.FC = () => {
             <div className="lg:hidden fixed inset-0 z-[60] bg-black/50" onClick={() => setMobileMenuOpen(false)}>
                 <div className="absolute top-14 left-0 right-0 bg-[#2d2d5f] border-t border-indigo-500/20 shadow-2xl p-4 space-y-1 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                     {/* Direct tabs */}
-                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'summary', label: '📱 SUMMARY' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
+                    {[{ id: 'dashboard', label: 'DASHBOARD' }, { id: 'briefing', label: 'BRIEFING' }, { id: 'daily-tasks', label: '📋 DAILY' }, { id: 'summary', label: '📱 SUMMARY' }, { id: 'command', label: '⚡ LIVE' }].filter(t => isTabAllowed(t.id)).map(tab => (
                         <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }} className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-bold tracking-widest uppercase transition-all ${activeTab === tab.id ? 'bg-[#3e3e7a] text-white' : 'text-indigo-200 hover:bg-white/5'}`}>{tab.label}</button>
                     ))}
                     {/* Grouped sections */}
@@ -3364,6 +3365,19 @@ const App: React.FC = () => {
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <ErrorBoundary fallbackTitle="Morning Briefing Error">
                   <MorningBriefing decoJobs={rawDecoJobs} orders={unifiedOrders} onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }} />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'daily-tasks' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Daily Tasks Error">
+                  <DailyTaskList
+                    decoJobs={rawDecoJobs}
+                    currentUser={{ id: user?.id ?? null, email: user?.email ?? null }}
+                    onNavigateTab={setActiveTab}
+                    onNavigateToOrder={(num) => { setActiveTab('dashboard'); setSearchTerm(num); }}
+                  />
                 </ErrorBoundary>
               </Suspense>
             )}

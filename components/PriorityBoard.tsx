@@ -258,6 +258,60 @@ function passesFilter(job: DecoJob, section: PrioritySection, filterMin: number 
   }
 }
 
+/**
+ * Default row order: longest waiting at the top, per the section's metric.
+ * - PO: most days since ordered first
+ * - Stock / Processing: most overdue first (most negative days-until-due),
+ *   then due-sooner before due-later among jobs not yet overdue
+ * - Shipping: most days since ready first; "New" (no stamp yet) at the bottom
+ * Tie-breakers: higher priority score, then oldest order date (FIFO).
+ */
+function compareLongestWaitingFirst(
+  a: PriorityResult,
+  b: PriorityResult,
+  sec: PrioritySection,
+  now: Date,
+  readyAtMap?: ReadyAtMap,
+): number {
+  const ma = getMetricDays(a.job, sec, now, readyAtMap);
+  const mb = getMetricDays(b.job, sec, now, readyAtMap);
+
+  switch (sec.filterMetric) {
+    case 'days_since_ordered':
+    case 'days_past_due': {
+      const sa = ma ?? -1;
+      const sb = mb ?? -1;
+      if (sb !== sa) return sb - sa;
+      break;
+    }
+    case 'days_until_due': {
+      // More negative = more overdue = longer waiting on ship-by
+      const sa = ma ?? 999_999;
+      const sb = mb ?? 999_999;
+      if (sa !== sb) return sa - sb;
+      break;
+    }
+    case 'days_since_ready': {
+      const na = ma == null ? -1 : ma;
+      const nb = mb == null ? -1 : mb;
+      if (nb !== na) return nb - na;
+      break;
+    }
+    default:
+      break;
+  }
+
+  if (a.score !== b.score) {
+    if (a.score > 0 && b.score > 0) return b.score - a.score;
+    if (a.score > 0) return -1;
+    if (b.score > 0) return 1;
+  }
+
+  const da = pd(a.job.dateOrdered)?.getTime() || 0;
+  const db = pd(b.job.dateOrdered)?.getTime() || 0;
+  return da - db;
+}
+
 /* ---------- Main component ---------- */
 
 export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onClearCompleted, lastSyncTime, loading }: Props) {
@@ -371,23 +425,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const sections = useMemo(() => {
     return PRIORITY_SECTIONS.map(sec => {
       const items = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
-      items.sort((a, b) => {
-        if (sec.filterMetric === 'days_since_ready') {
-          const readyDaysA = getMetricDays(a.job, sec, now, readyAtMap);
-          const readyDaysB = getMetricDays(b.job, sec, now, readyAtMap);
-          const safeReadyDaysA = readyDaysA ?? -1;
-          const safeReadyDaysB = readyDaysB ?? -1;
-
-          if (safeReadyDaysA !== safeReadyDaysB) return safeReadyDaysB - safeReadyDaysA;
-        }
-
-        if (a.score > 0 && b.score > 0) return b.score - a.score;
-        if (a.score > 0) return -1;
-        if (b.score > 0) return 1;
-        const da = pd(a.job.dateOrdered)?.getTime() || 0;
-        const db = pd(b.job.dateOrdered)?.getTime() || 0;
-        return db - da;
-      });
+      items.sort((a, b) => compareLongestWaitingFirst(a, b, sec, now, readyAtMap));
       return { ...sec, items };
     });
   }, [allScored, now, readyAtMap]);
