@@ -188,6 +188,31 @@ async function copyTextSafe(text: string): Promise<boolean> {
   }
 }
 
+/**
+ * Deco jobs the user has ticked off as completed on any daily list date.
+ * Pull from system skips these so they don't reappear the next day.
+ */
+async function fetchCompletedPriorityJobRefsEver(): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!isSupabaseReady()) return out;
+  try {
+    const res = await supabaseFetch(
+      'stash_daily_tasks?source_page=eq.priority&completed=eq.true&select=source_ref&limit=10000',
+      'GET',
+    );
+    const data: { source_ref: string | null }[] = await res.json();
+    if (!Array.isArray(data)) return out;
+    for (const r of data) {
+      if (r.source_ref != null && String(r.source_ref).trim() !== '') {
+        out.add(String(r.source_ref));
+      }
+    }
+  } catch {
+    /* Import still runs; cross-day skip is best-effort */
+  }
+  return out;
+}
+
 /** One-click copy Deco order/job number (plain digits — paste into search or chat). */
 function JobNumberCopyButton({ jobNumber, className = '' }: { jobNumber: string; className?: string }) {
   const [copied, setCopied] = useState(false);
@@ -499,6 +524,7 @@ const DailyTaskList: React.FC<Props> = ({
     const suggestions = buildPriorityImportSuggestions(decoJobs, 25);
     setImporting(true);
     try {
+      const completedPriorityEver = await fetchCompletedPriorityJobRefsEver();
       let order = nextSortOrder;
       let imported = 0;
       let postAttempts = 0;
@@ -517,6 +543,7 @@ const DailyTaskList: React.FC<Props> = ({
       for (const s of suggestions) {
         const key = `priority:${s.jobNumber}`;
         if (existingKeys.has(key)) continue;
+        if (completedPriorityEver.has(String(s.jobNumber))) continue;
         await post({
           task_date: taskDate,
           title: s.title,
@@ -573,7 +600,7 @@ const DailyTaskList: React.FC<Props> = ({
         alert(
           suggestions.length === 0
             ? 'No scored jobs to add (sync Deco) or every checklist row is already on this date.'
-            : 'Every pulled item was already on today\'s list.',
+            : 'Nothing new to add — already on today\'s list, already checked off on a previous day, or every checklist row is present.',
         );
       }
     } finally {
@@ -657,7 +684,7 @@ const DailyTaskList: React.FC<Props> = ({
           </button>
         </div>
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
-          Adds up to 25 scored jobs (most urgent first), then finance reviews, then the production issue log. Skips anything already on this date. Your manual tasks stay at the bottom unless you tick them off.
+          Adds up to 25 scored jobs (most urgent first), then finance reviews, then the production issue log. Skips rows already on this date. Jobs you previously ticked complete on any day are not pulled again — uncheck or delete that older row if you need it back.
         </p>
       </div>
 
