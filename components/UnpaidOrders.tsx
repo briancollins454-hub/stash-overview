@@ -23,6 +23,8 @@ type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShippe
 // have no salesperson attached in Deco. Kept as a non-printable character
 // so it can never clash with a real name.
 const UNASSIGNED = '\u0000__UNASSIGNED__';
+/** Ignore float noise when deciding if a priced order is fully settled. */
+const BALANCE_OWED_EPS = 0.005;
 type SortDir = 'asc' | 'desc';
 type SectionKey = 'zero' | 'priced' | 'authorised';
 
@@ -82,13 +84,12 @@ const CopyableJobNum: React.FC<{ jobNumber: string; onNavigate?: () => void }> =
 };
 
 /**
- * Unpaid Orders — three buckets:
- *   1. Zero priced (£0 total, no payment, not yet authorised)
- *   2. Priced but unpaid (real price, no payment)
- *   3. Authorised £0 invoice — previously in bucket 1, but a user has
- *      explicitly confirmed the £0 invoice is legitimate. Persisted in
- *      Supabase (stash_zero_invoice_authorised) so the decision is shared
- *      with the rest of the team and survives refreshes.
+ * Unpaid Orders — three buckets (everything here is **shipped**):
+ *   1. Zero priced (£0 total on the order, no payment, not yet authorised)
+ *   2. Priced but unpaid — order has a price and outstanding balance above zero
+ *      (goods shipped; money still owed). Fully settled priced rows are dropped.
+ *   3. Authorised £0 invoice — zero-total orders approved as legitimate £0;
+ *      reference bucket (no balance to chase).
  *
  * All three buckets are individually collapsible. Zero + Priced open by
  * default (active work); Authorised starts collapsed (reference bucket).
@@ -395,6 +396,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           : (j.outstandingBalance || 0);
         const total = j.orderTotal || 0;
 
+        // Only shipped jobs — focus on customers who already have product but owe money.
+        if (!j.dateShipped) return false;
+
+        // Priced orders with nothing left to collect are not "unpaid" for this page.
+        if (total > 0 && balance <= BALANCE_OWED_EPS) return false;
+
         const customer = (j.customerName || '').toLowerCase();
         if (balance === 0 && customer.includes('stash')) return false;
 
@@ -404,8 +411,6 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
         if (haystack.includes('gift of kit')) return false;
         if (haystack.includes('stash shop')) return false;
         if (/\bsamples?\b/.test(haystack)) return false;
-
-        if (balance === 0 && total === 0 && !j.dateShipped) return false;
 
         return true;
       })
@@ -499,7 +504,9 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     // the authorisation is implicitly ignored (but not deleted).
     const authorisedRows = list.filter(j => j.isZeroPriced && !!j.authorisedAt).sort(sorter);
     const zeroPricedRows = list.filter(j => j.isZeroPriced && !j.authorisedAt).sort(sorter);
-    const pricedRows = list.filter(j => !j.isZeroPriced).sort(sorter);
+    const pricedRows = list
+      .filter(j => !j.isZeroPriced && (j.outstandingBalance || 0) > BALANCE_OWED_EPS && j.hasShipped)
+      .sort(sorter);
     return { zeroPricedRows, pricedRows, authorisedRows };
   }, [jobs, search, sorter, responsibleFilter]);
 
@@ -1207,7 +1214,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           sectionKey="priced"
           icon={<CircleDollarSign className={`w-5 h-5 ${pricedRows.length > 0 ? 'text-rose-400' : textSecondary}`} />}
           title="Priced but unpaid"
-          subtitle="A price is on the order but Deco has no payment recorded — invoice may have been missed."
+          subtitle="Shipped, a price on the order, and money still outstanding — chase payment."
           count={pricedRows.length}
           outstanding={pricedOutstanding}
         />
@@ -1248,7 +1255,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, <span className="font-mono">Stash Shop</span> orders, and <span className="font-mono">Sample</span> orders. Sort defaults to newest shipped first.
+        Shipped jobs only. The <span className="font-semibold">priced</span> section needs a positive outstanding balance (paid-in-full priced rows are hidden). Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, <span className="font-mono">Stash Shop</span> orders, and <span className="font-mono">Sample</span> orders. Sort defaults to newest shipped first.
       </div>
     </div>
   );
