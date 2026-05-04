@@ -763,12 +763,60 @@ const App: React.FC = () => {
 
             // Then layer API deco jobs on top (highest priority — freshly parsed with latest code)
             dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
+
+            // Tail refresh: manage_orders/find is date-gated (see fetchDecoJobs lookback).
+            // Jobs older than that window never appear in dRecentJobs, so local/cloud
+            // copies can stay wrong forever (e.g. still "Not Ordered" after cancel in Deco).
+            // Re-fetch by job number for a capped set of older "open" jobs so status tracks reality.
+            const decoLookbackDays = isDeepSync ? 180 : 120;
+            const decoLookbackCutoff = new Date();
+            decoLookbackCutoff.setDate(decoLookbackCutoff.getDate() - decoLookbackDays);
+            decoLookbackCutoff.setHours(0, 0, 0, 0);
+
+            const recentSyncedNums = new Set(dRecentJobs.map(j => j.jobNumber));
+            const OPEN_DECO_TAIL_REFRESH = new Set([
+                'Not Ordered', 'Awaiting Stock', 'Awaiting Processing', 'Awaiting Artwork',
+                'Awaiting Review', 'On Hold', 'In Production', 'Ready for Shipping', 'Completed',
+            ]);
+
+            const staleJobNums = new Set<string>();
+            for (const j of jobMap.values()) {
+                if (recentSyncedNums.has(j.jobNumber)) continue;
+                if (isDecoJobCancelled(j)) continue;
+                if (!OPEN_DECO_TAIL_REFRESH.has(j.status || '')) continue;
+                const ord = j.dateOrdered ? new Date(j.dateOrdered) : null;
+                if (!ord || Number.isNaN(ord.getTime())) continue;
+                if (ord >= decoLookbackCutoff) continue;
+                staleJobNums.add(j.jobNumber);
+            }
+
+            const STALE_DECO_CAP = 200;
+            const staleSorted = Array.from(staleJobNums).sort((a, b) => {
+                const da = new Date(jobMap.get(a)!.dateOrdered!).getTime();
+                const db = new Date(jobMap.get(b)!.dateOrdered!).getTime();
+                return da - db;
+            });
+            const staleSlice = staleSorted.slice(0, STALE_DECO_CAP);
+
+            let decoStaleRefreshed: DecoJob[] = [];
+            if (staleSlice.length > 0) {
+                setSyncStatusMsg(`Refreshing ${staleSlice.length} older open Deco job${staleSlice.length === 1 ? '' : 's'}…`);
+                try {
+                    decoStaleRefreshed = await fetchBulkDecoJobs(apiSettings, staleSlice, (cur, tot) => {
+                        setSyncStatusMsg(`Refreshing older Deco jobs ${cur}/${tot}…`);
+                    });
+                    decoStaleRefreshed.forEach(j => jobMap.set(j.jobNumber, j));
+                } catch (e: unknown) {
+                    console.warn('[sync] stale tail Deco refresh failed:', e instanceof Error ? e.message : e);
+                }
+            }
+
             const mergedDecoJobs = Array.from(jobMap.values());
             setRawDecoJobs(mergedDecoJobs);
             setLocalItem('stash_raw_deco_jobs', mergedDecoJobs).catch(console.error);
 
             // Track API-fresh deco jobs — only these get pushed to cloud
-            const apiFreshJobs = [...dRecentJobs];
+            const apiFreshJobs = [...dRecentJobs, ...decoStaleRefreshed];
 
             const unfulfilledShopifyOrders = mergedOrders.filter(o => 
                 o.fulfillmentStatus !== 'fulfilled' && 
