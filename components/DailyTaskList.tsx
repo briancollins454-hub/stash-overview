@@ -7,6 +7,7 @@ import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
 import { calculatePriority, URGENCY_STYLE, type Urgency, type PriorityResult } from '../services/priorityEngine';
 import { displayStaffName } from '../services/staffDisplay';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 import {
   buildPriorityImportSuggestions,
   FINANCE_CHECKLIST_SUGGESTIONS,
@@ -145,10 +146,10 @@ function priorityIssueExplanation(job: DecoJob, pr: PriorityResult): { summary: 
       factors: [],
     };
   }
-  if (jobSt === 'cancelled') {
+  if (isDecoJobCancelled(job)) {
     return {
       summary:
-        'Deco shows this job as Cancelled. Remove or complete this checklist row; new pulls will not treat it as active priority work.',
+        'Deco shows this job as cancelled. Remove or complete this checklist row; new pulls will not treat it as active priority work.',
       factors: [],
     };
   }

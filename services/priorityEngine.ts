@@ -1,4 +1,5 @@
 import type { DecoJob } from '../types';
+import { isDecoJobCancelled } from './decoJobFilters';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 export const pd = (d?: string) => (d ? new Date(d) : null);
@@ -64,7 +65,7 @@ export function calculatePriority(job: DecoJob, now: Date): PriorityResult {
   if (statusNorm === 'shipped') {
     return { job, score: 0, matchedRules: [], reason: 'Shipped', urgency: 'low' };
   }
-  if (statusNorm === 'cancelled') {
+  if (isDecoJobCancelled(job)) {
     return { job, score: 0, matchedRules: [], reason: 'Cancelled', urgency: 'low' };
   }
   const due = pd(job.dateDue) || pd(job.productionDueDate);

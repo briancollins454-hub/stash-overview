@@ -31,6 +31,7 @@ import {
   TrendingDown, Activity,
 } from 'lucide-react';
 import { UnifiedOrder, DecoJob } from '../types';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 import { addWorkingDays } from '../utils/workingDays';
 import type { HolidayRange } from './SettingsModal';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
@@ -125,11 +126,6 @@ const hashHue = (s: string): number => {
 };
 
 // ─── Status helpers (mirrored from CreditBlockList / FinancialDashboard) ────
-
-const isCancelled = (j: DecoJob): boolean => {
-  const status = (j.status || '').toLowerCase();
-  return status === 'cancelled' || j.paymentStatus === '7';
-};
 
 const parseTermsDays = (terms: string | undefined | null, fallback = 30): number => {
   if (!terms) return fallback;
@@ -545,7 +541,7 @@ const MobileSummary: React.FC<Props> = ({
     };
     const now = Date.now();
     for (const j of jobs) {
-      if (isCancelled(j) || j.isQuote) continue;
+      if (isDecoJobCancelled(j) || j.isQuote) continue;
       const status = j.status || '';
       // Prefer productionDueDate (the production-floor target) over
       // dateDue (account-side); matches PriorityBoard scoring.
@@ -655,7 +651,7 @@ const MobileSummary: React.FC<Props> = ({
     let invoicedOutstanding = 0;
     let workInProgress = 0;
     for (const j of financeJobs) {
-      if (isCancelled(j as DecoJob) || j.isQuote) continue;
+      if (isDecoJobCancelled(j as DecoJob) || j.isQuote) continue;
       const out = toNumber(j.outstandingBalance);
       if (out <= 0) continue;
       totalOutstanding += out;
@@ -670,7 +666,7 @@ const MobileSummary: React.FC<Props> = ({
     const byCustomer = new Map<string, { name: string; balance: number; oldestDays: number }>();
     const nowMs = Date.now();
     for (const j of financeJobs) {
-      if (isCancelled(j as DecoJob) || j.isQuote) continue;
+      if (isDecoJobCancelled(j as DecoJob) || j.isQuote) continue;
       const out = toNumber(j.outstandingBalance);
       if (out <= 0.009) continue;
       if (!j.dateInvoiced) continue;

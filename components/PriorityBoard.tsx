@@ -8,6 +8,7 @@ import {
 } from '../services/priorityEngine';
 import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore';
 import { displayStaffName } from '../services/staffDisplay';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -36,9 +37,6 @@ interface Props {
   lastSyncTime?: number | null;
   loading?: boolean;
 }
-
-const isCancelled = (j: DecoJob) =>
-  (j.status || '').toLowerCase() === 'cancelled' || j.paymentStatus === '7';
 
 const fmtK = (n: number) => {
   if (n >= 1000) return '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -575,7 +573,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
 
   const active = useMemo(() =>
     allJobs.filter(j => {
-      if (isCancelled(j)) return false;
+      if (isDecoJobCancelled(j)) return false;
       const st = (j.status || '').toLowerCase();
       return st !== 'shipped';
     }),

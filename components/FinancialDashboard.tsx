@@ -18,6 +18,7 @@ const loadExcelJS = (): Promise<ExcelJSModule> => {
 };
 import { DecoJob, ShopifyOrder } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 import { getItem, setItem } from '../services/localStore';
 import { supabaseFetch } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
@@ -179,11 +180,6 @@ const paymentStatusLabel = (ps: string | undefined): string => {
   if (ps.toLowerCase().includes('paid')) return 'Paid';
   if (ps.toLowerCase().includes('invoice')) return 'Invoiced';
   return ps;
-};
-
-const isCancelled = (j: DecoJob): boolean => {
-  const status = (j.status || '').toLowerCase();
-  return status === 'cancelled' || j.paymentStatus === '7';
 };
 
 const paymentStatusColor = (ps: string | undefined): string => {
@@ -574,7 +570,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
 
     return Array.from(map.entries()).map(([name, jobs]) => {
       // Exclude cancelled and quote jobs from financial figures
-      const activeJobs = jobs.filter(j => !isCancelled(j) && !j.isQuote);
+      const activeJobs = jobs.filter(j => !isDecoJobCancelled(j) && !j.isQuote);
 
       const totalOutstanding = activeJobs.reduce((s, j) => s + (j.outstandingBalance || 0), 0);
       const totalBillable = activeJobs.reduce((s, j) => s + (j.billableAmount || 0), 0);
@@ -650,7 +646,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     const overdue60 = customersWithInvoicedBalance.filter(a => a.agingBucket === '61-90' || a.agingBucket === '90+');
 
     // Exclude cancelled and quotes from financial calculations (quotes counted separately)
-    const activeJobs = allJobs.filter(j => !isCancelled(j) && !j.isQuote);
+    const activeJobs = allJobs.filter(j => !isDecoJobCancelled(j) && !j.isQuote);
 
     // Aging buckets — only for invoiced orders (jobs with dateInvoiced)
     const aging = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };

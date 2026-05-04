@@ -29,6 +29,7 @@ import {
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { fetchDecoFinancials } from '../services/apiService';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -78,11 +79,6 @@ const parseTermsDays = (terms: string | undefined | null, fallback = 30): number
   if (!m) return fallback;
   const n = parseInt(m[1], 10);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
-};
-
-const isCancelled = (j: DecoJob): boolean => {
-  const status = (j.status || '').toLowerCase();
-  return status === 'cancelled' || j.paymentStatus === '7';
 };
 
 const daysBetween = (fromIso: string, toMs = Date.now()): number => {
@@ -226,7 +222,7 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, settings, onNaviga
     const byCustomer = new Map<string, OverdueInvoice[]>();
 
     for (const j of allJobs) {
-      if (isCancelled(j) || j.isQuote) continue;
+      if (isDecoJobCancelled(j) || j.isQuote) continue;
       const outstanding = typeof j.outstandingBalance === 'string'
         ? parseFloat(j.outstandingBalance as any)
         : (j.outstandingBalance || 0);

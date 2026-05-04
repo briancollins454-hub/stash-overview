@@ -1,4 +1,5 @@
 import type { DecoJob } from '../types';
+import { isDecoJobCancelled } from './decoJobFilters';
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 const pd = (d?: string) => (d ? new Date(d) : null);
@@ -42,10 +43,7 @@ export function buildDigest(jobs: DecoJob[], type: 'daily' | 'weekly'): DigestDa
     : `${fmtDate(cutoff)} \u2013 ${fmtDate(now)}`;
 
   // Exclude cancelled
-  const active = jobs.filter(j => {
-    const st = (j.status || '').toLowerCase();
-    return st !== 'cancelled' && j.paymentStatus !== '7';
-  });
+  const active = jobs.filter(j => !isDecoJobCancelled(j));
 
   const notShipped = active.filter(j => (j.status || '').toLowerCase() !== 'shipped');
 

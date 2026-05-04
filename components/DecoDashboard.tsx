@@ -61,7 +61,7 @@ const getProductionStatusBadge = (status: string) => {
     if (s === 'not ordered') return 'bg-red-50 text-red-800 border-red-200';
     if (s === 'unknown') return 'bg-gray-50 text-gray-400 border-gray-200 italic font-medium';
     if (s === 'awaiting processing') return 'bg-gray-100 text-gray-600 border-gray-200';
-    if (s === 'cancelled' || s === 'on hold') return 'bg-red-100 text-red-700 border-red-300';
+    if (s === 'cancelled' || s === 'canceled' || s === 'on hold') return 'bg-red-100 text-red-700 border-red-300';
     if (s.includes('awaiting stock')) return 'bg-amber-100 text-amber-800 border-amber-200';
     if (s.includes('quote') || s.includes('artwork') || s.includes('po')) return 'bg-orange-50 text-orange-800 border-orange-200';
     if (s.includes('production') || s.includes('order') || s.includes('quality') || s.includes('process')) return 'bg-blue-50 text-blue-800 border-blue-200';

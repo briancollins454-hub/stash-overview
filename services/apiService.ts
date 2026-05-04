@@ -1,4 +1,5 @@
 import { DecoJob, ShopifyOrder, DecoItem } from '../types';
+import { normalizeDecoCancelStatusString } from './decoJobFilters';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
 
@@ -29,10 +30,13 @@ export const isEligibleForMapping = (itemName: string, productType?: string): bo
 
 const mapDecoStatus = (status: string | number): string => {
     if (!status) return 'Unknown';
-    if (typeof status === 'string' && isNaN(parseInt(status)) && status.trim() !== '') {
-        return status.trim();
+    if (typeof status === 'string' && isNaN(parseInt(status, 10)) && status.trim() !== '') {
+        const t = status.trim();
+        const canonCancel = normalizeDecoCancelStatusString(t);
+        if (canonCancel) return canonCancel;
+        return t;
     }
-    const statusNum = typeof status === 'string' ? parseInt(status) : status;
+    const statusNum = typeof status === 'string' ? parseInt(status, 10) : status;
     const statusMap: Record<number, string> = {
         1: 'Awaiting Processing', 2: 'Completed', 3: 'Shipped', 4: 'Cancelled', 7: 'On Hold',
         8: 'Not Ordered', 9: 'Awaiting Stock', 10: 'Awaiting Artwork',

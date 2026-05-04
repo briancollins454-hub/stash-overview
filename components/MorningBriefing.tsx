@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { DecoJob, UnifiedOrder } from '../types';
 import { getItem } from '../services/localStore';
+import { isDecoJobCancelled } from '../services/decoJobFilters';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -9,8 +10,6 @@ interface Props {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-const isCancelled = (j: DecoJob) =>
-  (j.status || '').toLowerCase() === 'cancelled' || j.paymentStatus === '7';
 const pd = (d?: string) => (d ? new Date(d) : null);
 const fmt = (n: number) => '\u00a3' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtK = (n: number) => n >= 1000 ? '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : fmt(n);
@@ -110,7 +109,7 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     const fourteenAgo = new Date(t0); fourteenAgo.setDate(t0.getDate() - 14);
     const todayEnd = new Date(t0); todayEnd.setHours(23, 59, 59, 999);
 
-    const live = allDecoJobs.filter(j => !isCancelled(j));
+    const live = allDecoJobs.filter(j => !isDecoJobCancelled(j));
     const active = live.filter(j => {
       const st = (j.status || '').toLowerCase();
       return st !== 'shipped' && st !== 'completed';

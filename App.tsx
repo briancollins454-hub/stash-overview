@@ -9,6 +9,7 @@ import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
+import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
@@ -1883,7 +1884,7 @@ const App: React.FC = () => {
           const st = (j.status || '').toLowerCase();
           if (st === 'shipped') result.shipped += 1;
           // Cancelled is signalled by either status text or paymentStatus = '7'.
-          else if (st === 'cancelled' || j.paymentStatus === '7') result.cancelled += 1;
+          else if (isDecoJobCancelled(j)) result.cancelled += 1;
       }
 
       setRawDecoJobs(prev => {

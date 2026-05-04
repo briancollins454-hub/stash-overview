@@ -1,13 +1,11 @@
 import type { DecoJob } from '../types';
 import { calculatePriority, PRIORITY_SECTIONS, type PrioritySection } from './priorityEngine';
-
-const isCancelled = (j: DecoJob) =>
-  (j.status || '').toLowerCase() === 'cancelled' || j.paymentStatus === '7';
+import { isDecoJobCancelled } from './decoJobFilters';
 
 /** Active jobs the Priority Board would show (non-shipped, non-cancelled). */
 export function activePriorityJobs(jobs: DecoJob[]): DecoJob[] {
   return jobs.filter(j => {
-    if (isCancelled(j)) return false;
+    if (isDecoJobCancelled(j)) return false;
     const st = (j.status || '').toLowerCase();
     return st !== 'shipped';
   });
