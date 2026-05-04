@@ -2,12 +2,17 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Package, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download,
   RefreshCw, Check, Eye, EyeOff, Copy, Undo2, Printer, UserRound, ChevronDown,
-  CloudDownload,
+  CloudDownload, CalendarRange,
 } from 'lucide-react';
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
 import { fetchDecoFinancials } from '../services/apiService';
+import {
+  DAYS_SHIP_BUCKET_OPTIONS,
+  matchesDaysSinceShipBucket,
+  type DaysSinceShipBucket,
+} from '../constants/daysSinceShipBuckets';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -104,9 +109,12 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   const [isTogglingId, setIsTogglingId] = useState<string | null>(null);
 
   // Responsible-person filter. '' means "show all". Selecting a specific
-  // name narrows the table (and the PDF export) to that staff member so
+  // name narrows the table (and the PDF / CSV export) to that staff member so
   // they can print just their own shipped-but-not-invoiced orders.
   const [responsibleFilter, setResponsibleFilter] = useState<string>('');
+
+  // Days since ship — same bands as Unpaid Orders; narrows table, totals, CSV, PDF.
+  const [daysSinceBucket, setDaysSinceBucket] = useState<DaysSinceShipBucket>('all');
 
   // Load from the FinancialDashboard's Supabase cache (finance_jobs) —
   // keeps us decoupled from the Finance tab's sync cycle.
@@ -392,6 +400,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       });
     }
 
+    if (daysSinceBucket !== 'all') {
+      list = list.filter(j => matchesDaysSinceShipBucket(j.daysSinceShipped, daysSinceBucket));
+    }
+
     list = [...list].sort((a, b) => {
       let av: any, bv: any;
       switch (sortKey) {
@@ -409,7 +421,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       return 0;
     });
     return list;
-  }, [jobs, search, sortKey, sortDir, showSent, responsibleFilter]);
+  }, [jobs, search, sortKey, sortDir, showSent, responsibleFilter, daysSinceBucket]);
 
   const totalOutstanding = useMemo(() => filtered.reduce((s, j) => s + (j.outstandingBalance || 0), 0), [filtered]);
   const sentCount = useMemo(() => Object.keys(paymentSent).length, [paymentSent]);
@@ -432,7 +444,8 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   };
 
   const exportCsv = () => {
-    const header = ['Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Outstanding', 'Date Shipped', 'Days Since Shipped', 'Payment Request Sent', 'Sent At', 'Sent By'];
+    const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages';
+    const header = ['Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Outstanding', 'Date Shipped', 'Days Since Shipped', 'Payment Request Sent', 'Sent At', 'Sent By', 'Aging filter'];
     const rows = filtered.map(j => [
       j.jobNumber,
       j.poNumber || '',
@@ -445,13 +458,15 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       j.paymentRequestSentAt ? 'Yes' : 'No',
       j.paymentRequestSentAt || '',
       j.paymentRequestSentBy || '',
+      agingLabel,
     ]);
     const csv = [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `shipped-not-invoiced-${new Date().toISOString().slice(0, 10)}.csv`;
+    const slug = daysSinceBucket === 'all' ? 'all-ages' : daysSinceBucket.replace(/[^a-z0-9-]/gi, '');
+    a.download = `shipped-not-invoiced-${slug}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -461,7 +476,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   // staff member can print a paper sheet of their own jobs that shipped
   // without an invoice — the goal is to prompt them to raise and send
   // the invoice. Scopes to whatever's currently on screen (respecting
-  // search + responsible + showSent filters).
+  // search + responsible + days-since-ship + showSent filters).
   const printChaseList = () => {
     if (filtered.length === 0) return;
 
@@ -474,6 +489,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     const whoLabel = responsibleFilter
       ? (responsibleFilter === UNASSIGNED ? 'Unassigned jobs' : responsibleFilter)
       : 'All staff';
+    const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages (days)';
 
     const fmtMoney = (n: number) =>
       '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -557,7 +573,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         <div>
           <div class="brand">Stash · Invoice-to-send</div>
           <h1>Shipped Not Invoiced — Chase List</h1>
-          <div style="font-size:13px;color:#4b5563;margin-top:4px;">Responsible: <strong style="color:#111827;">${esc(whoLabel)}</strong></div>
+          <div style="font-size:13px;color:#4b5563;margin-top:4px;line-height:1.5;">
+            Responsible: <strong style="color:#111827;">${esc(whoLabel)}</strong><br>
+            Days since ship: <strong style="color:#111827;">${esc(agingLabel)}</strong>
+          </div>
         </div>
         <div class="meta">
           <strong>${esc(dateStr)}</strong><br>
@@ -604,7 +623,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
       </table>
 
       <div class="print-footer">
-        Stash Shipped-Not-Invoiced · Chase list for ${esc(whoLabel)} · ${esc(dateStr)} ${esc(timeStr)} · Raise the invoice, email it to the customer, then mark the job as sent in Stash.
+        Stash Shipped-Not-Invoiced · ${esc(agingLabel)} · ${esc(whoLabel)} · ${esc(dateStr)} ${esc(timeStr)} · Raise the invoice, email it to the customer, then mark the job as sent in Stash.
       </div>
     `;
 
@@ -616,7 +635,8 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
     const scopeTag = responsibleFilter
       ? (responsibleFilter === UNASSIGNED ? 'unassigned' : responsibleFilter.replace(/\s+/g, '_'))
       : 'all-staff';
-    const title = `Shipped Not Invoiced — ${scopeTag} — ${dateStr}`;
+    const ageTag = daysSinceBucket === 'all' ? 'all-ages' : daysSinceBucket;
+    const title = `Shipped Not Invoiced — ${scopeTag} — ${ageTag} — ${dateStr}`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${styles}</style></head><body>${bodyHtml}</body></html>`;
     win.document.open();
     win.document.write(html);
@@ -745,6 +765,21 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
         </div>
 
+        <div className="relative">
+          <CalendarRange className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+          <select
+            value={daysSinceBucket}
+            onChange={e => setDaysSinceBucket(e.target.value as DaysSinceShipBucket)}
+            className={`pl-9 pr-8 py-2 rounded-lg border ${borderColor} ${cardBg} ${textPrimary} text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none appearance-none min-w-[200px]`}
+            title="Filter by days since ship (same basis as the Days Ago column)"
+          >
+            {DAYS_SHIP_BUCKET_OPTIONS.map(opt => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
+          <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+        </div>
+
         <button
           onClick={() => setShowSent(s => !s)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} text-xs font-medium transition-colors ${showSent
@@ -764,9 +799,17 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
               ? 'bg-slate-500/40 text-white/60 cursor-not-allowed'
               : 'bg-amber-600 text-white hover:bg-amber-700'
           }`}
-          title={responsibleFilter
-            ? `Print an invoice chase list for ${responsibleFilter === UNASSIGNED ? 'unassigned jobs' : responsibleFilter}`
-            : 'Print an invoice chase list for the currently shown jobs'}
+          title={
+            [
+              responsibleFilter
+                ? `Responsible: ${responsibleFilter === UNASSIGNED ? 'unassigned' : responsibleFilter}`
+                : 'All staff',
+              daysSinceBucket !== 'all'
+                ? (DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? '')
+                : 'All ages',
+              'Print matches what you see in the table below.',
+            ].join(' · ')
+          }
         >
           <Printer className="w-3.5 h-3.5" /> Chase list PDF
         </button>
@@ -775,13 +818,14 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           <Download className="w-3.5 h-3.5" /> Export CSV
         </button>
 
-        {responsibleFilter && (
+        {(responsibleFilter || daysSinceBucket !== 'all') && (
           <button
-            onClick={() => setResponsibleFilter('')}
+            type="button"
+            onClick={() => { setResponsibleFilter(''); setDaysSinceBucket('all'); }}
             className={`text-xs ${textSecondary} hover:underline`}
-            title="Clear responsible filter"
+            title="Clear responsible person and days-since-ship filters"
           >
-            Clear filter
+            Clear filters
           </button>
         )}
       </div>
@@ -911,6 +955,10 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
           </div>
         )}
       </div>
+
+      <p className={`text-xs ${textSecondary} px-1`}>
+        Use <span className="font-semibold">days since ship</span> to isolate aging bands — the table, job count, total outstanding, CSV export, and chase PDF all use the same filter (with search, responsible person, and sent/hidden toggle).
+      </p>
     </div>
   );
 };
