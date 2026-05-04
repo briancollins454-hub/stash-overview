@@ -327,18 +327,50 @@ const URGENCY_PRINT_CLASS: Record<Urgency, string> = {
   low: 'u-low',
 };
 
+function aggregatePriorityPrintTotals(
+  sections: Array<PrioritySection & { items: PriorityResult[] }>,
+  uncategorised: PriorityResult[],
+  includeKeys: Set<string>,
+): { orders: number; critical: number; high: number; value: number; titles: string[] } {
+  let orders = 0;
+  let critical = 0;
+  let high = 0;
+  let value = 0;
+  const titles: string[] = [];
+  for (const sec of sections) {
+    if (!includeKeys.has(sec.key) || sec.items.length === 0) continue;
+    titles.push(sec.title);
+    orders += sec.items.length;
+    critical += sec.items.filter(r => r.urgency === 'critical').length;
+    high += sec.items.filter(r => r.urgency === 'high').length;
+    value += sec.items.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  }
+  if (includeKeys.has('other') && uncategorised.length > 0) {
+    titles.push('Other flagged');
+    orders += uncategorised.length;
+    critical += uncategorised.filter(r => r.urgency === 'critical').length;
+    high += uncategorised.filter(r => r.urgency === 'high').length;
+    value += uncategorised.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  }
+  return { orders, critical, high, value, titles };
+}
+
 function openPriorityHandoffPrint(opts: {
   sections: Array<PrioritySection & { items: PriorityResult[] }>;
   uncategorised: PriorityResult[];
   readyAtMap: ReadyAtMap;
   now: Date;
   audienceLine: string;
+  /** Which board columns to include (`other` = Other flagged). */
+  includeKeys: Set<string>;
   totalOrders: number;
   totalCritical: number;
   totalHigh: number;
   totalValue: number;
+  /** Human-readable list for the PDF banner, e.g. "Awaiting PO, Awaiting Stock". */
+  sectionsIncludedLine: string;
 }): void {
-  const { sections, uncategorised, readyAtMap, now, audienceLine, totalOrders, totalCritical, totalHigh, totalValue } = opts;
+  const { sections, uncategorised, readyAtMap, now, audienceLine, includeKeys, totalOrders, totalCritical, totalHigh, totalValue, sectionsIncludedLine } = opts;
   const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -366,6 +398,7 @@ function openPriorityHandoffPrint(opts: {
 
   let body = '';
   for (const sec of sections) {
+    if (!includeKeys.has(sec.key)) continue;
     if (sec.items.length === 0) continue;
     const rows = sec.items.map((it, i) => renderRow(it, i, sec, 'metric')).join('');
     body += `
@@ -390,7 +423,7 @@ function openPriorityHandoffPrint(opts: {
       </section>`;
   }
 
-  if (uncategorised.length > 0) {
+  if (includeKeys.has('other') && uncategorised.length > 0) {
     const fakeSec: PrioritySection = {
       key: 'other',
       title: 'Other flagged',
@@ -484,7 +517,7 @@ function openPriorityHandoffPrint(opts: {
           <div class="kpi"><span>Pipeline</span><b>${fmtK(totalValue)}</b></div>
         </div>
       </div>
-      <div class="note">Same ordering as the live Priority Board (longest-waiting first within each column). Forward this PDF to the named staff or discuss in stand-up.</div>
+      <div class="note">Sections: ${escHandoffHtml(sectionsIncludedLine)}. Same ordering as the live board (longest-waiting first within each column).</div>
       <div class="blocks">${body || '<p style="padding:24px;color:#9ca3af;">No jobs in scope for this export.</p>'}</div>
       <div class="foot">Generated from Stash · Priority rules match in-app scoring</div>
     </div>
@@ -649,9 +682,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const totalHigh = sections.reduce((a, s) => a + s.items.filter(r => r.urgency === 'high').length, 0);
   const totalValue = sections.reduce((a, s) => a + s.items.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0), 0);
 
-  const uncategorisedValue = uncategorised.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
-  const uncategorisedCritical = uncategorised.filter(r => r.urgency === 'critical').length;
-  const uncategorisedHigh = uncategorised.filter(r => r.urgency === 'high').length;
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [printSelection, setPrintSelection] = useState<Record<string, boolean>>({});
 
   const printAudienceLine =
     staffFilter === STAFF_ALL
@@ -660,22 +692,48 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
         ? 'Unassigned in Deco (no sales / responsible name on file)'
         : `Prepared for: ${staffFilter}`;
 
-  const handlePrintHandoff = () => {
-    const ord = totalOrders + uncategorised.length;
-    const crit = totalCritical + uncategorisedCritical;
-    const high = totalHigh + uncategorisedHigh;
-    const val = totalValue + uncategorisedValue;
+  const openPrintModal = () => {
+    const init: Record<string, boolean> = {};
+    for (const sec of sections) init[sec.key] = sec.items.length > 0;
+    init.other = uncategorised.length > 0;
+    setPrintSelection(init);
+    setPrintModalOpen(true);
+  };
+
+  const setPrintAllSections = (on: boolean) => {
+    const next: Record<string, boolean> = {};
+    for (const sec of sections) {
+      next[sec.key] = on && sec.items.length > 0;
+    }
+    next.other = on && uncategorised.length > 0;
+    setPrintSelection(next);
+  };
+
+  const confirmPrintHandoff = () => {
+    const includeKeys = new Set(Object.entries(printSelection).filter(([, v]) => v).map(([k]) => k));
+    if (includeKeys.size === 0) {
+      window.alert('Select at least one section to include.');
+      return;
+    }
+    const agg = aggregatePriorityPrintTotals(sections, uncategorised, includeKeys);
+    if (agg.orders === 0) {
+      window.alert('No jobs in the selected sections. Pick columns that have orders, or sync Deco.');
+      return;
+    }
     openPriorityHandoffPrint({
       sections,
       uncategorised,
       readyAtMap,
       now,
       audienceLine: printAudienceLine,
-      totalOrders: ord,
-      totalCritical: crit,
-      totalHigh: high,
-      totalValue: val,
+      includeKeys,
+      totalOrders: agg.orders,
+      totalCritical: agg.critical,
+      totalHigh: agg.high,
+      totalValue: agg.value,
+      sectionsIncludedLine: agg.titles.join(', '),
     });
+    setPrintModalOpen(false);
   };
 
   const toggleSection = (key: string) => setExpandedSection(prev => (prev === key ? null : key));
@@ -717,9 +775,9 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
             </label>
             <button
               type="button"
-              onClick={handlePrintHandoff}
+              onClick={openPrintModal}
               disabled={totalOrders === 0 && uncategorised.length === 0}
-              title="Opens a print-ready handoff (Save as PDF in the print dialog)"
+              title="Choose which board columns to include, then print or save as PDF"
               className="px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 disabled:bg-violet-500/30 disabled:cursor-not-allowed text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
@@ -871,6 +929,99 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
         <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 px-6 py-12 text-center">
           <p className="text-white/50 text-sm">No orders found for this filter.</p>
           <p className="text-white/25 text-xs mt-1">Try &quot;All staff&quot; or another staff filter, or sync Deco.</p>
+        </div>
+      )}
+
+      {printModalOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="print-modal-title"
+          onClick={() => setPrintModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-indigo-500/30 bg-[#16162a] shadow-2xl p-5 text-left"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 id="print-modal-title" className="text-base font-black text-white tracking-tight">PDF — choose sections</h2>
+            <p className="text-[11px] text-white/45 mt-1 mb-4">
+              Tick only the columns you want in this handoff. KPIs on the PDF reflect your selection (respects the staff filter above).
+            </p>
+            <div className="space-y-2 max-h-[min(48vh,360px)] overflow-y-auto pr-1">
+              {sections.map(sec => {
+                const n = sec.items.length;
+                const disabled = n === 0;
+                const checked = !!printSelection[sec.key];
+                return (
+                  <label
+                    key={sec.key}
+                    className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                      disabled ? 'border-white/5 opacity-45 cursor-not-allowed' : 'border-white/10 hover:bg-white/5 cursor-pointer'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 rounded border-white/20 bg-[#2a2a55] text-violet-500 focus:ring-violet-500/50"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => {
+                        if (!disabled) setPrintSelection(p => ({ ...p, [sec.key]: !p[sec.key] }));
+                      }}
+                    />
+                    <span className="text-xl shrink-0 leading-none">{sec.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-white">{sec.title}</span>
+                      <span className="text-[10px] text-white/35">{n === 0 ? 'No jobs in this column' : `${n} job${s(n)}`}</span>
+                    </span>
+                  </label>
+                );
+              })}
+              <label
+                className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                  uncategorised.length === 0 ? 'border-white/5 opacity-45 cursor-not-allowed' : 'border-white/10 hover:bg-white/5 cursor-pointer'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-white/20 bg-[#2a2a55] text-violet-500 focus:ring-violet-500/50"
+                  checked={!!printSelection.other}
+                  disabled={uncategorised.length === 0}
+                  onChange={() => {
+                    if (uncategorised.length > 0) setPrintSelection(p => ({ ...p, other: !p.other }));
+                  }}
+                />
+                <span className="text-xl shrink-0 leading-none">🔎</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-indigo-300">Other flagged</span>
+                  <span className="text-[10px] text-white/35">
+                    {uncategorised.length === 0 ? 'None' : `${uncategorised.length} job${s(uncategorised.length)}`}
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-4 text-[10px] font-bold uppercase tracking-wide">
+              <button type="button" className="text-violet-300 hover:text-violet-200" onClick={() => setPrintAllSections(true)}>Select all</button>
+              <span className="text-white/20">·</span>
+              <button type="button" className="text-white/40 hover:text-white/70" onClick={() => setPrintAllSections(false)}>Clear</button>
+            </div>
+            <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-white/10">
+              <button
+                type="button"
+                className="px-3 py-2 rounded-lg text-xs font-bold text-white/60 hover:bg-white/5"
+                onClick={() => setPrintModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-400 text-white text-xs font-black uppercase tracking-wider"
+                onClick={confirmPrintHandoff}
+              >
+                Generate PDF
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
