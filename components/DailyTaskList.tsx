@@ -137,6 +137,21 @@ const FINANCE_WHY_INTRO: Record<string, string> = {
 };
 
 function priorityIssueExplanation(job: DecoJob, pr: PriorityResult): { summary: string; factors: string[] } {
+  const jobSt = (job.status || '').trim().toLowerCase();
+  if (jobSt === 'shipped') {
+    return {
+      summary:
+        'Deco shows this job as Shipped. It remains on this date because the daily list is stored in your database until you tick Done or delete the row — it is not removed automatically when Deco status changes.',
+      factors: [],
+    };
+  }
+  if (jobSt === 'cancelled') {
+    return {
+      summary:
+        'Deco shows this job as Cancelled. Remove or complete this checklist row; new pulls will not treat it as active priority work.',
+      factors: [],
+    };
+  }
   const factors = pr.matchedRules.filter(Boolean);
   if (factors.length === 0) {
     return {

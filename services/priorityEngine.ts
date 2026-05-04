@@ -58,6 +58,15 @@ export function calculatePriority(job: DecoJob, now: Date): PriorityResult {
   let score = 0;
   const matchedRules: string[] = [];
   const status = job.status || '';
+  const statusNorm = status.trim().toLowerCase();
+  // Terminal states: no status-specific PRIORITY_RULES row, so we would otherwise fall
+  // through to "generic overdue vs due date" and falsely flag e.g. Shipped as critical.
+  if (statusNorm === 'shipped') {
+    return { job, score: 0, matchedRules: [], reason: 'Shipped', urgency: 'low' };
+  }
+  if (statusNorm === 'cancelled') {
+    return { job, score: 0, matchedRules: [], reason: 'Cancelled', urgency: 'low' };
+  }
   const due = pd(job.dateDue) || pd(job.productionDueDate);
   const ordered = pd(job.dateOrdered);
   const val = job.orderTotal || job.billableAmount || 0;
