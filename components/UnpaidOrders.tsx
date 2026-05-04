@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CircleDollarSign, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download,
   RefreshCw, Check, Copy, ShieldAlert, ChevronDown, ChevronRight, ShieldCheck, Undo2,
-  Printer, UserRound, CloudDownload,
+  Printer, UserRound, CloudDownload, CalendarRange,
 } from 'lucide-react';
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
@@ -25,6 +25,31 @@ type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShippe
 const UNASSIGNED = '\u0000__UNASSIGNED__';
 /** Ignore float noise when deciding if a priced order is fully settled. */
 const BALANCE_OWED_EPS = 0.005;
+
+/** Days since ship anchor (same as `daysSince` on each row). */
+type DaysSinceShipBucket = 'all' | 'lt30' | '30-39' | '40-49' | '50-59' | '60-89' | 'ge90';
+
+const DAYS_SHIP_BUCKET_OPTIONS: { id: DaysSinceShipBucket; label: string }[] = [
+  { id: 'all', label: 'All ages (days)' },
+  { id: 'lt30', label: 'Under 30 days' },
+  { id: '30-39', label: '30–39 days' },
+  { id: '40-49', label: '40–49 days' },
+  { id: '50-59', label: '50–59 days' },
+  { id: '60-89', label: '60–89 days' },
+  { id: 'ge90', label: '90+ days' },
+];
+
+function matchesDaysSinceShipBucket(daysSince: number, bucket: DaysSinceShipBucket): boolean {
+  if (bucket === 'all') return true;
+  if (bucket === 'lt30') return daysSince < 30;
+  if (bucket === '30-39') return daysSince >= 30 && daysSince <= 39;
+  if (bucket === '40-49') return daysSince >= 40 && daysSince <= 49;
+  if (bucket === '50-59') return daysSince >= 50 && daysSince <= 59;
+  if (bucket === '60-89') return daysSince >= 60 && daysSince <= 89;
+  if (bucket === 'ge90') return daysSince >= 90;
+  return true;
+}
+
 type SortDir = 'asc' | 'desc';
 type SectionKey = 'zero' | 'priced' | 'authorised';
 
@@ -138,9 +163,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
   const toggleSection = (key: SectionKey) => setCollapsed(c => ({ ...c, [key]: !c[key] }));
 
   // Responsible-person filter. '' means "show all". Selecting a specific
-  // name here narrows every section (and the PDF export) to that staff
+  // name here narrows every section (and the PDF / CSV export) to that staff
   // member's jobs. UNASSIGNED matches jobs with no salesperson on them.
   const [responsibleFilter, setResponsibleFilter] = useState<string>('');
+
+  // Days since ship — narrows tables, summary tiles, CSV, and chase PDF together.
+  const [daysSinceBucket, setDaysSinceBucket] = useState<DaysSinceShipBucket>('all');
 
   // ─── Data loading ────────────────────────────────────────────────────
   const loadFromFinanceCache = useCallback(async () => {
@@ -499,6 +527,9 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
         return sp === responsibleFilter;
       });
     }
+    if (daysSinceBucket !== 'all') {
+      list = list.filter(j => matchesDaysSinceShipBucket(j.daysSince, daysSinceBucket));
+    }
     // Authorisation only has semantic meaning for zero-priced rows. If the
     // order later gets a real price, it drifts into priced-but-unpaid and
     // the authorisation is implicitly ignored (but not deleted).
@@ -508,7 +539,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       .filter(j => !j.isZeroPriced && (j.outstandingBalance || 0) > BALANCE_OWED_EPS && j.hasShipped)
       .sort(sorter);
     return { zeroPricedRows, pricedRows, authorisedRows };
-  }, [jobs, search, sorter, responsibleFilter]);
+  }, [jobs, search, sorter, responsibleFilter, daysSinceBucket]);
 
   const zeroPricedOutstanding = useMemo(
     () => zeroPricedRows.reduce((s, j) => s + (j.outstandingBalance || 0), 0),
@@ -551,7 +582,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
   };
 
   const exportCsv = () => {
-    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By'];
+    const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages';
+    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By', 'Aging filter'];
     const toRow = (j: Row, section: string) => [
       section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName,
       j.salesPerson || '',
@@ -562,6 +594,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       j.hasShipped ? 'YES' : 'no',
       j.authorisedAt || '',
       j.authorisedBy || '',
+      agingLabel,
     ];
     const rows = [
       ...zeroPricedRows.map(r => toRow(r, 'Zero priced')),
@@ -573,7 +606,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `unpaid-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    const slug = daysSinceBucket === 'all' ? 'all-ages' : daysSinceBucket.replace(/[^a-z0-9-]/gi, '');
+    a.download = `unpaid-orders-${slug}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -596,6 +630,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     const whoLabel = responsibleFilter
       ? (responsibleFilter === UNASSIGNED ? 'Unassigned jobs' : responsibleFilter)
       : 'All staff';
+    const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages (days)';
 
     const fmtMoney = (n: number) =>
       '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -703,7 +738,10 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
         <div>
           <div class="brand">Stash · Invoice Chase</div>
           <h1>Unpaid Invoice Chase List</h1>
-          <div style="font-size:13px;color:#4b5563;margin-top:4px;">Responsible: <strong style="color:#111827;">${esc(whoLabel)}</strong></div>
+          <div style="font-size:13px;color:#4b5563;margin-top:4px;line-height:1.5;">
+            Responsible: <strong style="color:#111827;">${esc(whoLabel)}</strong><br>
+            Days since ship: <strong style="color:#111827;">${esc(agingLabel)}</strong>
+          </div>
         </div>
         <div class="meta">
           <strong>${esc(dateStr)}</strong><br>
@@ -731,7 +769,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       ${renderSection('Priced but unpaid — invoice likely raised, payment outstanding', pricedRows, 'rose')}
 
       <div class="print-footer">
-        Stash Unpaid Orders · Chase list for ${esc(whoLabel)} · ${esc(dateStr)} ${esc(timeStr)} · Contact the customer to confirm invoicing / payment status.
+        Stash Unpaid Orders · ${esc(agingLabel)} · ${esc(whoLabel)} · ${esc(dateStr)} ${esc(timeStr)} · Contact the customer to confirm invoicing / payment status.
       </div>
     `;
 
@@ -743,7 +781,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     const scopeTag = responsibleFilter
       ? (responsibleFilter === UNASSIGNED ? 'unassigned' : responsibleFilter.replace(/\s+/g, '_'))
       : 'all-staff';
-    const title = `Unpaid Orders — ${scopeTag} — ${dateStr}`;
+    const ageTag = daysSinceBucket === 'all' ? 'all-ages' : daysSinceBucket;
+    const title = `Unpaid Orders — ${scopeTag} — ${ageTag} — ${dateStr}`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${styles}</style></head><body>${bodyHtml}</body></html>`;
     win.document.open();
     win.document.write(html);
@@ -1120,6 +1159,21 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
         </div>
 
+        <div className="relative">
+          <CalendarRange className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+          <select
+            value={daysSinceBucket}
+            onChange={e => setDaysSinceBucket(e.target.value as DaysSinceShipBucket)}
+            className={`pl-9 pr-8 py-2 rounded-lg border ${borderColor} ${cardBg} ${textPrimary} text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none appearance-none min-w-[200px]`}
+            title="Filter by days since ship (same basis as the Days column)"
+          >
+            {DAYS_SHIP_BUCKET_OPTIONS.map(opt => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
+          <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 ${textSecondary} pointer-events-none`} />
+        </div>
+
         <button
           onClick={printChaseList}
           disabled={zeroPricedRows.length + pricedRows.length === 0}
@@ -1128,9 +1182,17 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
               ? 'bg-slate-500/40 text-white/60 cursor-not-allowed'
               : 'bg-rose-600 text-white hover:bg-rose-700'
           }`}
-          title={responsibleFilter
-            ? `Print an invoice-chase list for ${responsibleFilter === UNASSIGNED ? 'unassigned jobs' : responsibleFilter}`
-            : 'Print an invoice-chase list for the currently shown jobs'}
+          title={
+            [
+              responsibleFilter
+                ? `Responsible: ${responsibleFilter === UNASSIGNED ? 'unassigned' : responsibleFilter}`
+                : 'All staff',
+              daysSinceBucket !== 'all'
+                ? (DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? '')
+                : 'All ages',
+              'Print matches what you see in the tables below.',
+            ].join(' · ')
+          }
         >
           <Printer className="w-3.5 h-3.5" /> Chase list PDF
         </button>
@@ -1139,13 +1201,14 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           <Download className="w-3.5 h-3.5" /> Export CSV
         </button>
 
-        {responsibleFilter && (
+        {(responsibleFilter || daysSinceBucket !== 'all') && (
           <button
-            onClick={() => setResponsibleFilter('')}
+            type="button"
+            onClick={() => { setResponsibleFilter(''); setDaysSinceBucket('all'); }}
             className={`text-xs ${textSecondary} hover:underline`}
-            title="Clear responsible filter"
+            title="Clear responsible person and days-since-ship filters"
           >
-            Clear filter
+            Clear filters
           </button>
         )}
       </div>
@@ -1255,7 +1318,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
       {/* Explanatory footer */}
       <div className={`text-xs ${textSecondary} px-1`}>
-        Shipped jobs only. The <span className="font-semibold">priced</span> section needs a positive outstanding balance (paid-in-full priced rows are hidden). Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, <span className="font-mono">Stash Shop</span> orders, and <span className="font-mono">Sample</span> orders. Sort defaults to newest shipped first.
+        Shipped jobs only. The <span className="font-semibold">priced</span> section needs a positive outstanding balance (paid-in-full priced rows are hidden). Use <span className="font-semibold">days since ship</span> to isolate aging bands — tables, totals, CSV, and chase PDF all use the same filter. Shown when Deco has <span className="font-semibold">no payment records</span> against the order. Excludes cancelled, quotes, &pound;0-balance internal <span className="font-mono">stash</span> customers, <span className="font-mono">GOK</span> / Gift of Kit orders, <span className="font-mono">Stash Shop</span> orders, and <span className="font-mono">Sample</span> orders. Sort defaults to newest shipped first.
       </div>
     </div>
   );
