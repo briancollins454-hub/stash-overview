@@ -528,6 +528,7 @@ const App: React.FC = () => {
               return {
                 ...item,
                 decorationType: item.decorationType || match.decorationType,
+                decorationTypes: item.decorationTypes?.length ? item.decorationTypes : match.decorationTypes,
                 stitchCount: item.stitchCount || match.stitchCount,
               };
             });
@@ -841,13 +842,19 @@ const App: React.FC = () => {
                                 const updatedItems = job.items.map((item, idx) => {
                                     const match = cached.decoration_data.items.find(c => c.lineIndex === idx);
                                     if (!match) return item;
-                                    if (item.decorationType && item.stitchCount) return item;
-                                    changed = true;
-                                    return {
+                                    const next = {
                                         ...item,
                                         decorationType: item.decorationType || match.decorationType,
+                                        decorationTypes: item.decorationTypes?.length ? item.decorationTypes : match.decorationTypes,
                                         stitchCount: item.stitchCount || match.stitchCount,
                                     };
+                                    if (
+                                        next.decorationType === item.decorationType &&
+                                        next.stitchCount === item.stitchCount &&
+                                        JSON.stringify(next.decorationTypes || []) === JSON.stringify(item.decorationTypes || [])
+                                    ) return item;
+                                    changed = true;
+                                    return next;
                                 });
                                 return { ...job, items: updatedItems };
                             });
@@ -866,7 +873,7 @@ const App: React.FC = () => {
                             // In cache with data → skip
                             if (cached.decoration_data?.items?.length > 0) return false;
                             // In cache but empty, AND job still has no decoration types → re-enrich
-                            return !j.items.some(i => i.decorationType);
+                            return !j.items.some(i => i.decorationType || (i.decorationTypes && i.decorationTypes.length > 0));
                         })
                         .map(j => j.jobNumber);
 
@@ -893,6 +900,7 @@ const App: React.FC = () => {
                                         return {
                                             ...item,
                                             decorationType: item.decorationType || match.decorationType,
+                                            decorationTypes: item.decorationTypes?.length ? item.decorationTypes : match.decorationTypes,
                                             stitchCount: item.stitchCount || match.stitchCount,
                                         };
                                     });

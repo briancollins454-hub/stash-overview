@@ -387,13 +387,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const targetId = String(jobIds[0]).trim();
     try {
       // Try the fast multi-strategy direct lookup first
-      const order = await fetchOrderById(targetId, false);
+      const order = await fetchOrderById(targetId, true);
       if (order) {
         return res.status(200).json({ results: [{ jobId: targetId, order }] });
       }
       // Fall back to date-range scan if direct strategies all miss
       console.log(`[Deco API] Direct lookup missed for #${targetId}, falling back to date scan`);
-      const results = await fetchOrdersByIds([targetId], false);
+      const results = await fetchOrdersByIds([targetId], true);
       return res.status(200).json({ results });
     } catch (error: any) {
       return res.status(500).json({ error: 'Single fetch failed', details: error.message });

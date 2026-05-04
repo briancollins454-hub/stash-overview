@@ -560,7 +560,7 @@ export const saveProductMapping = async (settings: ApiSettings, shopify_pattern:
 export interface CloudStitchCache {
     job_number: string;
     decoration_data: {
-        items: Array<{ lineIndex: number; decorationType?: string; stitchCount?: number }>;
+        items: Array<{ lineIndex: number; decorationType?: string; decorationTypes?: string[]; stitchCount?: number }>;
     };
     enriched_at: string;
 }
@@ -578,7 +578,7 @@ export const fetchStitchCache = async (): Promise<Map<string, CloudStitchCache>>
     return map;
 };
 
-export const saveStitchCache = async (entries: Array<{ job_number: string; items: Array<{ lineIndex: number; decorationType?: string; stitchCount?: number }>; enriched_at: string }>) => {
+export const saveStitchCache = async (entries: Array<{ job_number: string; items: Array<{ lineIndex: number; decorationType?: string; decorationTypes?: string[]; stitchCount?: number }>; enriched_at: string }>) => {
     if (entries.length === 0) return;
     try {
         await trackSave('stash_deco_stitch_cache', entries.length, async () => {

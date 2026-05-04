@@ -125,6 +125,10 @@ export interface DecoItem {
   totalPrice?: number;
   decorationDetails?: string;
   decorationType?: string;      // EMB, DTF, FLEX, TRANSFER, UV, FREEFORM, NONE, etc.
+  /** All decoration types on this line (views/areas/processes); use for mixed jobs. */
+  decorationTypes?: string[];
+  /** Workflow: units produced so far (Deco `qty_produced`) for partial progress vs `isProduced`. */
+  qtyProduced?: number;
   stitchCount?: number;         // per-item stitch count (embroidery)
   assignedTo?: string;
   estimatedCompletion?: string;

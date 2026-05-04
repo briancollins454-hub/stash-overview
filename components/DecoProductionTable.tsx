@@ -20,12 +20,32 @@ interface ProductionEstimate {
     isEmbroidery: boolean;
 }
 
+const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
+
+export function allItemDecoTypes(i: DecoItem): string[] {
+    if (i.decorationTypes?.length) return i.decorationTypes;
+    return i.decorationType ? [i.decorationType] : [];
+}
+
+export function itemHasPrintDecoration(i: DecoItem): boolean {
+    return allItemDecoTypes(i).some(t => PRINT_TYPES.has(t));
+}
+
+/** Units to credit toward EMB/print done columns (partial workflow qty_produced). */
+export function effectiveProducedUnits(i: DecoItem): number {
+    const qty = i.quantity || 0;
+    if (i.isShipped || i.isProduced) return qty;
+    const qpRaw = i.qtyProduced;
+    const qp = typeof qpRaw === 'number' && !Number.isNaN(qpRaw) ? Math.max(0, qpRaw) : 0;
+    if (qp <= 0) return 0;
+    return Math.min(qty, qp);
+}
+
 // Single source of truth for "is this row embroidery work?".
-// An item counts as embroidery if it's explicitly EMB, OR has a non-zero
-// stitchCount (some DecoNetwork jobs come through with a stitchCount but no
-// decorationType set).
+// Counts EMB on any process on the line (`decorationTypes`), stitches, or legacy primary type.
 export function isEmbItem(i: DecoItem): boolean {
-    return i.decorationType === 'EMB' || ((i.stitchCount ?? 0) > 0);
+    if ((i.stitchCount ?? 0) > 0) return true;
+    return allItemDecoTypes(i).some(t => t === 'EMB');
 }
 
 function estimateProductionTime(items: DecoItem[]): ProductionEstimate {
@@ -37,12 +57,17 @@ function estimateProductionTime(items: DecoItem[]): ProductionEstimate {
 
     items.forEach(item => {
         totalQty += item.quantity;
+        const types = allItemDecoTypes(item);
+        const printLabel = types.find(t => PRINT_TYPES.has(t)) || '';
         if (item.stitchCount && item.stitchCount > 0) {
             hasEmbroidery = true;
             totalStitches += item.stitchCount * item.quantity;
             stitchesPerItem = Math.max(stitchesPerItem, item.stitchCount);
+            if (printLabel) {
+                nonEmbMinutes += (DEFAULT_TIMES[printLabel] ?? 3) * item.quantity;
+            }
         } else {
-            const dt = item.decorationType || '';
+            const dt = printLabel || item.decorationType || '';
             const perItem = DEFAULT_TIMES[dt] ?? 3;
             nonEmbMinutes += perItem * item.quantity;
         }
@@ -135,8 +160,6 @@ type StatusFilter =
     | 'awaitingProcessing'
     | 'partiallyFulfilled'
     | 'awaitingShipping';
-
-const PRINT_TYPES = new Set(['FLEX', 'SCREEN', 'TRANSFER', 'DTF', 'DTG', 'UV', 'PRINT']);
 
 // Predicate for "Partially Fulfilled": some items shipped but not all.
 const isPartiallyFulfilled = (items: DecoItem[]): boolean => {
@@ -433,8 +456,14 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         let pending = 0;
         for (const i of j.items) {
             const s = getStage(i);
+            const qty = i.quantity || 0;
+            const qp = typeof i.qtyProduced === 'number' && !Number.isNaN(i.qtyProduced) ? Math.max(0, i.qtyProduced) : 0;
+            const partial = qp > 0 && qp < qty && !i.isProduced && !i.isShipped;
             if (s === 'produced') produced++;
-            else if (s === 'awaiting' || s === 'notReady') pending++;
+            else if (s === 'awaiting' || s === 'notReady') {
+                pending++;
+                if (partial) produced++;
+            }
         }
         return produced > 0 && pending > 0;
     };
@@ -461,19 +490,19 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const jobValue = job.orderTotal || job.billableAmount || 0;
             const estHours = est.totalMinutes / 60;
             const poundPerHour = estHours > 0 && jobValue > 0 ? jobValue / estHours : 0;
-            const decoTypes = Array.from(new Set(job.items.map(i => i.decorationType).filter(Boolean))) as string[];
+            const decoTypes = Array.from(new Set(job.items.flatMap(i => allItemDecoTypes(i)))) as string[];
             const dueDate = job.dateDue ? new Date(job.dateDue) : null;
             const daysUntilDue = dueDate ? daysBetween(now, dueDate) : null;
             const orderedDate = job.dateOrdered ? new Date(job.dateOrdered) : null;
             const daysInProd = orderedDate ? daysBetween(orderedDate, now) : null;
-            // Per-job EMB/Print completion. Use the shared isEmbItem helper so
-            // stitch-only items (no decorationType) still count as embroidery.
+            // Per-job EMB/Print completion — includes partial Deco `qty_produced`; mixed lines
+            // can contribute to both EMB and print totals.
             const embItems = job.items.filter(isEmbItem);
             const embTotal = embItems.reduce((a, i) => a + i.quantity, 0);
-            const embDone = embItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-            const printItems = job.items.filter(i => !isEmbItem(i) && i.decorationType && PRINT_TYPES.has(i.decorationType));
+            const embDone = embItems.reduce((a, i) => a + effectiveProducedUnits(i), 0);
+            const printItems = job.items.filter(i => itemHasPrintDecoration(i));
             const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
-            const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
+            const printDone = printItems.reduce((a, i) => a + effectiveProducedUnits(i), 0);
             // ---- RISK SCORE (0-100) + REASONS + NEXT STEPS ----
             let riskScore = 0;
             const riskReasons: string[] = [];
@@ -807,6 +836,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             .badge-status-ready { background: #ecfdf5; color: #047857; border-color: #6ee7b7; }
             .badge-status-other { background: #f9fafb; color: #6b7280; border-color: #d1d5db; }
             .print-footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 8px; color: #9ca3af; text-align: center; letter-spacing: 0.5px; }
+            .report-footnote { margin: 10px 0 0; font-size: 9px; color: #6b7280; line-height: 1.45; max-width: 720px; }
             .empty { padding: 30px; text-align: center; color: #9ca3af; font-size: 11px; }
             .note-box { margin-bottom: 14px; padding: 10px 12px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 6px; font-size: 9px; color: #7c2d12; line-height: 1.5; }
             .note-box strong { color: #7c2d12; }
@@ -889,7 +919,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             for (const job of scopedJobs) {
                 // Items belonging to the active type on this job.
                 const typeItems = job.items.filter(i =>
-                    isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType,
+                    isEmbReport ? isEmbItem(i) : allItemDecoTypes(i).some(t => (t || '').toUpperCase() === activeType),
                 );
                 if (typeItems.length === 0) continue;
                 const typeQty = typeItems.reduce((a, i) => a + (i.quantity || 0), 0);
@@ -899,12 +929,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     : 0;
                 const typeEst = estimateProductionTime(typeItems);
                 const otherTypes = Array.from(new Set(job.items
-                    .filter(i => !(isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType))
-                    .map(i => {
-                        if (isEmbItem(i)) return 'EMB';
-                        return (i.decorationType || '').toUpperCase();
-                    })
-                    .filter(t => t && t !== 'NONE')
+                    .filter(i => !(isEmbReport ? isEmbItem(i) : allItemDecoTypes(i).some(t => (t || '').toUpperCase() === activeType)))
+                    .flatMap(i => (isEmbItem(i) ? ['EMB'] : []).concat(allItemDecoTypes(i).map(t => (t || '').toUpperCase())))
+                    .filter(t => t && t !== 'NONE'),
                 ));
                 const dueClass: '' | 'overdue' | 'due-soon' =
                     job.daysUntilDue === null || job.daysUntilDue === undefined ? ''
@@ -1162,16 +1189,20 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                 if (isEmbItem(item)) {
                     embQty += qty;
                     embStitches += (item.stitchCount ?? 0) * qty;
-                    continue;
                 }
-                const dt = (item.decorationType || '').toUpperCase();
-                if (!dt || dt === 'NONE') { untypedQty += qty; continue; }
-                if (Object.prototype.hasOwnProperty.call(perType, dt)) {
-                    perType[dt] += qty;
+                if (itemHasPrintDecoration(item)) {
                     printQty += qty;
-                } else {
-                    otherPrintQty += qty;
-                    printQty += qty;
+                    const upperTypes = allItemDecoTypes(item).map(t => (t || '').toUpperCase());
+                    for (const u of upperTypes) {
+                        if (u === 'NONE' || u === 'EMB') continue;
+                        if (Object.prototype.hasOwnProperty.call(perType, u)) perType[u] += qty;
+                    }
+                    const hasNonStandardPrint = upperTypes.some(
+                        u => u !== 'NONE' && u !== 'EMB' && !Object.prototype.hasOwnProperty.call(perType, u),
+                    );
+                    if (hasNonStandardPrint) otherPrintQty += qty;
+                } else if (!isEmbItem(item)) {
+                    untypedQty += qty;
                 }
             }
             const dueClass: '' | 'overdue' | 'due-soon' =
@@ -1398,7 +1429,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         });
         if (cfg.showDecoBreakdown) {
             fullCols.push({
-                header: 'Embroidery',
+                header: 'Emb. units',
                 numeric: true,
                 renderCell: r => r.embQty > 0 ? r.embQty.toLocaleString() : '—',
                 renderTotal: () => totals.embQty.toLocaleString(),
@@ -1475,6 +1506,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
 
             <h2>Job Detail</h2>
             ${jobsTableHtml}
+            ${cfg.showDecoBreakdown ? `<p class="report-footnote">Embroidery and print columns count pieces that carry that decoration. On mixed lines the same piece can appear in both; per-process totals can be higher than a single decoration count but lower than job “Items” when the job mixes processes.</p>` : ''}
 
             <div class="print-footer">
                 Stash Production Report · ${esc(dateStr)} · ${esc(timeStr)} · ${footerBits.join(' · ')}
@@ -1530,7 +1562,7 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             const rows: TypeCsvRow[] = [];
             for (const job of scopedJobs) {
                 const typeItems = job.items.filter(i =>
-                    isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType,
+                    isEmbReport ? isEmbItem(i) : allItemDecoTypes(i).some(t => (t || '').toUpperCase() === activeType),
                 );
                 if (typeItems.length === 0) continue;
                 const typeQty = typeItems.reduce((a, i) => a + (i.quantity || 0), 0);
@@ -1540,9 +1572,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
                     : 0;
                 const typeEst = estimateProductionTime(typeItems);
                 const otherTypes = Array.from(new Set(job.items
-                    .filter(i => !(isEmbReport ? isEmbItem(i) : (i.decorationType || '').toUpperCase() === activeType))
-                    .map(i => (isEmbItem(i) ? 'EMB' : (i.decorationType || '').toUpperCase()))
-                    .filter(t => t && t !== 'NONE')
+                    .filter(i => !(isEmbReport ? isEmbItem(i) : allItemDecoTypes(i).some(t => (t || '').toUpperCase() === activeType)))
+                    .flatMap(i => (isEmbItem(i) ? ['EMB'] : []).concat(allItemDecoTypes(i).map(t => (t || '').toUpperCase())))
+                    .filter(t => t && t !== 'NONE'),
                 ));
                 rows.push({
                     jobNumber: job.jobNumber,
@@ -1655,11 +1687,21 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
             let untyped = 0;
             for (const item of job.items) {
                 const qty = item.quantity || 0;
-                if (isEmbItem(item)) { embQty += qty; embStitches += (item.stitchCount ?? 0) * qty; continue; }
-                const dt = (item.decorationType || '').toUpperCase();
-                if (!dt || dt === 'NONE') { untyped += qty; continue; }
-                if (Object.prototype.hasOwnProperty.call(perType, dt)) { perType[dt] += qty; printQty += qty; }
-                else { otherPrint += qty; printQty += qty; }
+                if (isEmbItem(item)) { embQty += qty; embStitches += (item.stitchCount ?? 0) * qty; }
+                if (itemHasPrintDecoration(item)) {
+                    printQty += qty;
+                    const upperTypes = allItemDecoTypes(item).map(t => (t || '').toUpperCase());
+                    for (const u of upperTypes) {
+                        if (u === 'NONE' || u === 'EMB') continue;
+                        if (Object.prototype.hasOwnProperty.call(perType, u)) perType[u] += qty;
+                    }
+                    const hasNonStandardPrint = upperTypes.some(
+                        u => u !== 'NONE' && u !== 'EMB' && !Object.prototype.hasOwnProperty.call(perType, u),
+                    );
+                    if (hasNonStandardPrint) otherPrint += qty;
+                } else if (!isEmbItem(item)) {
+                    untyped += qty;
+                }
             }
             return {
                 jobNumber: job.jobNumber,
@@ -1711,8 +1753,8 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         lines.push(esc(`Total Jobs: ${totals.jobs}`));
         if (cfg.showTotalItems) lines.push(esc(`Total Items: ${totals.totalQty}`));
         if (cfg.showDecoBreakdown) {
-            lines.push(esc(`Total Embroidery Items: ${totals.embQty}${cfg.showStitches ? `  (${totals.embStitches} stitches)` : ''}`));
-            lines.push(esc(`Total Print Items: ${totals.printQty}`));
+            lines.push(esc(`Total embroidery units (emb-decorated pieces): ${totals.embQty}${cfg.showStitches ? `  (${totals.embStitches} stitches)` : ''}`));
+            lines.push(esc(`Total print units (print-decorated pieces): ${totals.printQty}`));
         }
         if (cfg.showEstTime) lines.push(esc(`Total Est. Production Time: ${fmtTime(totals.estMinutes)}`));
         if (cfg.showFinancials) lines.push(esc(`Total Pipeline Value (GBP): ${totals.jobValue.toFixed(2)}`));
@@ -1732,9 +1774,9 @@ export default function DecoProductionTable({ decoJobs, onNavigateToOrder, onEnr
         if (cfg.showDaysUntilDue) fullCsvCols.push({ header: 'Days Until Due', row: r => r.daysUntilDue, total: '' });
         if (cfg.showTotalItems) fullCsvCols.push({ header: 'Total Items', row: r => r.totalQty, total: totals.totalQty });
         if (cfg.showDecoBreakdown) {
-            fullCsvCols.push({ header: 'Embroidery Items', row: r => r.embQty, total: totals.embQty });
+            fullCsvCols.push({ header: 'Embroidery units (pieces w/ emb)', row: r => r.embQty, total: totals.embQty });
             if (cfg.showStitches) fullCsvCols.push({ header: 'Embroidery Stitches', row: r => r.embStitches, total: totals.embStitches });
-            fullCsvCols.push({ header: 'Print Items (Total)', row: r => r.printQty, total: totals.printQty });
+            fullCsvCols.push({ header: 'Print units (pieces w/ print)', row: r => r.printQty, total: totals.printQty });
             for (const t of printTypeCols) fullCsvCols.push({ header: `${t} Qty`, row: r => r.perType[t], total: totals.perType[t] });
             fullCsvCols.push({ header: 'Other Print Qty', row: r => r.otherPrint, total: totals.otherPrint });
             fullCsvCols.push({ header: 'Untyped Qty', row: r => r.untyped, total: totals.untyped });

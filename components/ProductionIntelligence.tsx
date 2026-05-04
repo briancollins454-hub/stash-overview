@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import type { DecoJob, DecoItem } from '../types';
 import { AlertTriangle, ShieldAlert, Zap, TrendingDown, CheckCircle2, XCircle, Clock, Package, Palette, FileWarning, DollarSign, RefreshCw, Hash } from 'lucide-react';
-import { isEmbItem } from './DecoProductionTable';
+import { isEmbItem, effectiveProducedUnits, itemHasPrintDecoration, allItemDecoTypes } from './DecoProductionTable';
 
 /* ================================================================
    PRODUCTION INTELLIGENCE DASHBOARD
@@ -48,14 +48,23 @@ interface EnrichedJob {
 function enrichJob(job: DecoJob, now: Date): EnrichedJob {
     const items = job.items;
     const totalQty = items.reduce((a, i) => a + i.quantity, 0);
-    const decoTypes = Array.from(new Set(items.map(i => i.decorationType).filter(Boolean))) as string[];
+    const decoTypes = Array.from(new Set(items.flatMap(i => allItemDecoTypes(i)))) as string[];
     const jobValue = job.orderTotal || job.billableAmount || 0;
 
     // Estimate time
     let totalStitches = 0, hasEmb = false, nonEmbMin = 0, stitchesPerItem = 0;
     items.forEach(i => {
-        if (i.stitchCount && i.stitchCount > 0) { hasEmb = true; totalStitches += i.stitchCount * i.quantity; stitchesPerItem = Math.max(stitchesPerItem, i.stitchCount); }
-        else { nonEmbMin += (DEFAULT_TIMES[i.decorationType || ''] ?? 3) * i.quantity; }
+        const types = allItemDecoTypes(i);
+        const printLabel = types.find(t => PRINT_TYPES.has(t)) || '';
+        if (i.stitchCount && i.stitchCount > 0) {
+            hasEmb = true;
+            totalStitches += i.stitchCount * i.quantity;
+            stitchesPerItem = Math.max(stitchesPerItem, i.stitchCount);
+            if (printLabel) nonEmbMin += (DEFAULT_TIMES[printLabel] ?? 3) * i.quantity;
+        } else {
+            const dt = printLabel || i.decorationType || '';
+            nonEmbMin += (DEFAULT_TIMES[dt] ?? 3) * i.quantity;
+        }
     });
     let estMinutes = 0;
     if (hasEmb) {
@@ -72,10 +81,10 @@ function enrichJob(job: DecoJob, now: Date): EnrichedJob {
 
     const embItems = items.filter(isEmbItem);
     const embTotal = embItems.reduce((a, i) => a + i.quantity, 0);
-    const embDone = embItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
-    const printItems = items.filter(i => !isEmbItem(i) && i.decorationType && PRINT_TYPES.has(i.decorationType));
+    const embDone = embItems.reduce((a, i) => a + effectiveProducedUnits(i), 0);
+    const printItems = items.filter(i => itemHasPrintDecoration(i));
     const printTotal = printItems.reduce((a, i) => a + i.quantity, 0);
-    const printDone = printItems.filter(i => i.isProduced || i.isShipped).reduce((a, i) => a + i.quantity, 0);
+    const printDone = printItems.reduce((a, i) => a + effectiveProducedUnits(i), 0);
 
     // ---- RISK SCORE (0-100) ----
     let risk = 0;
