@@ -7,6 +7,7 @@ import {
   type PriorityResult, type PrioritySection, type Urgency,
 } from '../services/priorityEngine';
 import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore';
+import { displayStaffName } from '../services/staffDisplay';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -155,18 +156,6 @@ const FreshnessControl: React.FC<{
   );
 };
 
-const extractSP = (sp: any): string | undefined => {
-  if (!sp) return undefined;
-  if (typeof sp === 'string') return sp;
-  if (typeof sp === 'object') {
-    if (sp.firstname || sp.lastname) return `${sp.firstname || ''} ${sp.lastname || ''}`.trim();
-    if (sp.name) return sp.name;
-    if (sp.login) return sp.login;
-    return undefined;
-  }
-  return String(sp);
-};
-
 const TIME_FRAMES = [
   { id: 'all',    label: 'All',    min: null, max: null  },
   { id: '3-5d',   label: '3-5D',   min: 3,    max: 5     },
@@ -312,10 +301,215 @@ function compareLongestWaitingFirst(
   return da - db;
 }
 
+/* ---------- Staff filter (Deco responsible / sales) ---------- */
+
+const STAFF_ALL = 'all';
+const STAFF_UNASSIGNED = '__unassigned__';
+
+function priorityStaffBucket(job: DecoJob): string {
+  return displayStaffName(job.salesPerson) || STAFF_UNASSIGNED;
+}
+
+/* ---------- Print handoff PDF ---------- */
+
+function escHandoffHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const URGENCY_PRINT_CLASS: Record<Urgency, string> = {
+  critical: 'u-crit',
+  high: 'u-high',
+  medium: 'u-med',
+  low: 'u-low',
+};
+
+function openPriorityHandoffPrint(opts: {
+  sections: Array<PrioritySection & { items: PriorityResult[] }>;
+  uncategorised: PriorityResult[];
+  readyAtMap: ReadyAtMap;
+  now: Date;
+  audienceLine: string;
+  totalOrders: number;
+  totalCritical: number;
+  totalHigh: number;
+  totalValue: number;
+}): void {
+  const { sections, uncategorised, readyAtMap, now, audienceLine, totalOrders, totalCritical, totalHigh, totalValue } = opts;
+  const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+  const renderRow = (item: PriorityResult, i: number, sec: PrioritySection, metricCol: 'metric' | 'status') => {
+    const staff = displayStaffName(item.job.salesPerson) || '—';
+    const rules = item.matchedRules.length ? item.matchedRules.join(' · ') : '—';
+    const val = item.job.orderTotal || item.job.billableAmount || 0;
+    const u = URGENCY_PRINT_CLASS[item.urgency];
+    const metric =
+      metricCol === 'status'
+        ? (item.job.status || '—')
+        : formatMetric(getMetricDays(item.job, sec, now, readyAtMap), sec);
+    return `<tr>
+      <td class="c-num">${i + 1}</td>
+      <td class="mono">#${escHandoffHtml(item.job.jobNumber)}</td>
+      <td>${escHandoffHtml(item.job.customerName || '')}</td>
+      <td class="muted">${escHandoffHtml((item.job.jobName || '').slice(0, 96))}</td>
+      <td class="small">${escHandoffHtml(metric)}</td>
+      <td><span class="badge ${u}">${escHandoffHtml(item.urgency)}</span></td>
+      <td class="small">${escHandoffHtml(rules)}</td>
+      <td>${escHandoffHtml(staff)}</td>
+      <td class="num">${fmtK(val)}</td>
+    </tr>`;
+  };
+
+  let body = '';
+  for (const sec of sections) {
+    if (sec.items.length === 0) continue;
+    const rows = sec.items.map((it, i) => renderRow(it, i, sec, 'metric')).join('');
+    body += `
+      <section class="block">
+        <div class="block-h">
+          <span class="emoji">${sec.icon}</span>
+          <div>
+            <h2>${escHandoffHtml(sec.title)}</h2>
+            <p class="sub">${escHandoffHtml(sec.subtitle)}</p>
+          </div>
+          <span class="count">${sec.items.length}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Order</th><th>Customer</th><th>Job</th>
+              <th>${escHandoffHtml(sec.daysLabel)}</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Value</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </section>`;
+  }
+
+  if (uncategorised.length > 0) {
+    const fakeSec: PrioritySection = {
+      key: 'other',
+      title: 'Other flagged',
+      subtitle: '',
+      statuses: [],
+      icon: '🔎',
+      color: 'indigo',
+      filterMetric: 'days_until_due',
+      daysLabel: 'Status',
+    };
+    const rowsOther = uncategorised.map((it, i) => renderRow(it, i, fakeSec, 'status')).join('');
+    body += `
+      <section class="block">
+        <div class="block-h">
+          <span class="emoji">🔎</span>
+          <div>
+            <h2>Other flagged</h2>
+            <p class="sub">Orders in other statuses with priority flags</p>
+          </div>
+          <span class="count">${uncategorised.length}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Order</th><th>Customer</th><th>Job</th>
+              <th>Status</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Value</th>
+            </tr>
+          </thead>
+          <tbody>${rowsOther}</tbody>
+        </table>
+      </section>`;
+  }
+
+  const styles = `
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Serif+Display&display=swap');
+    * { box-sizing: border-box; }
+    body { font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif; color: #1e1b4b; background: #fafafa; margin: 0; padding: 28px 32px 40px; font-size: 11px; line-height: 1.45; }
+    .sheet { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(30,27,75,0.08); border: 1px solid #e9e7ef; overflow: hidden; }
+    .hero { background: linear-gradient(135deg, #312e81 0%, #4c1d95 48%, #5b21b6 100%); color: #fff; padding: 28px 32px 32px; }
+    .brand { font-family: 'DM Serif Display', Georgia, serif; font-size: 22px; letter-spacing: 0.02em; opacity: 0.95; }
+    h1 { font-size: 20px; font-weight: 800; margin: 10px 0 0; letter-spacing: -0.02em; }
+    .meta { margin-top: 14px; font-size: 11px; opacity: 0.85; line-height: 1.6; }
+    .kpis { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+    .kpi { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 10px 14px; min-width: 120px; }
+    .kpi b { display: block; font-size: 18px; font-weight: 800; }
+    .kpi span { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.75; }
+    .note { padding: 14px 32px; background: #f5f3ff; border-bottom: 1px solid #e9e7ef; font-size: 10px; color: #5b21b6; }
+    .blocks { padding: 20px 28px 32px; }
+    .block { margin-bottom: 28px; page-break-inside: avoid; }
+    .block:last-child { margin-bottom: 0; }
+    .block-h { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #ede9fe; }
+    .emoji { font-size: 22px; line-height: 1; }
+    .block-h h2 { margin: 0; font-size: 13px; font-weight: 800; color: #3730a3; letter-spacing: -0.01em; }
+    .block-h .sub { margin: 4px 0 0; font-size: 9px; color: #6b7280; max-width: 520px; }
+    .count { margin-left: auto; font-size: 11px; font-weight: 800; background: #ede9fe; color: #5b21b6; padding: 4px 10px; border-radius: 999px; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th { text-align: left; padding: 8px 10px; background: #faf5ff; color: #6b21a8; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e9e7ef; }
+    td { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+    tr:nth-child(even) td { background: #fcfcfd; }
+    .c-num { color: #9ca3af; font-weight: 700; width: 28px; }
+    .mono { font-family: ui-monospace, monospace; font-weight: 600; color: #5b21b6; }
+    .muted { color: #6b7280; font-size: 9px; }
+    .small { font-size: 9px; color: #4b5563; }
+    .num { text-align: right; font-weight: 700; white-space: nowrap; color: #374151; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+    .u-crit { background: #fee2e2; color: #991b1b; }
+    .u-high { background: #ffedd5; color: #9a3412; }
+    .u-med { background: #fef3c7; color: #92400e; }
+    .u-low { background: #dbeafe; color: #1e40af; }
+    .foot { padding: 16px 32px 24px; text-align: center; font-size: 9px; color: #9ca3af; border-top: 1px solid #f3f4f6; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .sheet { box-shadow: none; border: none; border-radius: 0; max-width: none; }
+      .no-print { display: none !important; }
+    }
+  `;
+
+  const bodyHtml = `
+    <div class="no-print" style="margin-bottom:12px;text-align:center;">
+      <button type="button" onclick="window.print()" style="padding:10px 20px;border-radius:8px;border:none;background:#4f46e5;color:#fff;font-weight:800;cursor:pointer;font-size:12px;">Print / Save as PDF</button>
+    </div>
+    <div class="sheet">
+      <div class="hero">
+        <div class="brand">Stash Shop Overview</div>
+        <h1>Priority board handoff</h1>
+        <div class="meta">${escHandoffHtml(dateStr)} · ${escHandoffHtml(timeStr)}<br>${escHandoffHtml(audienceLine)}</div>
+        <div class="kpis">
+          <div class="kpi"><span>Orders</span><b>${totalOrders}</b></div>
+          <div class="kpi"><span>Critical</span><b>${totalCritical}</b></div>
+          <div class="kpi"><span>High</span><b>${totalHigh}</b></div>
+          <div class="kpi"><span>Pipeline</span><b>${fmtK(totalValue)}</b></div>
+        </div>
+      </div>
+      <div class="note">Same ordering as the live Priority Board (longest-waiting first within each column). Forward this PDF to the named staff or discuss in stand-up.</div>
+      <div class="blocks">${body || '<p style="padding:24px;color:#9ca3af;">No jobs in scope for this export.</p>'}</div>
+      <div class="foot">Generated from Stash · Priority rules match in-app scoring</div>
+    </div>
+  `;
+
+  const title = `Priority handoff — ${dateStr}`;
+  const win = window.open('', '_blank');
+  if (!win) {
+    window.alert('Please allow pop-ups for this site to open the handoff document.');
+    return;
+  }
+  win.document.open();
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHandoffHtml(title)}</title><style>${styles}</style></head><body>${bodyHtml}</body></html>`);
+  win.document.close();
+  win.focus();
+  window.setTimeout(() => {
+    try { win.print(); } catch { /* user can use the button */ }
+  }, 280);
+}
+
 /* ---------- Main component ---------- */
 
 export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, onClearCompleted, lastSyncTime, loading }: Props) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [staffFilter, setStaffFilter] = useState<string>(STAFF_ALL);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
 
@@ -354,6 +548,20 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     }),
   [allJobs]);
 
+  const staffNamesOnBoard = useMemo(() => {
+    const s = new Set<string>();
+    for (const j of active) {
+      const n = displayStaffName(j.salesPerson);
+      if (n) s.add(n);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [active]);
+
+  const filteredActive = useMemo(() => {
+    if (staffFilter === STAFF_ALL) return active;
+    return active.filter(j => priorityStaffBucket(j) === staffFilter);
+  }, [active, staffFilter]);
+
   // Local working state — separates "general sync" from "clear completed"
   // so each button shows its own spinner + status without confusion.
   const [bulkRefreshing, setBulkRefreshing] = useState(false);
@@ -391,7 +599,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   // direct-lookup matches reliably on order_number for any tenant.
   const handleClearCompleted = async () => {
     if (!onClearCompleted || clearing) return;
-    const visibleNums = active.map(j => j.jobNumber || j.id).filter(Boolean);
+    const visibleNums = filteredActive.map(j => j.jobNumber || j.id).filter(Boolean);
     if (visibleNums.length === 0) return;
     // Cap the burst — protects the Deco API on dashboards with very long
     // historical tails. 250 is enough for any realistic Priority Board.
@@ -418,8 +626,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   };
 
   const allScored = useMemo(() =>
-    active.map(j => calculatePriority(j, now)),
-  [active, now]);
+    filteredActive.map(j => calculatePriority(j, now)),
+  [filteredActive, now]);
 
   // Group ALL scored items by section (no time filtering here — each SectionCard filters independently)
   const sections = useMemo(() => {
@@ -441,6 +649,35 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const totalHigh = sections.reduce((a, s) => a + s.items.filter(r => r.urgency === 'high').length, 0);
   const totalValue = sections.reduce((a, s) => a + s.items.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0), 0);
 
+  const uncategorisedValue = uncategorised.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  const uncategorisedCritical = uncategorised.filter(r => r.urgency === 'critical').length;
+  const uncategorisedHigh = uncategorised.filter(r => r.urgency === 'high').length;
+
+  const printAudienceLine =
+    staffFilter === STAFF_ALL
+      ? 'All staff (full board)'
+      : staffFilter === STAFF_UNASSIGNED
+        ? 'Unassigned in Deco (no sales / responsible name on file)'
+        : `Prepared for: ${staffFilter}`;
+
+  const handlePrintHandoff = () => {
+    const ord = totalOrders + uncategorised.length;
+    const crit = totalCritical + uncategorisedCritical;
+    const high = totalHigh + uncategorisedHigh;
+    const val = totalValue + uncategorisedValue;
+    openPriorityHandoffPrint({
+      sections,
+      uncategorised,
+      readyAtMap,
+      now,
+      audienceLine: printAudienceLine,
+      totalOrders: ord,
+      totalCritical: crit,
+      totalHigh: high,
+      totalValue: val,
+    });
+  };
+
   const toggleSection = (key: string) => setExpandedSection(prev => (prev === key ? null : key));
 
   return (
@@ -452,9 +689,46 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
             <h1 className="text-lg font-black text-white tracking-tight">Priority Board</h1>
             <p className="text-xs text-white/40 mt-0.5">
               {totalOrders} order{s(totalOrders)} &middot; {totalCritical} critical &middot; {totalHigh} high &middot; {fmtK(totalValue)} pipeline
+              {uncategorised.length > 0 && (
+                <span> &middot; +{uncategorised.length} other flagged</span>
+              )}
             </p>
+            {staffFilter !== STAFF_ALL && (
+              <p className="text-[11px] text-indigo-300/90 mt-1.5 font-semibold">
+                View: {staffFilter === STAFF_UNASSIGNED ? 'Unassigned' : staffFilter} ({filteredActive.length} of {active.length} jobs)
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <label className="flex items-center gap-2 text-[10px] font-bold text-white/70 uppercase tracking-wider">
+              Staff
+              <select
+                value={staffFilter}
+                onChange={e => setStaffFilter(e.target.value)}
+                className="max-w-[10.5rem] sm:max-w-[13rem] px-2 py-1.5 rounded-lg border border-white/15 bg-white/10 text-white text-xs font-semibold normal-case tracking-normal cursor-pointer hover:bg-white/15"
+                title="Filter the board and PDF export by Deco sales / responsible person"
+              >
+                <option value={STAFF_ALL}>All staff</option>
+                <option value={STAFF_UNASSIGNED}>Unassigned</option>
+                {staffNamesOnBoard.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={handlePrintHandoff}
+              disabled={totalOrders === 0 && uncategorised.length === 0}
+              title="Opens a print-ready handoff (Save as PDF in the print dialog)"
+              className="px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 disabled:bg-violet-500/30 disabled:cursor-not-allowed text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+                <path d="M6 9V2h12v7" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" rx="1" />
+              </svg>
+              PDF
+            </button>
             {onClearCompleted && (
               <button
                 type="button"
@@ -596,7 +870,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       {totalOrders === 0 && uncategorised.length === 0 && (
         <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 px-6 py-12 text-center">
           <p className="text-white/50 text-sm">No orders found for this filter.</p>
-          <p className="text-white/25 text-xs mt-1">Try selecting &quot;All&quot; to see everything.</p>
+          <p className="text-white/25 text-xs mt-1">Try &quot;All staff&quot; or another staff filter, or sync Deco.</p>
         </div>
       )}
     </div>
@@ -716,7 +990,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
               <div className="divide-y divide-white/[0.03]">
                 {items.map((item, i) => {
                   const us = URGENCY_STYLE[item.urgency];
-                  const staff = extractSP(item.job.salesPerson) || '\u2014';
+                  const staff = displayStaffName(item.job.salesPerson) || '\u2014';
                   const metric = getMetricDays(item.job, section, now, readyAtMap);
                   const metricStr = formatMetric(metric, section);
                   const mStyle = metricColor(metric, section);
