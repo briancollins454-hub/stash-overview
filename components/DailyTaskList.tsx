@@ -596,6 +596,15 @@ const DailyTaskList: React.FC<Props> = ({
     });
   };
 
+  const reopenToReviewed = (row: DailyTaskRow) => {
+    patchRow(row.id, {
+      completed: false,
+      completed_at: null,
+      reviewed: true,
+      reviewed_at: row.reviewed_at || new Date().toISOString(),
+    });
+  };
+
   const updateHoldNote = (id: number, hold_note: string) => {
     patchRow(id, { hold_note: hold_note || null });
   };
@@ -752,6 +761,23 @@ const DailyTaskList: React.FC<Props> = ({
     () => filteredDisplayRows.filter(r => r.completed),
     [filteredDisplayRows],
   );
+  const legacyCompletedRows = useMemo(
+    () => completedRows.filter(r => !r.reviewed),
+    [completedRows],
+  );
+
+  const bulkMoveLegacyToReviewed = async () => {
+    if (legacyCompletedRows.length === 0) return;
+    if (!window.confirm(`Move ${legacyCompletedRows.length} row${legacyCompletedRows.length === 1 ? '' : 's'} from Completed back to To Be Completed?`)) return;
+    for (const row of legacyCompletedRows) {
+      await patchRow(row.id, {
+        completed: false,
+        completed_at: null,
+        reviewed: true,
+        reviewed_at: row.reviewed_at || new Date().toISOString(),
+      });
+    }
+  };
 
   const renderTaskRow = (row: DailyTaskRow) => {
     const job =
@@ -822,6 +848,16 @@ const DailyTaskList: React.FC<Props> = ({
                     title="Mark this task as completed by staff"
                   >
                     Complete
+                  </button>
+                )}
+                {row.completed && (
+                  <button
+                    type="button"
+                    onClick={() => reopenToReviewed(row)}
+                    className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-300 hover:underline px-1"
+                    title="Reopen to To Be Completed"
+                  >
+                    Reopen
                   </button>
                 )}
                 {row.source_page !== 'manual' && (
@@ -1102,6 +1138,21 @@ tr:nth-child(even) td{background:#fafafa}
       {error && (
         <div className="flex items-center gap-2 text-sm text-rose-600 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg p-3">
           <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
+        </div>
+      )}
+
+      {legacyCompletedRows.length > 0 && (
+        <div className="flex items-center justify-between gap-3 text-xs rounded-lg border border-amber-300/80 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5">
+          <span className="text-amber-800 dark:text-amber-300">
+            {legacyCompletedRows.length} older row{legacyCompletedRows.length === 1 ? '' : 's'} are in Completed from the old checkbox flow.
+          </span>
+          <button
+            type="button"
+            onClick={bulkMoveLegacyToReviewed}
+            className="px-2.5 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black uppercase tracking-widest"
+          >
+            Move To Be Completed
+          </button>
         </div>
       )}
 
