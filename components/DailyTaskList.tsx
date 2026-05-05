@@ -26,6 +26,8 @@ export interface DailyTaskRow {
   sort_order: number;
   completed: boolean;
   completed_at: string | null;
+  reviewed: boolean;
+  reviewed_at: string | null;
   hold_note: string | null;
   created_by: string | null;
   created_at: string;
@@ -432,7 +434,6 @@ const DailyTaskList: React.FC<Props> = ({
   const [newTitle, setNewTitle] = useState('');
   const [importing, setImporting] = useState(false);
   const [weeklyExporting, setWeeklyExporting] = useState(false);
-  const [hideDone, setHideDone] = useState(false);
   /** Narrow list to one Deco responsible person (finance / manual rows only show when All). */
   const [staffViewFilter, setStaffViewFilter] = useState<string>(STAFF_VIEW_ALL);
   const holdDebounceRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
@@ -483,10 +484,10 @@ const DailyTaskList: React.FC<Props> = ({
   }, [rows]);
 
   /** Highest-pressure work first: live job scores, then finance, issues, manual. */
-  const displayRows = useMemo(() => {
-    const base = hideDone ? rows.filter(r => !r.completed) : [...rows];
-    return sortDailyTaskRowsForDisplay(base, decoJobs);
-  }, [rows, hideDone, decoJobs]);
+  const displayRows = useMemo(
+    () => sortDailyTaskRowsForDisplay([...rows], decoJobs),
+    [rows, decoJobs],
+  );
 
   const jobByNumber = useMemo(() => {
     const m = new Map<string, DecoJob>();
@@ -528,6 +529,8 @@ const DailyTaskList: React.FC<Props> = ({
         source_page: 'manual',
         source_ref: null,
         sort_order: nextSortOrder,
+        reviewed: false,
+        reviewed_at: null,
         completed: false,
         hold_note: null,
         created_by: createdBy,
@@ -551,11 +554,23 @@ const DailyTaskList: React.FC<Props> = ({
     }
   };
 
+  const toggleReviewed = (row: DailyTaskRow) => {
+    const next = !row.reviewed;
+    patchRow(row.id, {
+      reviewed: next,
+      reviewed_at: next ? new Date().toISOString() : null,
+      // If unchecked from reviewed, keep final completion untouched.
+    });
+  };
+
   const toggleComplete = (row: DailyTaskRow) => {
     const next = !row.completed;
     patchRow(row.id, {
       completed: next,
       completed_at: next ? new Date().toISOString() : null,
+      // Completing always implies reviewed.
+      reviewed: next ? true : row.reviewed,
+      reviewed_at: next ? (row.reviewed_at || new Date().toISOString()) : row.reviewed_at,
     });
   };
 
@@ -623,6 +638,8 @@ const DailyTaskList: React.FC<Props> = ({
           source_page: 'priority',
           source_ref: s.jobNumber,
           sort_order: order++,
+          reviewed: false,
+          reviewed_at: null,
           completed: false,
           hold_note: null,
           created_by: createdBy,
@@ -638,6 +655,8 @@ const DailyTaskList: React.FC<Props> = ({
           source_page: item.source_page,
           source_ref: item.source_ref,
           sort_order: order++,
+          reviewed: false,
+          reviewed_at: null,
           completed: false,
           hold_note: null,
           created_by: createdBy,
@@ -652,6 +671,8 @@ const DailyTaskList: React.FC<Props> = ({
           source_page: pi.source_page,
           source_ref: pi.source_ref,
           sort_order: order++,
+          reviewed: false,
+          reviewed_at: null,
           completed: false,
           hold_note: null,
           created_by: createdBy,
@@ -690,6 +711,143 @@ const DailyTaskList: React.FC<Props> = ({
     if (row.source_page === 'priority' && row.source_ref && onNavigateToOrder) {
       onNavigateToOrder(row.source_ref);
     }
+  };
+
+  const dailyRows = useMemo(
+    () => filteredDisplayRows.filter(r => !r.reviewed && !r.completed),
+    [filteredDisplayRows],
+  );
+  const toCompleteRows = useMemo(
+    () => filteredDisplayRows.filter(r => r.reviewed && !r.completed),
+    [filteredDisplayRows],
+  );
+  const completedRows = useMemo(
+    () => filteredDisplayRows.filter(r => r.completed),
+    [filteredDisplayRows],
+  );
+
+  const renderTaskRow = (row: DailyTaskRow) => {
+    const job =
+      row.source_page === 'priority' && row.source_ref
+        ? jobByNumber.get(String(row.source_ref))
+        : undefined;
+    const primaryTitle =
+      row.source_page === 'priority' && row.source_ref && job
+        ? `#${job.jobNumber} · ${job.customerName || 'Customer'}`
+        : row.title;
+    const legacyTitle =
+      row.source_page === 'priority' && job && row.title.trim() !== primaryTitle.trim();
+
+    return (
+      <li
+        key={row.id}
+        className={`rounded-xl border p-3 sm:p-4 transition-colors ${
+          row.completed
+            ? 'bg-emerald-50/70 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-700/40 opacity-90'
+            : row.reviewed
+              ? 'bg-amber-50/70 dark:bg-amber-900/15 border-amber-200 dark:border-amber-700/40'
+              : 'bg-white dark:bg-[#1e1e3a] border-gray-200 dark:border-indigo-500/20'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={row.reviewed}
+            onChange={() => toggleReviewed(row)}
+            className="mt-1 w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+            title="Checked / reviewed"
+          />
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`text-sm sm:text-base font-bold leading-snug ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+                    {primaryTitle}
+                  </span>
+                  {row.source_page === 'priority' && row.source_ref ? (
+                    <JobNumberCopyButton jobNumber={String(row.source_ref)} />
+                  ) : null}
+                  <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    row.completed
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                      : row.reviewed
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                        : 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-300'
+                  }`}>
+                    {row.completed ? 'Completed' : row.reviewed ? 'To be completed' : 'Daily task'}
+                  </span>
+                </div>
+                {legacyTitle ? (
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 block">
+                    Earlier label: {row.title}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300">
+                  {SOURCE_LABEL[row.source_page] || row.source_page}
+                </span>
+                {!row.completed && (
+                  <button
+                    type="button"
+                    onClick={() => toggleComplete(row)}
+                    className="text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400 hover:underline px-1"
+                    title="Mark this task as completed by staff"
+                  >
+                    Complete
+                  </button>
+                )}
+                {row.source_page !== 'manual' && (
+                  <button
+                    type="button"
+                    onClick={() => openLinked(row)}
+                    className="p-1 rounded text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/30"
+                    title="Open linked page"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </button>
+                )}
+                {row.source_page === 'priority' && row.source_ref && onNavigateToOrder && (
+                  <button
+                    type="button"
+                    onClick={() => openOrderIfAny(row)}
+                    className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 hover:underline"
+                  >
+                    Find order
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                  title="Remove"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <TaskRowContext row={row} job={job} />
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">Hold-up / note</label>
+              <textarea
+                value={row.hold_note || ''}
+                onChange={e => onHoldNoteChange(row.id, e.target.value)}
+                onBlur={e => {
+                  const t = holdDebounceRef.current[row.id];
+                  if (t) clearTimeout(t);
+                  delete holdDebounceRef.current[row.id];
+                  const v = e.target.value.trim();
+                  patchRow(row.id, { hold_note: v || null });
+                }}
+                rows={2}
+                placeholder="Waiting on stock, customer reply, artwork…"
+                className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-[#2a2a55] text-gray-900 dark:text-white placeholder:text-gray-400 resize-y min-h-[2.5rem]"
+              />
+            </div>
+          </div>
+        </div>
+      </li>
+    );
   };
 
   const fetchWeekRows = useCallback(async (): Promise<DailyTaskRow[]> => {
@@ -735,7 +893,7 @@ const DailyTaskList: React.FC<Props> = ({
         const lis = rowsForDate.map(r => {
           const staff = rowStaffName(r);
           const source = SOURCE_LABEL[r.source_page] || r.source_page;
-          const done = r.completed ? 'Done' : 'Open';
+          const done = r.completed ? 'Completed' : r.reviewed ? 'To be completed' : 'Daily task';
           const note = (r.hold_note || '').trim() || '—';
           const ref = r.source_ref ? `#${r.source_ref}` : '';
           return `<tr>
@@ -888,10 +1046,6 @@ tr:nth-child(even) td{background:#fafafa}
             className="px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#2a2a55] text-gray-900 dark:text-white text-sm"
           />
         </label>
-        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
-          <input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} />
-          Hide completed
-        </label>
         <label className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
           <UserRound className="w-4 h-4 shrink-0 text-indigo-500" />
           View
@@ -972,118 +1126,36 @@ tr:nth-child(even) td{background:#fafafa}
         </div>
       ) : displayRows.length === 0 ? (
         <div className="text-center py-14 text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-600 rounded-xl">
-          {hideDone && rows.some(r => r.completed)
-            ? 'All tasks done for this day — toggle off "Hide completed" to see them.'
-            : 'No tasks yet — import from priority/finance or add your own.'}
+          No tasks yet — import from priority/finance or add your own.
         </div>
       ) : filteredDisplayRows.length === 0 ? (
         <div className="text-center py-14 text-gray-500 dark:text-gray-400 border border-dashed border-amber-300/80 dark:border-amber-700/50 rounded-xl bg-amber-50/40 dark:bg-amber-950/20 px-4">
           No Deco jobs for this view on this day — choose <strong className="text-gray-700 dark:text-gray-300">All staff</strong> to see finance checks and everyone&apos;s tasks, or pick another name.
         </div>
       ) : (
-        <ul className="space-y-2">
-          {filteredDisplayRows.map(row => {
-            const job =
-              row.source_page === 'priority' && row.source_ref
-                ? jobByNumber.get(String(row.source_ref))
-                : undefined;
-            const primaryTitle =
-              row.source_page === 'priority' && row.source_ref && job
-                ? `#${job.jobNumber} · ${job.customerName || 'Customer'}`
-                : row.title;
-            const legacyTitle =
-              row.source_page === 'priority' && job && row.title.trim() !== primaryTitle.trim();
-
-            return (
-            <li
-              key={row.id}
-              className={`rounded-xl border p-3 sm:p-4 transition-colors ${
-                row.completed
-                  ? 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 opacity-75'
-                  : 'bg-white dark:bg-[#1e1e3a] border-gray-200 dark:border-indigo-500/20'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={row.completed}
-                  onChange={() => toggleComplete(row)}
-                  className="mt-1 w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
-                />
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="flex items-start justify-between gap-2 flex-wrap">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={`text-sm sm:text-base font-bold leading-snug ${row.completed ? 'line-through text-gray-500' : 'text-gray-900 dark:text-white'}`}>
-                          {primaryTitle}
-                        </span>
-                        {row.source_page === 'priority' && row.source_ref ? (
-                          <JobNumberCopyButton jobNumber={String(row.source_ref)} />
-                        ) : null}
-                      </div>
-                      {legacyTitle ? (
-                        <span className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 block">
-                          Earlier label: {row.title}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300">
-                        {SOURCE_LABEL[row.source_page] || row.source_page}
-                      </span>
-                      {row.source_page !== 'manual' && (
-                        <button
-                          type="button"
-                          onClick={() => openLinked(row)}
-                          className="p-1 rounded text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/30"
-                          title="Open linked page"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      )}
-                      {row.source_page === 'priority' && row.source_ref && onNavigateToOrder && (
-                        <button
-                          type="button"
-                          onClick={() => openOrderIfAny(row)}
-                          className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 hover:underline"
-                        >
-                          Find order
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeRow(row.id)}
-                        className="p-1 rounded text-gray-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                        title="Remove"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <TaskRowContext row={row} job={job} />
-                  <div>
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block mb-1">Hold-up / note</label>
-                    <textarea
-                      value={row.hold_note || ''}
-                      onChange={e => onHoldNoteChange(row.id, e.target.value)}
-                      onBlur={e => {
-                        const t = holdDebounceRef.current[row.id];
-                        if (t) clearTimeout(t);
-                        delete holdDebounceRef.current[row.id];
-                        const v = e.target.value.trim();
-                        patchRow(row.id, { hold_note: v || null });
-                      }}
-                      rows={2}
-                      placeholder="Waiting on stock, customer reply, artwork…"
-                      className="w-full text-sm px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-[#2a2a55] text-gray-900 dark:text-white placeholder:text-gray-400 resize-y min-h-[2.5rem]"
-                    />
-                  </div>
-                </div>
-              </div>
-            </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-4">
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-200">Daily tasks</span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">{dailyRows.length}</span>
+            </div>
+            {dailyRows.length === 0 ? <div className="text-xs text-gray-400 px-1">No rows in this section.</div> : <ul className="space-y-2">{dailyRows.map(renderTaskRow)}</ul>}
+          </section>
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">To be completed</span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">{toCompleteRows.length}</span>
+            </div>
+            {toCompleteRows.length === 0 ? <div className="text-xs text-gray-400 px-1">No rows in this section.</div> : <ul className="space-y-2">{toCompleteRows.map(renderTaskRow)}</ul>}
+          </section>
+          <section className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Completed</span>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">{completedRows.length}</span>
+            </div>
+            {completedRows.length === 0 ? <div className="text-xs text-gray-400 px-1">No rows in this section.</div> : <ul className="space-y-2">{completedRows.map(renderTaskRow)}</ul>}
+          </section>
+        </div>
       )}
     </div>
   );

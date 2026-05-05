@@ -10,6 +10,8 @@ create table if not exists public.stash_daily_tasks (
     source_page     text not null default 'manual',  -- manual | priority | finance_sni | finance_credit | finance_unpaid | production_issues
     source_ref      text,                             -- e.g. Deco job #, optional deep-link anchor
     sort_order      integer not null default 0,
+    reviewed        boolean not null default false,
+    reviewed_at     timestamptz,
     completed       boolean not null default false,
     completed_at    timestamptz,
     hold_note       text,                             -- reason for delay / blocker
