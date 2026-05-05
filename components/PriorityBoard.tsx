@@ -346,6 +346,7 @@ const PRIORITY_NOTES_TABLE = 'stash_priority_notes';
 function aggregatePriorityPrintTotals(
   sections: Array<PrioritySection & { items: PriorityResult[] }>,
   uncategorised: PriorityResult[],
+  completed: PriorityResult[],
   includeKeys: Set<string>,
 ): { orders: number; critical: number; high: number; value: number; titles: string[] } {
   let orders = 0;
@@ -368,12 +369,20 @@ function aggregatePriorityPrintTotals(
     high += uncategorised.filter(r => r.urgency === 'high').length;
     value += uncategorised.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
   }
+  if (includeKeys.has('completed') && completed.length > 0) {
+    titles.push('Completed / delegated');
+    orders += completed.length;
+    critical += completed.filter(r => r.urgency === 'critical').length;
+    high += completed.filter(r => r.urgency === 'high').length;
+    value += completed.reduce((v, r) => v + (r.job.orderTotal || r.job.billableAmount || 0), 0);
+  }
   return { orders, critical, high, value, titles };
 }
 
 function openPriorityHandoffPrint(opts: {
   sections: Array<PrioritySection & { items: PriorityResult[] }>;
   uncategorised: PriorityResult[];
+  completed: PriorityResult[];
   readyAtMap: ReadyAtMap;
   now: Date;
   audienceLine: string;
@@ -387,7 +396,7 @@ function openPriorityHandoffPrint(opts: {
   sectionsIncludedLine: string;
   notesByJobNumber: Record<string, PriorityLineNote>;
 }): void {
-  const { sections, uncategorised, readyAtMap, now, audienceLine, includeKeys, totalOrders, totalCritical, totalHigh, totalValue, sectionsIncludedLine, notesByJobNumber } = opts;
+  const { sections, uncategorised, completed, readyAtMap, now, audienceLine, includeKeys, totalOrders, totalCritical, totalHigh, totalValue, sectionsIncludedLine, notesByJobNumber } = opts;
   const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -472,6 +481,40 @@ function openPriorityHandoffPrint(opts: {
             </tr>
           </thead>
           <tbody>${rowsOther}</tbody>
+        </table>
+      </section>`;
+  }
+
+  if (includeKeys.has('completed') && completed.length > 0) {
+    const doneSec: PrioritySection = {
+      key: 'completed',
+      title: 'Completed / delegated',
+      subtitle: '',
+      statuses: [],
+      icon: '✅',
+      color: 'green',
+      filterMetric: 'days_until_due',
+      daysLabel: 'Status',
+    };
+    const rowsDone = completed.map((it, i) => renderRow(it, i, doneSec, 'status')).join('');
+    body += `
+      <section class="block">
+        <div class="block-h">
+          <span class="emoji">✅</span>
+          <div>
+            <h2>Completed / delegated</h2>
+            <p class="sub">Rows marked done on the board (kept for weekly briefing context)</p>
+          </div>
+          <span class="count">${completed.length}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Order</th><th>Customer</th><th>Job</th>
+              <th>Status</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Note</th><th>Value</th>
+            </tr>
+          </thead>
+          <tbody>${rowsDone}</tbody>
         </table>
       </section>`;
   }
@@ -771,21 +814,40 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const allScored = useMemo(() =>
     filteredActive.map(j => calculatePriority(j, now)),
   [filteredActive, now]);
+  const completedJobNumbers = useMemo(() =>
+    new Set(
+      Object.entries(notesByJobNumber)
+        .filter(([, n]) => !!n.excludeFromPdf)
+        .map(([k]) => k)
+    ),
+  [notesByJobNumber]);
 
   // Group ALL scored items by section (no time filtering here — each SectionCard filters independently)
   const sections = useMemo(() => {
     return PRIORITY_SECTIONS.map(sec => {
-      const items = allScored.filter(r => sec.statuses.includes(r.job.status || ''));
+      const items = allScored.filter(r =>
+        sec.statuses.includes(r.job.status || '') && !completedJobNumbers.has(r.job.jobNumber)
+      );
       items.sort((a, b) => compareLongestWaitingFirst(a, b, sec, now, readyAtMap));
       return { ...sec, items };
     });
-  }, [allScored, now, readyAtMap]);
+  }, [allScored, now, readyAtMap, completedJobNumbers]);
 
   const coveredStatuses = new Set(PRIORITY_SECTIONS.flatMap(s => s.statuses));
   const uncategorised = useMemo(() =>
-    allScored.filter(r => !coveredStatuses.has(r.job.status || '') && r.score > 0)
+    allScored.filter(r => !coveredStatuses.has(r.job.status || '') && r.score > 0 && !completedJobNumbers.has(r.job.jobNumber))
       .sort((a, b) => b.score - a.score),
-  [allScored]);
+  [allScored, completedJobNumbers]);
+  const completedItems = useMemo(
+    () => allScored
+      .filter(r => completedJobNumbers.has(r.job.jobNumber))
+      .sort((a, b) => {
+        const ta = notesByJobNumber[a.job.jobNumber]?.updatedAt || '';
+        const tb = notesByJobNumber[b.job.jobNumber]?.updatedAt || '';
+        return tb.localeCompare(ta);
+      }),
+    [allScored, completedJobNumbers, notesByJobNumber],
+  );
 
   const totalOrders = sections.reduce((a, s) => a + s.items.length, 0);
   const totalCritical = sections.reduce((a, s) => a + s.items.filter(r => r.urgency === 'critical').length, 0);
@@ -806,6 +868,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     const init: Record<string, boolean> = {};
     for (const sec of sections) init[sec.key] = sec.items.length > 0;
     init.other = uncategorised.length > 0;
+    init.completed = completedItems.length > 0;
     setPrintSelection(init);
     setPrintModalOpen(true);
   };
@@ -816,6 +879,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       next[sec.key] = on && sec.items.length > 0;
     }
     next.other = on && uncategorised.length > 0;
+    next.completed = on && completedItems.length > 0;
     setPrintSelection(next);
   };
 
@@ -825,19 +889,18 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       window.alert('Select at least one section to include.');
       return;
     }
-    const pdfSections = sections.map(sec => ({
-      ...sec,
-      items: sec.items.filter(r => !notesByJobNumber[r.job.jobNumber]?.excludeFromPdf),
-    }));
-    const pdfUncategorised = uncategorised.filter(r => !notesByJobNumber[r.job.jobNumber]?.excludeFromPdf);
-    const agg = aggregatePriorityPrintTotals(pdfSections, pdfUncategorised, includeKeys);
+    const pdfSections = sections.map(sec => ({ ...sec, items: sec.items }));
+    const pdfUncategorised = [...uncategorised];
+    const pdfCompleted = [...completedItems];
+    const agg = aggregatePriorityPrintTotals(pdfSections, pdfUncategorised, pdfCompleted, includeKeys);
     if (agg.orders === 0) {
-      window.alert('No jobs left for PDF after your "Done / exclude from PDF" marks in the selected sections.');
+      window.alert('No jobs in the selected sections for this PDF.');
       return;
     }
     openPriorityHandoffPrint({
       sections: pdfSections,
       uncategorised: pdfUncategorised,
+      completed: pdfCompleted,
       readyAtMap,
       now,
       audienceLine: printAudienceLine,
@@ -848,6 +911,50 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       totalValue: agg.value,
       sectionsIncludedLine: agg.titles.join(', '),
       notesByJobNumber,
+    });
+    setPrintModalOpen(false);
+  };
+
+  const generateIndividualPdfs = () => {
+    const includeKeys = new Set(Object.entries(printSelection).filter(([, v]) => v).map(([k]) => k));
+    if (includeKeys.size === 0) {
+      window.alert('Select at least one section to include.');
+      return;
+    }
+    const allForRoster = [
+      ...sections.flatMap(s => s.items),
+      ...uncategorised,
+      ...completedItems,
+    ];
+    const staff = Array.from(new Set(allForRoster.map(r => displayStaffName(r.job.salesPerson) || 'Unassigned')));
+    if (staff.length === 0) {
+      window.alert('No staff-assigned jobs available for individual PDFs.');
+      return;
+    }
+    staff.forEach(name => {
+      const secForStaff = sections.map(sec => ({
+        ...sec,
+        items: sec.items.filter(r => (displayStaffName(r.job.salesPerson) || 'Unassigned') === name),
+      }));
+      const otherForStaff = uncategorised.filter(r => (displayStaffName(r.job.salesPerson) || 'Unassigned') === name);
+      const doneForStaff = completedItems.filter(r => (displayStaffName(r.job.salesPerson) || 'Unassigned') === name);
+      const agg = aggregatePriorityPrintTotals(secForStaff, otherForStaff, doneForStaff, includeKeys);
+      if (agg.orders === 0) return;
+      openPriorityHandoffPrint({
+        sections: secForStaff,
+        uncategorised: otherForStaff,
+        completed: doneForStaff,
+        readyAtMap,
+        now,
+        audienceLine: `Prepared for: ${name}`,
+        includeKeys,
+        totalOrders: agg.orders,
+        totalCritical: agg.critical,
+        totalHigh: agg.high,
+        totalValue: agg.value,
+        sectionsIncludedLine: agg.titles.join(', '),
+        notesByJobNumber,
+      });
     });
     setPrintModalOpen(false);
   };
@@ -1042,14 +1149,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                         type="checkbox"
                         checked={excluded}
                         onChange={(e) => updateLineNote(item.job.jobNumber, { excludeFromPdf: e.target.checked })}
-                        title="Done: exclude this row from PDF exports"
+                        title="Done: move this row into Completed / Delegated"
                         className="rounded border-white/20 bg-[#2a2a55] text-emerald-500 focus:ring-emerald-500/40"
                       />
                       <input
                         type="text"
                         value={noteText}
                         onChange={(e) => updateLineNote(item.job.jobNumber, { text: e.target.value })}
-                        placeholder={excluded ? 'Excluded from PDF' : 'Follow-up note'}
+                        placeholder={excluded ? 'Completed / delegated note' : 'Follow-up note'}
                         className={`w-full px-2 py-1 rounded border text-[10px] ${
                           excluded
                             ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
@@ -1065,8 +1172,59 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
         </div>
       )}
 
+      {completedItems.length > 0 && (
+        <div className="bg-[#1e1e3a] rounded-2xl border border-emerald-500/20 overflow-hidden">
+          <button className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors" onClick={() => toggleSection('completed')}>
+            <div className="flex items-center gap-3">
+              <span className="text-xl">✅</span>
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-emerald-300">Completed / Delegated</h2>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/10 text-emerald-400">{completedItems.length}</span>
+                </div>
+                <p className="text-[11px] text-white/40 mt-0.5">Rows marked done. Kept out of live sections, retained for weekly briefing PDF.</p>
+              </div>
+            </div>
+            <svg className={`w-4 h-4 text-white/30 transition-transform ${expandedSection === 'completed' ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {expandedSection === 'completed' && (
+            <div className="border-t border-white/5 divide-y divide-white/[0.03]">
+              {completedItems.map((item, i) => {
+                const us = URGENCY_STYLE[item.urgency];
+                const lineNote = notesByJobNumber[item.job.jobNumber];
+                const noteText = lineNote?.text || '';
+                return (
+                  <div key={item.job.id} className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors" onClick={() => onNavigateToOrder(item.job.jobNumber)}>
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${us.dot}`}>{i + 1}</span>
+                    <CopyableJobNum jobNumber={item.job.jobNumber} className="text-[10px] font-mono text-indigo-400/70 shrink-0" />
+                    <span className="text-xs text-white/70 truncate flex-1">{item.job.customerName}</span>
+                    <span className="text-[10px] text-white/50">{item.job.status}</span>
+                    <div className="flex items-center gap-1.5 min-w-[300px]" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={true}
+                        onChange={(e) => updateLineNote(item.job.jobNumber, { excludeFromPdf: e.target.checked })}
+                        title="Untick to return this row to live sections"
+                        className="rounded border-white/20 bg-[#2a2a55] text-emerald-500 focus:ring-emerald-500/40"
+                      />
+                      <input
+                        type="text"
+                        value={noteText}
+                        onChange={(e) => updateLineNote(item.job.jobNumber, { text: e.target.value })}
+                        placeholder="Completed note"
+                        className="w-full px-2 py-1 rounded border text-[10px] border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Empty */}
-      {totalOrders === 0 && uncategorised.length === 0 && (
+      {totalOrders === 0 && uncategorised.length === 0 && completedItems.length === 0 && (
         <div className="bg-[#1e1e3a] rounded-2xl border border-white/5 px-6 py-12 text-center">
           <p className="text-white/50 text-sm">No orders found for this filter.</p>
           <p className="text-white/25 text-xs mt-1">Try &quot;All staff&quot; or another staff filter, or sync Deco.</p>
@@ -1140,6 +1298,28 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                   </span>
                 </span>
               </label>
+              <label
+                className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                  completedItems.length === 0 ? 'border-white/5 opacity-45 cursor-not-allowed' : 'border-white/10 hover:bg-white/5 cursor-pointer'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-white/20 bg-[#2a2a55] text-violet-500 focus:ring-violet-500/50"
+                  checked={!!printSelection.completed}
+                  disabled={completedItems.length === 0}
+                  onChange={() => {
+                    if (completedItems.length > 0) setPrintSelection(p => ({ ...p, completed: !p.completed }));
+                  }}
+                />
+                <span className="text-xl shrink-0 leading-none">✅</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-emerald-300">Completed / delegated</span>
+                  <span className="text-[10px] text-white/35">
+                    {completedItems.length === 0 ? 'None' : `${completedItems.length} job${s(completedItems.length)}`}
+                  </span>
+                </span>
+              </label>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-4 text-[10px] font-bold uppercase tracking-wide">
               <button type="button" className="text-violet-300 hover:text-violet-200" onClick={() => setPrintAllSections(true)}>Select all</button>
@@ -1159,7 +1339,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                 className="px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-400 text-white text-xs font-black uppercase tracking-wider"
                 onClick={confirmPrintHandoff}
               >
-                Generate PDF
+                Generate All PDF
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-black uppercase tracking-wider"
+                onClick={generateIndividualPdfs}
+              >
+                Generate Individual PDFs
               </button>
             </div>
           </div>
@@ -1320,14 +1507,14 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                           type="checkbox"
                           checked={excluded}
                           onChange={(e) => onUpdateLineNote(item.job.jobNumber, { excludeFromPdf: e.target.checked })}
-                          title="Done: exclude this row from PDF exports"
+                          title="Done: move this row into Completed / Delegated"
                           className="rounded border-white/20 bg-[#2a2a55] text-emerald-500 focus:ring-emerald-500/40"
                         />
                         <input
                           type="text"
                           value={noteText}
                           onChange={(e) => onUpdateLineNote(item.job.jobNumber, { text: e.target.value })}
-                          placeholder={excluded ? 'Excluded from PDF' : 'Why still here / who is chasing'}
+                          placeholder={excluded ? 'Completed / delegated note' : 'Why still here / who is chasing'}
                           className={`w-full min-w-0 px-2 py-1 rounded border text-[10px] ${
                             excluded
                               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
