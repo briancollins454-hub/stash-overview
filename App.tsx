@@ -2465,6 +2465,7 @@ const App: React.FC = () => {
 
   const baseFilteredOrders = useMemo(() => {
       let filtered = [...unifiedOrders];
+      const hasSearch = !!debouncedSearch.trim();
       
       // Filter out orders that have ONLY excluded tags
       if (excludedTags.length > 0) {
@@ -2475,29 +2476,31 @@ const App: React.FC = () => {
       }
 
       if (!includeMto) filtered = filtered.filter(o => !o.isMto || o.hasStockItems);
-      if (showFulfilled) filtered = filtered.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
-      else {
-          filtered = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
-          if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
-          else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
-          else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
-          else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
-          else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
-          else if (activeQuickFilter === 'late') filtered = filtered.filter(o => o.daysRemaining < 0);
-          else if (activeQuickFilter === 'mapping_gap') filtered = filtered.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100);
-          else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
-          else if (activeQuickFilter === 'overdue10') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 10);
-          else if (activeQuickFilter === 'production_after_dispatch') filtered = filtered.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000);
-          else if (activeQuickFilter === 'due_soon') filtered = filtered.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5);
-          // No quick filter = default "Unfulfilled" view — hide ready-to-ship
-          // orders so they live only in the Ready to Ship card.
-          else filtered = filtered.filter(o => !isReadyToShip(o));
+      if (!hasSearch) {
+          if (showFulfilled) filtered = filtered.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
+          else {
+              filtered = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
+              if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
+              else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
+              else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
+              else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
+              else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
+              else if (activeQuickFilter === 'late') filtered = filtered.filter(o => o.daysRemaining < 0);
+              else if (activeQuickFilter === 'mapping_gap') filtered = filtered.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100);
+              else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
+              else if (activeQuickFilter === 'overdue10') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 10);
+              else if (activeQuickFilter === 'production_after_dispatch') filtered = filtered.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000);
+              else if (activeQuickFilter === 'due_soon') filtered = filtered.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5);
+              // No quick filter = default "Unfulfilled" view — hide ready-to-ship
+              // orders so they live only in the Ready to Ship card.
+              else filtered = filtered.filter(o => !isReadyToShip(o));
+          }
+          if (startDate && endDate) {
+              const s = new Date(startDate); const e = new Date(endDate); e.setHours(23, 59, 59, 999);
+              filtered = filtered.filter(o => { const d = new Date(o.shopify.date); return d >= s && d <= e; });
+          }
       }
-      if (startDate && endDate) {
-          const s = new Date(startDate); const e = new Date(endDate); e.setHours(23, 59, 59, 999);
-          filtered = filtered.filter(o => { const d = new Date(o.shopify.date); return d >= s && d <= e; });
-      }
-      if (debouncedSearch) { 
+      if (hasSearch) { 
           const lower = debouncedSearch.toLowerCase(); 
           filtered = filtered.filter(o => o.shopify.orderNumber.includes(lower) || o.shopify.customerName.toLowerCase().includes(lower) || (o.decoJobId && o.decoJobId.includes(lower))); 
       }
