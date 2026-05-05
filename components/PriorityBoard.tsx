@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { DecoJob } from '../types';
-import { getItem } from '../services/localStore';
+import { getItem, setItem } from '../services/localStore';
 import {
   calculatePriority, PRIORITY_SECTIONS, URGENCY_STYLE,
   pd, daysBetween,
@@ -37,6 +37,12 @@ interface Props {
   }>;
   lastSyncTime?: number | null;
   loading?: boolean;
+}
+
+interface PriorityLineNote {
+  text: string;
+  excludeFromPdf: boolean;
+  updatedAt: string;
 }
 
 const fmtK = (n: number) => {
@@ -326,6 +332,8 @@ const URGENCY_PRINT_CLASS: Record<Urgency, string> = {
   low: 'u-low',
 };
 
+const PRIORITY_NOTES_KEY = 'stash_priority_line_notes';
+
 function aggregatePriorityPrintTotals(
   sections: Array<PrioritySection & { items: PriorityResult[] }>,
   uncategorised: PriorityResult[],
@@ -368,8 +376,9 @@ function openPriorityHandoffPrint(opts: {
   totalValue: number;
   /** Human-readable list for the PDF banner, e.g. "Awaiting PO, Awaiting Stock". */
   sectionsIncludedLine: string;
+  notesByJobNumber: Record<string, PriorityLineNote>;
 }): void {
-  const { sections, uncategorised, readyAtMap, now, audienceLine, includeKeys, totalOrders, totalCritical, totalHigh, totalValue, sectionsIncludedLine } = opts;
+  const { sections, uncategorised, readyAtMap, now, audienceLine, includeKeys, totalOrders, totalCritical, totalHigh, totalValue, sectionsIncludedLine, notesByJobNumber } = opts;
   const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
@@ -382,6 +391,7 @@ function openPriorityHandoffPrint(opts: {
       metricCol === 'status'
         ? (item.job.status || '—')
         : formatMetric(getMetricDays(item.job, sec, now, readyAtMap), sec);
+    const note = (notesByJobNumber[item.job.jobNumber]?.text || '').trim() || '—';
     return `<tr>
       <td class="c-num">${i + 1}</td>
       <td class="mono">#${escHandoffHtml(item.job.jobNumber)}</td>
@@ -391,6 +401,7 @@ function openPriorityHandoffPrint(opts: {
       <td><span class="badge ${u}">${escHandoffHtml(item.urgency)}</span></td>
       <td class="small">${escHandoffHtml(rules)}</td>
       <td>${escHandoffHtml(staff)}</td>
+      <td class="small">${escHandoffHtml(note)}</td>
       <td class="num">${fmtK(val)}</td>
     </tr>`;
   };
@@ -414,7 +425,7 @@ function openPriorityHandoffPrint(opts: {
           <thead>
             <tr>
               <th>#</th><th>Order</th><th>Customer</th><th>Job</th>
-              <th>${escHandoffHtml(sec.daysLabel)}</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Value</th>
+              <th>${escHandoffHtml(sec.daysLabel)}</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Note</th><th>Value</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -448,7 +459,7 @@ function openPriorityHandoffPrint(opts: {
           <thead>
             <tr>
               <th>#</th><th>Order</th><th>Customer</th><th>Job</th>
-              <th>Status</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Value</th>
+              <th>Status</th><th>Urgency</th><th>Signals</th><th>Staff</th><th>Note</th><th>Value</th>
             </tr>
           </thead>
           <tbody>${rowsOther}</tbody>
@@ -544,12 +555,33 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const [staffFilter, setStaffFilter] = useState<string>(STAFF_ALL);
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
+  const [notesByJobNumber, setNotesByJobNumber] = useState<Record<string, PriorityLineNote>>({});
 
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
       if (cached) setFinanceJobs(cached);
     });
   }, [lastSyncTime]);
+
+  useEffect(() => {
+    getItem<Record<string, PriorityLineNote>>(PRIORITY_NOTES_KEY).then(cached => {
+      if (cached) setNotesByJobNumber(cached);
+    }).catch(() => { /* non-fatal */ });
+  }, []);
+
+  const updateLineNote = (jobNumber: string, patch: Partial<PriorityLineNote>) => {
+    setNotesByJobNumber(prev => {
+      const current = prev[jobNumber] || { text: '', excludeFromPdf: false, updatedAt: new Date().toISOString() };
+      const next: PriorityLineNote = {
+        ...current,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      const out = { ...prev, [jobNumber]: next };
+      setItem(PRIORITY_NOTES_KEY, out).catch(console.error);
+      return out;
+    });
+  };
 
   const now = useMemo(() => new Date(), []);
 
@@ -713,14 +745,19 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       window.alert('Select at least one section to include.');
       return;
     }
-    const agg = aggregatePriorityPrintTotals(sections, uncategorised, includeKeys);
+    const pdfSections = sections.map(sec => ({
+      ...sec,
+      items: sec.items.filter(r => !notesByJobNumber[r.job.jobNumber]?.excludeFromPdf),
+    }));
+    const pdfUncategorised = uncategorised.filter(r => !notesByJobNumber[r.job.jobNumber]?.excludeFromPdf);
+    const agg = aggregatePriorityPrintTotals(pdfSections, pdfUncategorised, includeKeys);
     if (agg.orders === 0) {
-      window.alert('No jobs in the selected sections. Pick columns that have orders, or sync Deco.');
+      window.alert('No jobs left for PDF after your "Done / exclude from PDF" marks in the selected sections.');
       return;
     }
     openPriorityHandoffPrint({
-      sections,
-      uncategorised,
+      sections: pdfSections,
+      uncategorised: pdfUncategorised,
       readyAtMap,
       now,
       audienceLine: printAudienceLine,
@@ -730,6 +767,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       totalHigh: agg.high,
       totalValue: agg.value,
       sectionsIncludedLine: agg.titles.join(', '),
+      notesByJobNumber,
     });
     setPrintModalOpen(false);
   };
@@ -884,6 +922,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           onNavigate={onNavigateToOrder}
           now={now}
           readyAtMap={readyAtMap}
+          notesByJobNumber={notesByJobNumber}
+          onUpdateLineNote={updateLineNote}
         />
       ))}
 
@@ -907,13 +947,36 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
             <div className="border-t border-white/5 divide-y divide-white/[0.03]">
               {uncategorised.map((item, i) => {
                 const us = URGENCY_STYLE[item.urgency];
+                const lineNote = notesByJobNumber[item.job.jobNumber];
+                const noteText = lineNote?.text || '';
+                const excluded = !!lineNote?.excludeFromPdf;
                 return (
-                  <div key={item.job.id} className="flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors" onClick={() => onNavigateToOrder(item.job.jobNumber)}>
+                  <div key={item.job.id} className={`flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 cursor-pointer transition-colors ${excluded ? 'opacity-70' : ''}`} onClick={() => onNavigateToOrder(item.job.jobNumber)}>
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${us.dot}`}>{i + 1}</span>
                     <CopyableJobNum jobNumber={item.job.jobNumber} className="text-[10px] font-mono text-indigo-400/70 shrink-0" />
                     <span className="text-xs text-white/70 truncate flex-1">{item.job.customerName}</span>
                     <span className={`text-[9px] px-2 py-0.5 rounded-full ${us.pill}`}>{item.reason}</span>
                     <span className="text-[10px] text-white/50">{item.job.status}</span>
+                    <div className="flex items-center gap-1.5 min-w-[260px]" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={excluded}
+                        onChange={(e) => updateLineNote(item.job.jobNumber, { excludeFromPdf: e.target.checked })}
+                        title="Done: exclude this row from PDF exports"
+                        className="rounded border-white/20 bg-[#2a2a55] text-emerald-500 focus:ring-emerald-500/40"
+                      />
+                      <input
+                        type="text"
+                        value={noteText}
+                        onChange={(e) => updateLineNote(item.job.jobNumber, { text: e.target.value })}
+                        placeholder={excluded ? 'Excluded from PDF' : 'Follow-up note'}
+                        className={`w-full px-2 py-1 rounded border text-[10px] ${
+                          excluded
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                            : 'border-white/10 bg-white/5 text-white/80'
+                        }`}
+                      />
+                    </div>
                   </div>
                 );
               })}
@@ -1036,6 +1099,8 @@ interface SectionCardProps {
   onNavigate: (orderNum: string) => void;
   now: Date;
   readyAtMap: ReadyAtMap;
+  notesByJobNumber: Record<string, PriorityLineNote>;
+  onUpdateLineNote: (jobNumber: string, patch: Partial<PriorityLineNote>) => void;
 }
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
@@ -1048,7 +1113,7 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap }: SectionCardProps) {
+function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap, notesByJobNumber, onUpdateLineNote }: SectionCardProps) {
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
@@ -1126,7 +1191,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
             <div className="px-5 py-6 text-center text-white/30 text-xs">No orders in this category{filterHint ? ' for this filter' : ''}.</div>
           ) : (
             <>
-              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
+              <div className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_1.2fr_70px] gap-1 px-4 py-2 text-[9px] font-bold text-white/20 uppercase tracking-wider border-b border-white/5">
                 <span>#</span>
                 <span>Order / Date</span>
                 <span>Customer / Job</span>
@@ -1134,6 +1199,7 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                 <span>Urgency</span>
                 <span>Reason</span>
                 <span>Staff</span>
+                <span>Follow-up note</span>
                 <span className="text-right">Value</span>
               </div>
               <div className="divide-y divide-white/[0.03]">
@@ -1143,10 +1209,13 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                   const metric = getMetricDays(item.job, section, now, readyAtMap);
                   const metricStr = formatMetric(metric, section);
                   const mStyle = metricColor(metric, section);
+                  const lineNote = notesByJobNumber[item.job.jobNumber];
+                  const noteText = lineNote?.text || '';
+                  const excluded = !!lineNote?.excludeFromPdf;
                   return (
                     <div
                       key={item.job.id}
-                      className="grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors"
+                      className={`grid grid-cols-[32px_1fr_1fr_70px_70px_90px_90px_1.2fr_70px] gap-1 px-4 py-2.5 items-center hover:bg-white/5 cursor-pointer transition-colors ${excluded ? 'opacity-70' : ''}`}
                       onClick={() => onNavigate(item.job.jobNumber)}
                     >
                       <span className="text-[10px] text-white/20 font-mono">{i + 1}</span>
@@ -1166,6 +1235,26 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                         )) : <span className="text-[8px] text-white/15">{'\u2014'}</span>}
                       </div>
                       <span className="text-[10px] text-white/40 truncate">{staff}</span>
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={excluded}
+                          onChange={(e) => onUpdateLineNote(item.job.jobNumber, { excludeFromPdf: e.target.checked })}
+                          title="Done: exclude this row from PDF exports"
+                          className="rounded border-white/20 bg-[#2a2a55] text-emerald-500 focus:ring-emerald-500/40"
+                        />
+                        <input
+                          type="text"
+                          value={noteText}
+                          onChange={(e) => onUpdateLineNote(item.job.jobNumber, { text: e.target.value })}
+                          placeholder={excluded ? 'Excluded from PDF' : 'Why still here / who is chasing'}
+                          className={`w-full min-w-0 px-2 py-1 rounded border text-[10px] ${
+                            excluded
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                              : 'border-white/10 bg-white/5 text-white/80'
+                          }`}
+                        />
+                      </div>
                       <span className="text-[10px] text-white/30 text-right">{fmtK(item.job.orderTotal || item.job.billableAmount || 0)}</span>
                     </div>
                   );
