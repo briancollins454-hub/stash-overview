@@ -708,6 +708,15 @@ const DailyTaskList: React.FC<Props> = ({
     return displayStaffName(job?.salesPerson) || 'Unassigned';
   }, [jobByNumber]);
 
+  const rowsForStaffView = useCallback((allRows: DailyTaskRow[], staff: string): DailyTaskRow[] => {
+    if (staff === STAFF_VIEW_ALL) return allRows;
+    return allRows.filter(row => {
+      if (row.source_page !== 'priority') return false;
+      const job = row.source_ref ? jobByNumber.get(String(row.source_ref)) : undefined;
+      return priorityRowStaffBucket(job) === staff;
+    });
+  }, [jobByNumber]);
+
   const openWeeklyPdf = useCallback((
     title: string,
     audience: string,
@@ -774,11 +783,15 @@ tr:nth-child(even) td{background:#fafafa}
     if (!isSupabaseReady()) return;
     setWeeklyExporting(true);
     try {
-      const weekRows = await fetchWeekRows();
+      const weekRows = rowsForStaffView(await fetchWeekRows(), staffViewFilter);
       const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      const audience =
+        staffViewFilter === STAFF_VIEW_ALL
+          ? 'Audience: all staff'
+          : `Audience: ${staffViewFilter === STAFF_VIEW_UNASSIGNED ? 'Unassigned' : staffViewFilter}`;
       openWeeklyPdf(
         `Weekly task briefing (${startIso} → ${endIso})`,
-        'Audience: all staff',
+        audience,
         weekRows,
       );
     } catch (e: unknown) {
@@ -786,30 +799,38 @@ tr:nth-child(even) td{background:#fafafa}
     } finally {
       setWeeklyExporting(false);
     }
-  }, [fetchWeekRows, taskDate, openWeeklyPdf]);
+  }, [fetchWeekRows, taskDate, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
 
   const exportWeeklyIndividualPdfs = useCallback(async () => {
     if (!isSupabaseReady()) return;
     setWeeklyExporting(true);
     try {
-      const weekRows = await fetchWeekRows();
-      const owners = Array.from(new Set(weekRows.map(rowStaffName))).sort((a, b) => a.localeCompare(b));
+      const weekRows = rowsForStaffView(await fetchWeekRows(), staffViewFilter);
+      const owners =
+        staffViewFilter === STAFF_VIEW_ALL
+          ? Array.from(new Set(weekRows.map(rowStaffName))).sort((a, b) => a.localeCompare(b))
+          : [staffViewFilter];
       const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      let generated = 0;
       owners.forEach(owner => {
         const scoped = weekRows.filter(r => rowStaffName(r) === owner);
         if (scoped.length === 0) return;
+        generated += 1;
         openWeeklyPdf(
           `Weekly tasks (${startIso} → ${endIso})`,
           `Audience: ${owner}`,
           scoped,
         );
       });
+      if (generated === 0) {
+        window.alert('No tasks found for the selected staff view in this week.');
+      }
     } catch (e: unknown) {
       window.alert(friendlyDailyTasksError(e));
     } finally {
       setWeeklyExporting(false);
     }
-  }, [fetchWeekRows, taskDate, rowStaffName, openWeeklyPdf]);
+  }, [fetchWeekRows, taskDate, rowStaffName, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
 
   return (
     <div className="max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-4">
