@@ -144,6 +144,28 @@ function escHtml(raw: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function normaliseWeeklyRowsForExport(rows: DailyTaskRow[]): DailyTaskRow[] {
+  // Weekly packs should reflect the latest known state per imported task ref,
+  // not every historical copy across days. Without this, an older completed
+  // row can print alongside a newer "to be completed" row for the same job.
+  const byKey = new Map<string, DailyTaskRow>();
+  for (const r of rows) {
+    const hasStableRef = !!(r.source_ref && String(r.source_ref).trim());
+    const key = hasStableRef
+      ? `${r.source_page}:${String(r.source_ref).trim()}`
+      : `id:${r.id}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, r);
+      continue;
+    }
+    const prevStamp = prev.updated_at || prev.created_at || `${prev.task_date}T00:00:00`;
+    const curStamp = r.updated_at || r.created_at || `${r.task_date}T00:00:00`;
+    if (curStamp >= prevStamp) byKey.set(key, r);
+  }
+  return Array.from(byKey.values());
+}
+
 function fmtMoney(n?: number): string | null {
   if (n == null || Number.isNaN(n)) return null;
   try {
@@ -943,8 +965,9 @@ const DailyTaskList: React.FC<Props> = ({
     audience: string,
     rowsToPrint: DailyTaskRow[],
   ) => {
+    const exportRows = normaliseWeeklyRowsForExport(rowsToPrint);
     const byDate = new Map<string, DailyTaskRow[]>();
-    rowsToPrint.forEach(r => {
+    exportRows.forEach(r => {
       const key = r.task_date;
       if (!byDate.has(key)) byDate.set(key, []);
       byDate.get(key)!.push(r);
