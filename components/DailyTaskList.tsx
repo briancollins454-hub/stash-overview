@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays, CheckSquare, ClipboardList, Copy, Check, ExternalLink, Loader2, Plus, RefreshCw,
-  Sparkles, Trash2, AlertTriangle, UserRound,
+  Sparkles, Trash2, AlertTriangle, UserRound, FileText,
 } from 'lucide-react';
 import type { DecoJob } from '../types';
 import { isSupabaseReady, supabaseFetch } from '../services/supabase';
@@ -111,6 +111,27 @@ function fmtShortDate(iso?: string): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function weekBoundsFromDateISO(iso: string): { startIso: string; endIso: string; start: Date; end: Date } {
+  const d = new Date(`${iso}T00:00:00`);
+  const day = d.getDay(); // 0 Sun ... 6 Sat
+  const diffToMonday = (day + 6) % 7;
+  const start = new Date(d);
+  start.setDate(d.getDate() - diffToMonday);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(0, 0, 0, 0);
+  return { startIso: localDateISO(start), endIso: localDateISO(end), start, end };
+}
+
+function escHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function fmtMoney(n?: number): string | null {
@@ -410,6 +431,7 @@ const DailyTaskList: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [importing, setImporting] = useState(false);
+  const [weeklyExporting, setWeeklyExporting] = useState(false);
   const [hideDone, setHideDone] = useState(false);
   /** Narrow list to one Deco responsible person (finance / manual rows only show when All). */
   const [staffViewFilter, setStaffViewFilter] = useState<string>(STAFF_VIEW_ALL);
@@ -670,6 +692,125 @@ const DailyTaskList: React.FC<Props> = ({
     }
   };
 
+  const fetchWeekRows = useCallback(async (): Promise<DailyTaskRow[]> => {
+    const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+    const res = await supabaseFetch(
+      `stash_daily_tasks?task_date=gte.${startIso}&task_date=lte.${endIso}&order=task_date.asc,sort_order.asc,id.asc`,
+      'GET',
+    );
+    const data: DailyTaskRow[] = await res.json();
+    return Array.isArray(data) ? data : [];
+  }, [taskDate]);
+
+  const rowStaffName = useCallback((row: DailyTaskRow): string => {
+    if (row.source_page !== 'priority' || !row.source_ref) return 'Shared / admin';
+    const job = jobByNumber.get(String(row.source_ref));
+    return displayStaffName(job?.salesPerson) || 'Unassigned';
+  }, [jobByNumber]);
+
+  const openWeeklyPdf = useCallback((
+    title: string,
+    audience: string,
+    rowsToPrint: DailyTaskRow[],
+  ) => {
+    const byDate = new Map<string, DailyTaskRow[]>();
+    rowsToPrint.forEach(r => {
+      const key = r.task_date;
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(r);
+    });
+    const sections = Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rowsForDate]) => {
+        const dayTitle = fmtShortDate(date) || date;
+        const lis = rowsForDate.map(r => {
+          const staff = rowStaffName(r);
+          const source = SOURCE_LABEL[r.source_page] || r.source_page;
+          const done = r.completed ? 'Done' : 'Open';
+          const note = (r.hold_note || '').trim() || '—';
+          const ref = r.source_ref ? `#${r.source_ref}` : '';
+          return `<tr>
+            <td>${escHtml(dayTitle)}</td>
+            <td>${escHtml(done)}</td>
+            <td>${escHtml(source)}</td>
+            <td>${escHtml(staff)}</td>
+            <td>${escHtml((r.title || '').trim())}${ref ? ` <span style="color:#6d28d9;font-family:ui-monospace,monospace;">${escHtml(ref)}</span>` : ''}</td>
+            <td>${escHtml(note)}</td>
+          </tr>`;
+        }).join('');
+        return lis;
+      }).join('');
+
+    const html = `<!doctype html>
+<html><head><meta charset="utf-8"><title>${escHtml(title)}</title>
+<style>
+body{font-family:Inter,system-ui,sans-serif;padding:20px;color:#111827}
+h1{margin:0 0 6px;font-size:20px} .meta{color:#6b7280;font-size:12px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{border:1px solid #e5e7eb;padding:7px 8px;vertical-align:top}
+th{background:#f5f3ff;color:#4c1d95;text-transform:uppercase;font-size:10px;letter-spacing:.08em}
+tr:nth-child(even) td{background:#fafafa}
+</style></head><body>
+<h1>${escHtml(title)}</h1>
+<div class="meta">${escHtml(audience)} · Generated ${escHtml(new Date().toLocaleString())}</div>
+<table>
+<thead><tr><th>Day</th><th>Status</th><th>Source</th><th>Owner</th><th>Task</th><th>Hold-up note</th></tr></thead>
+<tbody>${sections || '<tr><td colspan="6">No tasks in this week.</td></tr>'}</tbody>
+</table>
+</body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) {
+      window.alert('Please allow pop-ups for PDF generation.');
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    window.setTimeout(() => { try { win.print(); } catch { /* noop */ } }, 250);
+  }, [rowStaffName]);
+
+  const exportWeeklyAllPdf = useCallback(async () => {
+    if (!isSupabaseReady()) return;
+    setWeeklyExporting(true);
+    try {
+      const weekRows = await fetchWeekRows();
+      const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      openWeeklyPdf(
+        `Weekly task briefing (${startIso} → ${endIso})`,
+        'Audience: all staff',
+        weekRows,
+      );
+    } catch (e: unknown) {
+      window.alert(friendlyDailyTasksError(e));
+    } finally {
+      setWeeklyExporting(false);
+    }
+  }, [fetchWeekRows, taskDate, openWeeklyPdf]);
+
+  const exportWeeklyIndividualPdfs = useCallback(async () => {
+    if (!isSupabaseReady()) return;
+    setWeeklyExporting(true);
+    try {
+      const weekRows = await fetchWeekRows();
+      const owners = Array.from(new Set(weekRows.map(rowStaffName))).sort((a, b) => a.localeCompare(b));
+      const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      owners.forEach(owner => {
+        const scoped = weekRows.filter(r => rowStaffName(r) === owner);
+        if (scoped.length === 0) return;
+        openWeeklyPdf(
+          `Weekly tasks (${startIso} → ${endIso})`,
+          `Audience: ${owner}`,
+          scoped,
+        );
+      });
+    } catch (e: unknown) {
+      window.alert(friendlyDailyTasksError(e));
+    } finally {
+      setWeeklyExporting(false);
+    }
+  }, [fetchWeekRows, taskDate, rowStaffName, openWeeklyPdf]);
+
   return (
     <div className="max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-4">
       <div className="flex items-start gap-3 flex-wrap">
@@ -685,6 +826,26 @@ const DailyTaskList: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={exportWeeklyAllPdf}
+          disabled={weeklyExporting}
+          className="px-2.5 py-2 rounded-lg border border-violet-200 dark:border-violet-500/30 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 disabled:opacity-50"
+          title="Compile this week into one PDF including notes"
+        >
+          {weeklyExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+          Weekly PDF (all)
+        </button>
+        <button
+          type="button"
+          onClick={exportWeeklyIndividualPdfs}
+          disabled={weeklyExporting}
+          className="px-2.5 py-2 rounded-lg border border-indigo-200 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 disabled:opacity-50"
+          title="Compile this week into one PDF per owner including notes"
+        >
+          {weeklyExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserRound className="w-3.5 h-3.5" />}
+          Weekly PDF (individual)
+        </button>
         <button
           type="button"
           onClick={load}
