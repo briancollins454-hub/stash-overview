@@ -101,9 +101,17 @@ function isDailyTasksTableMissing(e: unknown): boolean {
   );
 }
 
+function isReviewedColumnMissing(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('reviewed') && msg.includes('schema cache');
+}
+
 function friendlyDailyTasksError(e: unknown): string {
   if (isDailyTasksTableMissing(e)) {
     return 'Daily tasks need the Supabase table `stash_daily_tasks`. In the Supabase dashboard → SQL Editor, run `migrations/stash_daily_tasks.sql` from the Stash repo on this project, then reload.';
+  }
+  if (isReviewedColumnMissing(e)) {
+    return 'This environment is missing the new daily-task stage columns (`reviewed`, `reviewed_at`). Run `migrations/stash_daily_tasks_reviewed.sql` in Supabase, then refresh.';
   }
   return e instanceof Error ? e.message : 'Couldn\'t load tasks';
 }
@@ -431,6 +439,7 @@ const DailyTaskList: React.FC<Props> = ({
   const [rows, setRows] = useState<DailyTaskRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [schemaSupportsReviewed, setSchemaSupportsReviewed] = useState(true);
   const [newTitle, setNewTitle] = useState('');
   const [importing, setImporting] = useState(false);
   const [weeklyExporting, setWeeklyExporting] = useState(false);
@@ -523,33 +532,46 @@ const DailyTaskList: React.FC<Props> = ({
     const title = newTitle.trim();
     if (!title || !isSupabaseReady()) return;
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         task_date: taskDate,
         title,
         source_page: 'manual',
         source_ref: null,
         sort_order: nextSortOrder,
-        reviewed: false,
-        reviewed_at: null,
         completed: false,
         hold_note: null,
         created_by: createdBy,
       };
+      if (schemaSupportsReviewed) {
+        payload.reviewed = false;
+        payload.reviewed_at = null;
+      }
       const res = await supabaseFetch('stash_daily_tasks', 'POST', payload, 'return=representation');
       const inserted: DailyTaskRow[] = await res.json();
       const row = Array.isArray(inserted) ? inserted[0] : inserted;
       if (row) setRows(prev => [...prev, row].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id));
       setNewTitle('');
     } catch (e: any) {
+      if (isReviewedColumnMissing(e)) setSchemaSupportsReviewed(false);
       alert(e?.message || 'Couldn\'t add task');
     }
   };
 
   const patchRow = async (id: number, patch: Partial<DailyTaskRow>) => {
     try {
-      await supabaseFetch(`stash_daily_tasks?id=eq.${id}`, 'PATCH', patch);
+      const payload: Record<string, unknown> = { ...patch };
+      if (!schemaSupportsReviewed) {
+        delete payload.reviewed;
+        delete payload.reviewed_at;
+      }
+      await supabaseFetch(`stash_daily_tasks?id=eq.${id}`, 'PATCH', payload);
       setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
     } catch (e: any) {
+      if (isReviewedColumnMissing(e)) {
+        setSchemaSupportsReviewed(false);
+        alert('DB migration still missing reviewed columns. Run migrations/stash_daily_tasks_reviewed.sql and refresh.');
+        return;
+      }
       alert(e?.message || 'Couldn\'t update task');
     }
   };
@@ -621,9 +643,14 @@ const DailyTaskList: React.FC<Props> = ({
       const post = async (payload: Record<string, unknown>) => {
         postAttempts++;
         try {
+          if (!schemaSupportsReviewed) {
+            delete payload.reviewed;
+            delete payload.reviewed_at;
+          }
           await supabaseFetch('stash_daily_tasks', 'POST', payload);
           imported++;
         } catch (e: unknown) {
+          if (isReviewedColumnMissing(e)) setSchemaSupportsReviewed(false);
           if (!firstError) firstError = e;
         }
       };
@@ -1134,21 +1161,21 @@ tr:nth-child(even) td{background:#fafafa}
         </div>
       ) : (
         <div className="space-y-4">
-          <section className="space-y-2">
+          <section className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700/50 p-3 bg-white/70 dark:bg-slate-900/20">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-slate-100 text-slate-700 dark:bg-slate-800/60 dark:text-slate-200">Daily tasks</span>
               <span className="text-[11px] text-gray-500 dark:text-gray-400">{dailyRows.length}</span>
             </div>
             {dailyRows.length === 0 ? <div className="text-xs text-gray-400 px-1">No rows in this section.</div> : <ul className="space-y-2">{dailyRows.map(renderTaskRow)}</ul>}
           </section>
-          <section className="space-y-2">
+          <section className="space-y-2 rounded-xl border border-amber-200 dark:border-amber-700/50 p-3 bg-amber-50/50 dark:bg-amber-900/10">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">To be completed</span>
               <span className="text-[11px] text-gray-500 dark:text-gray-400">{toCompleteRows.length}</span>
             </div>
             {toCompleteRows.length === 0 ? <div className="text-xs text-gray-400 px-1">No rows in this section.</div> : <ul className="space-y-2">{toCompleteRows.map(renderTaskRow)}</ul>}
           </section>
-          <section className="space-y-2">
+          <section className="space-y-2 rounded-xl border border-emerald-200 dark:border-emerald-700/50 p-3 bg-emerald-50/50 dark:bg-emerald-900/10">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">Completed</span>
               <span className="text-[11px] text-gray-500 dark:text-gray-400">{completedRows.length}</span>
