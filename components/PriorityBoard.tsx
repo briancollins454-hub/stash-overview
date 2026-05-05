@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { DecoJob } from '../types';
 import { getItem, setItem } from '../services/localStore';
+import { isSupabaseReady, supabaseFetch } from '../services/supabase';
 import {
   calculatePriority, PRIORITY_SECTIONS, URGENCY_STYLE,
   pd, daysBetween,
@@ -43,6 +44,13 @@ interface PriorityLineNote {
   text: string;
   excludeFromPdf: boolean;
   updatedAt: string;
+}
+
+interface CloudPriorityNoteRow {
+  job_number: string;
+  note_text: string | null;
+  exclude_from_pdf: boolean | null;
+  updated_at: string | null;
 }
 
 const fmtK = (n: number) => {
@@ -333,6 +341,7 @@ const URGENCY_PRINT_CLASS: Record<Urgency, string> = {
 };
 
 const PRIORITY_NOTES_KEY = 'stash_priority_line_notes';
+const PRIORITY_NOTES_TABLE = 'stash_priority_notes';
 
 function aggregatePriorityPrintTotals(
   sections: Array<PrioritySection & { items: PriorityResult[] }>,
@@ -556,6 +565,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const [financeJobs, setFinanceJobs] = useState<DecoJob[]>([]);
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
   const [notesByJobNumber, setNotesByJobNumber] = useState<Record<string, PriorityLineNote>>({});
+  const [notesDirty, setNotesDirty] = useState(false);
 
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
@@ -569,6 +579,75 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     }).catch(() => { /* non-fatal */ });
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!isSupabaseReady()) return;
+    (async () => {
+      try {
+        const res = await supabaseFetch(
+          `${PRIORITY_NOTES_TABLE}?select=job_number,note_text,exclude_from_pdf,updated_at`,
+          'GET',
+        );
+        const rows: CloudPriorityNoteRow[] = await res.json();
+        if (cancelled || !Array.isArray(rows)) return;
+        const fromCloud: Record<string, PriorityLineNote> = {};
+        for (const row of rows) {
+          const key = String(row.job_number || '').trim();
+          if (!key) continue;
+          fromCloud[key] = {
+            text: row.note_text || '',
+            excludeFromPdf: !!row.exclude_from_pdf,
+            updatedAt: row.updated_at || new Date().toISOString(),
+          };
+        }
+        setNotesByJobNumber(fromCloud);
+        setItem(PRIORITY_NOTES_KEY, fromCloud).catch(console.error);
+      } catch {
+        // keep local-only notes if cloud isn't reachable
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!notesDirty || !isSupabaseReady()) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const entries = Object.entries(notesByJobNumber);
+        const upserts = entries
+          .filter(([, v]) => (v.text || '').trim().length > 0 || v.excludeFromPdf)
+          .map(([jobNumber, v]) => ({
+            job_number: jobNumber,
+            note_text: (v.text || '').trim() || null,
+            exclude_from_pdf: !!v.excludeFromPdf,
+            updated_at: v.updatedAt || new Date().toISOString(),
+          }));
+        if (upserts.length > 0) {
+          await supabaseFetch(
+            PRIORITY_NOTES_TABLE,
+            'POST',
+            upserts,
+            'resolution=merge-duplicates',
+          );
+        }
+
+        const toDelete = entries
+          .filter(([, v]) => (v.text || '').trim().length === 0 && !v.excludeFromPdf)
+          .map(([jobNumber]) => `"${jobNumber.replace(/"/g, '\\"')}"`);
+        if (toDelete.length > 0) {
+          await supabaseFetch(
+            `${PRIORITY_NOTES_TABLE}?job_number=in.(${encodeURIComponent(toDelete.join(','))})`,
+            'DELETE',
+          );
+        }
+        setNotesDirty(false);
+      } catch {
+        // keep dirty flag true; next edit triggers another sync attempt
+      }
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [notesByJobNumber, notesDirty]);
+
   const updateLineNote = (jobNumber: string, patch: Partial<PriorityLineNote>) => {
     setNotesByJobNumber(prev => {
       const current = prev[jobNumber] || { text: '', excludeFromPdf: false, updatedAt: new Date().toISOString() };
@@ -581,6 +660,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       setItem(PRIORITY_NOTES_KEY, out).catch(console.error);
       return out;
     });
+    setNotesDirty(true);
   };
 
   const now = useMemo(() => new Date(), []);
