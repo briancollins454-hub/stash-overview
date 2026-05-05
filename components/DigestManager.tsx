@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { DecoJob } from '../types';
 import { getItem, setItem } from '../services/localStore';
 import { buildDigest, buildDigestHtml, type DigestData } from '../services/digestService';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -29,13 +30,10 @@ export default function DigestManager({ decoJobs }: Props) {
     });
   }, []);
 
-  // Merge jobs
-  const allJobs = useMemo(() => {
-    const map = new Map<string, DecoJob>();
-    financeJobs.forEach(j => map.set(j.id, j));
-    decoJobs.forEach(j => map.set(j.id, j));
-    return Array.from(map.values());
-  }, [decoJobs, financeJobs]);
+  const allJobs = useMemo(
+    () => mergeFinanceAndDecoJobs(financeJobs, decoJobs),
+    [decoJobs, financeJobs],
+  );
 
   // Build digest data
   const digestData = useMemo(() => buildDigest(allJobs, digestType), [allJobs, digestType]);

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { DecoJob, UnifiedOrder } from '../types';
 import { getItem } from '../services/localStore';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -83,15 +84,10 @@ export default function MorningBriefing({ decoJobs, orders, onNavigateToOrder }:
     })();
   }, []);
 
-  // Use whichever data source is more complete
-  // Fresh prop data overrides cache — prop data has salesPerson from include_user_assignments
-  const allDecoJobs = useMemo(() => {
-    if (!financeJobs || financeJobs.length <= decoJobs.length) return decoJobs;
-    // Merge: prop data (with salesPerson) takes priority over cache (without)
-    const propMap = new Map(decoJobs.map(j => [j.jobNumber, j]));
-    return financeJobs.map(j => propMap.get(j.jobNumber) || j)
-      .concat(decoJobs.filter(j => !financeJobs.some(f => f.jobNumber === j.jobNumber)));
-  }, [decoJobs, financeJobs]);
+  const allDecoJobs = useMemo(
+    () => mergeFinanceAndDecoJobs(financeJobs, decoJobs),
+    [decoJobs, financeJobs],
+  );
 
 
 

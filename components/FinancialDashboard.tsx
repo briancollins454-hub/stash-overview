@@ -19,6 +19,7 @@ const loadExcelJS = (): Promise<ExcelJSModule> => {
 import { DecoJob, ShopifyOrder } from '../types';
 import { fetchDecoFinancials } from '../services/apiService';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 import { getItem, setItem } from '../services/localStore';
 import { supabaseFetch } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
@@ -528,8 +529,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     }
   }, [settings, isLoading, persistFinanceData]);
 
-  // Use finance-fetched jobs if available, otherwise fall back to cached decoJobs
-  const allJobsRaw = hasLoaded ? financeJobs : decoJobs;
+  // Finance list + live dashboard Deco by job # (deco wins on overlap) so this tab matches the rest of the app.
+  const allJobsRaw = useMemo(
+    () => mergeFinanceAndDecoJobs(financeJobs, decoJobs),
+    [financeJobs, decoJobs],
+  );
 
   // Filter by order date and payment date ranges
   const allJobs = useMemo(() => {

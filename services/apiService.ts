@@ -744,15 +744,41 @@ export const fetchBulkDecoJobs = async (
     }
 
     const fetchOneChunk = async (chunk: string[]): Promise<DecoJob[]> => {
+        const mergeByJobNumber = (list: DecoJob[]) => {
+            const m = new Map<string, DecoJob>();
+            for (const j of list) {
+                if (j.jobNumber) m.set(j.jobNumber, j);
+            }
+            return Array.from(m.values());
+        };
+
         try {
             const res = await fetchServerRoute('/api/deco', { action: 'bulk', jobIds: chunk });
             const json = await res.json();
             const results = json.results || [];
-            return results.filter((r: any) => r.order).map((r: any) => {
-                const job = r.order;
-                const items = parseDecoItems(job);
-                return buildDecoJob(job, items);
-            });
+            const satisfied = new Set<string>();
+            const jobs: DecoJob[] = [];
+            for (const r of results) {
+                const jid = String(r.jobId ?? '').trim();
+                if (r.order && jid) {
+                    satisfied.add(jid);
+                    const items = parseDecoItems(r.order);
+                    jobs.push(buildDecoJob(r.order, items));
+                }
+            }
+            const missing = chunk.map(id => String(id).trim()).filter(id => id && !satisfied.has(id));
+            if (missing.length > 0) {
+                console.warn(`[fetchBulkDecoJobs] bulk missed ${missing.length}/${chunk.length} id(s) — direct fetch`);
+                const PER_ID_CONCURRENCY = 4;
+                for (let i = 0; i < missing.length; i += PER_ID_CONCURRENCY) {
+                    const slice = missing.slice(i, i + PER_ID_CONCURRENCY);
+                    const settled = await Promise.allSettled(slice.map(id => fetchSingleDecoJob(settings, id)));
+                    settled.forEach(r => {
+                        if (r.status === 'fulfilled' && r.value) jobs.push(r.value);
+                    });
+                }
+            }
+            return mergeByJobNumber(jobs);
         } catch (e: any) {
             console.warn(`[fetchBulkDecoJobs] chunk of ${chunk.length} failed (${e.message}); falling back to per-ID with concurrency`);
             // Per-ID fallback runs WITH concurrency rather than a sequential
@@ -767,7 +793,11 @@ export const fetchBulkDecoJobs = async (
                 const settled = await Promise.allSettled(slice.map(id => fetchSingleDecoJob(settings, id)));
                 settled.forEach(r => { if (r.status === 'fulfilled' && r.value) out.push(r.value); });
             }
-            return out;
+            const m = new Map<string, DecoJob>();
+            for (const j of out) {
+                if (j.jobNumber) m.set(j.jobNumber, j);
+            }
+            return Array.from(m.values());
         }
     };
 

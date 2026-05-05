@@ -12,6 +12,7 @@ import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSing
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { mergeCloudDecoFillOnly } from './services/decoJobSources';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
 import { startRealtime, stopRealtime } from './services/realtimeService';
@@ -656,10 +657,11 @@ const App: React.FC = () => {
                   }
                   orderMap.set(o.id, o);
                 });
-                // Cloud deco jobs OVERWRITE local cache — cloud is safe because only
-                // API-fresh data gets pushed there (stale cache is never pushed)
+                // Cloud fills **missing** job numbers only — never overwrite an
+                // existing local row (Supabase can lag; overwrite caused stale
+                // "Not Ordered" to win over fresher IndexedDB every sync).
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
-                  cloudData.decoJobs.forEach((j: DecoJob) => jobMap.set(j.jobNumber, j));
+                  mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
                 }
               }
             } catch {}
@@ -767,7 +769,7 @@ const App: React.FC = () => {
             // Tail refresh: manage_orders/find is date-gated (see fetchDecoJobs lookback).
             // Jobs older than that window never appear in dRecentJobs, so local/cloud
             // copies can stay wrong forever (e.g. still "Not Ordered" after cancel in Deco).
-            // Re-fetch by job number for a capped set of older "open" jobs so status tracks reality.
+            // Re-fetch by internal order id (when known) or job # for a capped set of older "open" jobs so status tracks reality.
             const decoLookbackDays = isDeepSync ? 180 : 120;
             const decoLookbackCutoff = new Date();
             decoLookbackCutoff.setDate(decoLookbackCutoff.getDate() - decoLookbackDays);
@@ -775,11 +777,12 @@ const App: React.FC = () => {
 
             const recentSyncedNums = new Set(dRecentJobs.map(j => j.jobNumber));
             const OPEN_DECO_TAIL_REFRESH = new Set([
-                'Not Ordered', 'Awaiting Stock', 'Awaiting Processing', 'Awaiting Artwork',
+                'Not Ordered', 'Awaiting PO', 'Awaiting Stock', 'Awaiting Processing', 'Awaiting Artwork',
                 'Awaiting Review', 'On Hold', 'In Production', 'Ready for Shipping', 'Completed',
             ]);
 
-            const staleJobNums = new Set<string>();
+            /** Deco manage_orders/find field=1 is internal order_id on many tenants — prefer it over display job # when they differ. */
+            const staleRows: { jobNumber: string; apiLookupId: string }[] = [];
             for (const j of jobMap.values()) {
                 if (recentSyncedNums.has(j.jobNumber)) continue;
                 if (isDecoJobCancelled(j)) continue;
@@ -787,25 +790,54 @@ const App: React.FC = () => {
                 const ord = j.dateOrdered ? new Date(j.dateOrdered) : null;
                 if (!ord || Number.isNaN(ord.getTime())) continue;
                 if (ord >= decoLookbackCutoff) continue;
-                staleJobNums.add(j.jobNumber);
+                const synthetic = (j.id || '').startsWith('unknown-');
+                const apiLookupId =
+                    !synthetic && j.id?.trim() && j.id !== j.jobNumber ? j.id.trim() : j.jobNumber;
+                staleRows.push({ jobNumber: j.jobNumber, apiLookupId });
             }
 
             const STALE_DECO_CAP = 200;
-            const staleSorted = Array.from(staleJobNums).sort((a, b) => {
-                const da = new Date(jobMap.get(a)!.dateOrdered!).getTime();
-                const db = new Date(jobMap.get(b)!.dateOrdered!).getTime();
+            const staleSorted = staleRows.sort((a, b) => {
+                const da = new Date(jobMap.get(a.jobNumber)!.dateOrdered!).getTime();
+                const db = new Date(jobMap.get(b.jobNumber)!.dateOrdered!).getTime();
                 return da - db;
             });
             const staleSlice = staleSorted.slice(0, STALE_DECO_CAP);
+            const staleLookupIds = staleSlice.map(r => r.apiLookupId);
 
             let decoStaleRefreshed: DecoJob[] = [];
             if (staleSlice.length > 0) {
                 setSyncStatusMsg(`Refreshing ${staleSlice.length} older open Deco job${staleSlice.length === 1 ? '' : 's'}…`);
                 try {
-                    decoStaleRefreshed = await fetchBulkDecoJobs(apiSettings, staleSlice, (cur, tot) => {
+                    decoStaleRefreshed = await fetchBulkDecoJobs(apiSettings, staleLookupIds, (cur, tot) => {
                         setSyncStatusMsg(`Refreshing older Deco jobs ${cur}/${tot}…`);
                     });
                     decoStaleRefreshed.forEach(j => jobMap.set(j.jobNumber, j));
+
+                    const refreshedNums = new Set(decoStaleRefreshed.map(j => j.jobNumber));
+                    const missedTail = staleSlice.filter(r => !refreshedNums.has(r.jobNumber));
+                    if (missedTail.length > 0) {
+                        setSyncStatusMsg(`Retrying ${missedTail.length} older Deco job${missedTail.length === 1 ? '' : 's'} (alternate id)…`);
+                        const TAIL_RETRY_CONCURRENCY = 4;
+                        for (let i = 0; i < missedTail.length; i += TAIL_RETRY_CONCURRENCY) {
+                            const batch = missedTail.slice(i, i + TAIL_RETRY_CONCURRENCY);
+                            const settled = await Promise.allSettled(
+                                batch.map(async row => {
+                                    let job = await fetchSingleDecoJob(apiSettings, row.jobNumber);
+                                    if (!job && row.apiLookupId !== row.jobNumber) {
+                                        job = await fetchSingleDecoJob(apiSettings, row.apiLookupId);
+                                    }
+                                    return job;
+                                }),
+                            );
+                            settled.forEach(r => {
+                                if (r.status === 'fulfilled' && r.value) {
+                                    jobMap.set(r.value.jobNumber, r.value);
+                                    decoStaleRefreshed.push(r.value);
+                                }
+                            });
+                        }
+                    }
                 } catch (e: unknown) {
                     console.warn('[sync] stale tail Deco refresh failed:', e instanceof Error ? e.message : e);
                 }
@@ -1252,8 +1284,7 @@ const App: React.FC = () => {
                           if (table === 'stash_deco_jobs' && cloudData.decoJobs?.length) {
                             setRawDecoJobs(prev => {
                               const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              // Cloud overwrites local — cloud only contains API-fresh data
-                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                              mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
                               const merged = Array.from(jobMap.values());
                               setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                               return merged;
@@ -1337,7 +1368,7 @@ const App: React.FC = () => {
                           if (cloudData.decoJobs?.length) {
                             setRawDecoJobs(prev => {
                               const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                              mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
                               const merged = Array.from(jobMap.values());
                               setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                               return merged;
@@ -1455,11 +1486,11 @@ const App: React.FC = () => {
                 setReferenceProducts(cloudData.referenceProducts || []);
                 setMissingCloudTables(cloudData.missingTables || []);
 
-                // Merge cloud Deco jobs with local — cloud wins on conflicts (newer data from deep scans on other devices)
+                // Cloud fills gaps only — do not replace local rows (same stale-cloud bug as mid-sync merge).
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
                     setRawDecoJobs(prev => {
                         const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                        cloudData.decoJobs.forEach(j => jobMap.set(j.jobNumber, j));
+                        mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
                         const merged = Array.from(jobMap.values());
                         setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                         return merged;
@@ -1904,29 +1935,81 @@ const App: React.FC = () => {
   // of "Sync now" immediately afterwards would read stale cloud data
   // and resurrect the cleared rows. Awaiting closes that race.
   const clearCompletedDecoJobs = useCallback(async (
-      jobNumbers: string[],
+      jobs: { jobNumber: string; id?: string }[],
       onProgress?: (current: number, total: number) => void,
   ) => {
       const result = { checked: 0, shipped: 0, cancelled: 0, failed: 0 };
       if (!apiSettings.useLiveData) return result;
-      const unique = Array.from(new Set(jobNumbers.filter(Boolean)));
+      const uniqueJobs = Array.from(
+        new Map(
+          jobs
+            .filter(j => j?.jobNumber)
+            .map(j => [String(j.jobNumber).trim(), { jobNumber: String(j.jobNumber).trim(), id: j.id ? String(j.id).trim() : undefined }])
+        ).values()
+      );
+      const unique = uniqueJobs.map(j => j.jobNumber);
       if (unique.length === 0) return result;
       result.checked = unique.length;
 
-      let refreshed: DecoJob[] = [];
+      const localByJobNumber = new Map(rawDecoJobs.map(j => [j.jobNumber, j]));
+      const retryLookupIdsByNumber = new Map<string, string[]>();
+      uniqueJobs.forEach(({ jobNumber: num, id }) => {
+        const ids = [num];
+        if (id && id !== num && !id.startsWith('unknown-')) ids.push(id);
+        const local = localByJobNumber.get(num);
+        const localId = local?.id?.trim();
+        if (localId && localId !== num && !localId.startsWith('unknown-') && !ids.includes(localId)) ids.push(localId);
+        retryLookupIdsByNumber.set(num, ids);
+      });
+
+      const refreshedByNumber = new Map<string, DecoJob>();
       try {
-          refreshed = await fetchBulkDecoJobs(apiSettings, unique, onProgress);
+          const firstPass = await fetchBulkDecoJobs(apiSettings, unique, onProgress);
+          firstPass.forEach(j => refreshedByNumber.set(j.jobNumber, j));
       } catch (e: any) {
           console.warn('[clearCompletedDecoJobs] bulk fetch failed:', e?.message || e);
-          result.failed = unique.length;
-          return result;
       }
 
-      if (refreshed.length === 0) {
-          result.failed = unique.length;
-          return result;
+      const firstMissing = unique.filter(n => !refreshedByNumber.has(n));
+      if (firstMissing.length > 0) {
+          const retryIds = Array.from(new Set(firstMissing.flatMap(n => retryLookupIdsByNumber.get(n) || [n])));
+          if (retryIds.length > 0) {
+            try {
+              const secondPass = await fetchBulkDecoJobs(apiSettings, retryIds);
+              secondPass.forEach(j => refreshedByNumber.set(j.jobNumber, j));
+            } catch (e: any) {
+              console.warn('[clearCompletedDecoJobs] retry bulk failed:', e?.message || e);
+            }
+          }
       }
-      result.failed = unique.length - refreshed.length;
+
+      const stillMissing = unique.filter(n => !refreshedByNumber.has(n));
+      if (stillMissing.length > 0) {
+        const CONCURRENCY = 4;
+        for (let i = 0; i < stillMissing.length; i += CONCURRENCY) {
+          const slice = stillMissing.slice(i, i + CONCURRENCY);
+          const settled = await Promise.allSettled(
+            slice.map(async (num) => {
+              const ids = retryLookupIdsByNumber.get(num) || [num];
+              for (const id of ids) {
+                const job = await fetchSingleDecoJob(apiSettings, id);
+                if (job) return job;
+              }
+              return null;
+            })
+          );
+          settled.forEach(r => {
+            if (r.status === 'fulfilled' && r.value) refreshedByNumber.set(r.value.jobNumber, r.value);
+          });
+        }
+      }
+
+      const refreshed = Array.from(refreshedByNumber.values());
+      if (refreshed.length === 0) {
+        result.failed = unique.length;
+        return result;
+      }
+      result.failed = unique.filter(n => !refreshedByNumber.has(n)).length;
 
       for (const j of refreshed) {
           const st = (j.status || '').toLowerCase();
@@ -1955,7 +2038,7 @@ const App: React.FC = () => {
       }
 
       return result;
-  }, [apiSettings]);
+  }, [apiSettings, rawDecoJobs]);
 
   const handleBulkStatusSync = async () => {
     if (isBulkRefreshing || loading) return;

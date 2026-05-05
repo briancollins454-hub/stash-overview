@@ -30,6 +30,7 @@ import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { fetchDecoFinancials } from '../services/apiService';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 import { ApiSettings } from './SettingsModal';
 
 interface Props {
@@ -110,6 +111,8 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, settings, onNaviga
   const [sortKey, setSortKey] = useState<SortKey>('overdueTotal');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const jobsBase = useMemo(() => mergeFinanceAndDecoJobs(allJobs, decoJobs), [allJobs, decoJobs]);
 
   /* ---------- Load from finance cache ---------- */
   const loadFromCache = useCallback(async () => {
@@ -221,7 +224,7 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, settings, onNaviga
   const customers = useMemo<CreditBlockedCustomer[]>(() => {
     const byCustomer = new Map<string, OverdueInvoice[]>();
 
-    for (const j of allJobs) {
+    for (const j of jobsBase) {
       if (isDecoJobCancelled(j) || j.isQuote) continue;
       const outstanding = typeof j.outstandingBalance === 'string'
         ? parseFloat(j.outstandingBalance as any)
@@ -270,7 +273,7 @@ const CreditBlockList: React.FC<Props> = ({ decoJobs, isDark, settings, onNaviga
       });
     }
     return out;
-  }, [allJobs]);
+  }, [jobsBase]);
 
   /* ---------- Search + sort ---------- */
   const filtered = useMemo(() => {

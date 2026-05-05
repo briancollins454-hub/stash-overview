@@ -30,10 +30,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return String(order.order_id) === id || String(order.order_number) === id || String(order.id) === id;
   }
 
-  async function fetchOrdersByIds(requestedIds: string[], includeDecoration: boolean): Promise<{jobId: string, order: any}[]> {
+  async function fetchOrdersByIds(
+    requestedIds: string[],
+    includeDecoration: boolean,
+    scanLookbackDays: number = 200,
+  ): Promise<{jobId: string, order: any}[]> {
     const idSet = new Set(requestedIds.map(id => String(id).trim()));
     const found = new Map<string, any>();
-    const lookbackDays = 200;
+    const lookbackDays = Math.min(Math.max(scanLookbackDays, 1), 1200);
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - lookbackDays);
     const dateStr = minDate.toISOString().split('T')[0] + ' 00:00:00';
@@ -391,9 +395,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (order) {
         return res.status(200).json({ results: [{ jobId: targetId, order }] });
       }
-      // Fall back to date-range scan if direct strategies all miss
+      // Fall back to date-range scan if direct strategies all miss (wide window — very old orders sit outside 200d)
       console.log(`[Deco API] Direct lookup missed for #${targetId}, falling back to date scan`);
-      const results = await fetchOrdersByIds([targetId], true);
+      const results = await fetchOrdersByIds([targetId], true, 900);
       return res.status(200).json({ results });
     } catch (error: any) {
       return res.status(500).json({ error: 'Single fetch failed', details: error.message });
@@ -437,27 +441,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       console.log(`[Deco API] Bulk pass-1 found ${firstPass.length - missing.length}/${firstPass.length}; ${missing.length} need direct lookup`);
 
-      // Lean direct-lookup variant — single strategy (field=1, condition=1,
-      // string=<id>) with a 5s per-call timeout. No fall-through chain.
+      // Direct lookup for pass-2 misses: field=1 is internal order_id on many tenants;
+      // field=0+condition=0 matches order_number (see diagnose). Keeps 5s/call budget.
       const fastDirect = async (orderId: string): Promise<any | null> => {
-        try {
-          const qp = new URLSearchParams({
-            username, password,
-            field: '1', condition: '1',
-            string: orderId.trim(), criteria: orderId.trim(), limit: '5',
-            include_workflow_data: '1', skip_login_token: '1',
-          });
-          const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-          const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
-          const text = await resp.text();
-          if (text.startsWith('<')) return null;
-          const data = JSON.parse(text);
-          const orders = data.orders || [];
-          if (orders.length === 0) return null;
-          return orders.find((o: any) => orderMatchesId(o, orderId.trim())) || null;
-        } catch {
-          return null;
+        const id = orderId.trim();
+        const strats: { field: string; condition: string }[] = [
+          { field: '1', condition: '1' },
+          { field: '0', condition: '0' },
+          { field: '2', condition: '1' },
+        ];
+        for (const strat of strats) {
+          try {
+            const qp = new URLSearchParams({
+              username, password,
+              field: strat.field, condition: strat.condition,
+              string: id, criteria: id, limit: '5',
+              include_workflow_data: '1', skip_login_token: '1',
+            });
+            const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+            const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) });
+            const text = await resp.text();
+            if (text.startsWith('<')) continue;
+            const data = JSON.parse(text);
+            const orders = data.orders || [];
+            const hit = orders.find((o: any) => orderMatchesId(o, id)) || null;
+            if (hit) return hit;
+          } catch {
+            /* next strat */
+          }
         }
+        return null;
       };
 
       const CONCURRENCY = 8;

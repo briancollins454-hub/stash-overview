@@ -7,6 +7,7 @@ import {
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { fetchDecoFinancials } from '../services/apiService';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 import { ApiSettings } from './SettingsModal';
 import {
   DAYS_SHIP_BUCKET_OPTIONS,
@@ -390,9 +391,11 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     }
   }, [authorised, isTogglingId]);
 
+  const jobsBase = useMemo(() => mergeFinanceAndDecoJobs(allJobs, decoJobs), [allJobs, decoJobs]);
+
   // ─── Filter + transform ──────────────────────────────────────────────
   const jobs: Row[] = useMemo(() => {
-    return allJobs
+    return jobsBase
       .filter(j => {
         const paymentCount = Array.isArray(j.payments) ? j.payments.length : 0;
         if (paymentCount > 0) return false;
@@ -444,7 +447,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           authorisedBy: auth?.authorised_by || undefined,
         };
       });
-  }, [allJobs, authorised]);
+  }, [jobsBase, authorised]);
 
   const sorter = useCallback((a: Row, b: Row) => {
     let av: any, bv: any;

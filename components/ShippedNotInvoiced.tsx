@@ -8,6 +8,7 @@ import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { ApiSettings } from './SettingsModal';
 import { fetchDecoFinancials } from '../services/apiService';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 import {
   DAYS_SHIP_BUCKET_OPTIONS,
   matchesDaysSinceShipBucket,
@@ -115,6 +116,8 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
 
   // Days since ship — same bands as Unpaid Orders; narrows table, totals, CSV, PDF.
   const [daysSinceBucket, setDaysSinceBucket] = useState<DaysSinceShipBucket>('all');
+
+  const jobsBase = useMemo(() => mergeFinanceAndDecoJobs(allJobs, decoJobs), [allJobs, decoJobs]);
 
   // Load from the FinancialDashboard's Supabase cache (finance_jobs) —
   // keeps us decoupled from the Finance tab's sync cycle.
@@ -326,7 +329,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
   }, [paymentSent, isTogglingId]);
 
   const jobs = useMemo(() => {
-    return allJobs.filter(j => {
+    return jobsBase.filter(j => {
       const bal = typeof j.outstandingBalance === 'string' ? parseFloat(j.outstandingBalance) : (j.outstandingBalance || 0);
       return !!j.dateShipped && bal > 0 && j.status !== 'Cancelled';
     }).map(j => {
@@ -344,7 +347,7 @@ const ShippedNotInvoiced: React.FC<Props> = ({ decoJobs, isDark, settings, onNav
         paymentRequestSentBy: sentRow?.sent_by || null,
       };
     });
-  }, [allJobs, paymentSent]);
+  }, [jobsBase, paymentSent]);
 
   // Unique salespeople across the currently-searched (but pre-responsible-filtered)
   // rows. Computing this from the post-search list keeps the dropdown

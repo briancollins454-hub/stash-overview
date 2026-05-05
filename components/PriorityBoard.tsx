@@ -9,6 +9,7 @@ import {
 import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore';
 import { displayStaffName } from '../services/staffDisplay';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
+import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -26,7 +27,7 @@ interface Props {
   // "Checked 50 / 150" rather than a blind spinner that looks frozen on
   // long boards.
   onClearCompleted?: (
-    jobNumbers: string[],
+    jobs: { jobNumber: string; id?: string }[],
     onProgress?: (current: number, total: number) => void,
   ) => Promise<{
     checked: number;
@@ -548,16 +549,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
       if (cached) setFinanceJobs(cached);
     });
-  }, []);
+  }, [lastSyncTime]);
 
   const now = useMemo(() => new Date(), []);
 
-  const allJobs = useMemo(() => {
-    const map = new Map<string, DecoJob>();
-    financeJobs.forEach(j => map.set(j.id, j));
-    decoJobs.forEach(j => map.set(j.id, j));
-    return Array.from(map.values());
-  }, [decoJobs, financeJobs]);
+  const allJobs = useMemo(
+    () => mergeFinanceAndDecoJobs(financeJobs, decoJobs),
+    [decoJobs, financeJobs],
+  );
 
   // Reconcile per-job "became ready" timestamps whenever the job set changes.
   // First observation anchors to date_completed (when present) or now,
@@ -625,16 +624,17 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   // cloud save so a follow-up sync from this or any other device can't
   // resurrect cleared rows by reading stale cloud data on its way in.
   //
-  // We pass jobNumber (the human-readable order number, e.g. "221964")
-  // rather than `id` (Deco's internal order_id) because Deco's
-  // direct-lookup matches reliably on order_number for any tenant.
+  // We pass visible job numbers; `fetchBulkDecoJobs` bulk-loads then
+  // direct-fetches any IDs Deco did not return in the bulk batch.
   const handleClearCompleted = async () => {
     if (!onClearCompleted || clearing) return;
-    const visibleNums = filteredActive.map(j => j.jobNumber || j.id).filter(Boolean);
-    if (visibleNums.length === 0) return;
+    const visibleJobs = filteredActive
+      .map(j => ({ jobNumber: j.jobNumber || j.id, id: j.id }))
+      .filter(j => !!j.jobNumber);
+    if (visibleJobs.length === 0) return;
     // Cap the burst — protects the Deco API on dashboards with very long
     // historical tails. 250 is enough for any realistic Priority Board.
-    const capped = visibleNums.slice(0, 250);
+    const capped = visibleJobs.slice(0, 250);
     setClearing(true);
     setClearResult(null);
     setClearProgress({ current: 0, total: capped.length });
