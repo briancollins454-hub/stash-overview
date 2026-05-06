@@ -441,6 +441,8 @@ const DailyTaskList: React.FC<Props> = ({
   onNavigateToOrder,
 }) => {
   const [taskDate, setTaskDate] = useState(() => localDateISO());
+  const [exportFromDate, setExportFromDate] = useState(() => localDateISO(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)));
+  const [exportToDate, setExportToDate] = useState(() => localDateISO());
   const [rows, setRows] = useState<DailyTaskRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -918,15 +920,16 @@ const DailyTaskList: React.FC<Props> = ({
     );
   };
 
-  const fetchWeekRows = useCallback(async (): Promise<DailyTaskRow[]> => {
-    const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+  const fetchRangeRows = useCallback(async (): Promise<DailyTaskRow[]> => {
+    const startIso = exportFromDate;
+    const endIso = exportToDate;
     const res = await supabaseFetch(
       `stash_daily_tasks?task_date=gte.${startIso}&task_date=lte.${endIso}&order=task_date.asc,sort_order.asc,id.asc`,
       'GET',
     );
     const data: DailyTaskRow[] = await res.json();
     return Array.isArray(data) ? data : [];
-  }, [taskDate]);
+  }, [exportFromDate, exportToDate]);
 
   const rowStaffName = useCallback((row: DailyTaskRow): string => {
     if (row.source_page !== 'priority' || !row.source_ref) return 'Shared / admin';
@@ -1008,10 +1011,15 @@ tr:nth-child(even) td{background:#fafafa}
 
   const exportWeeklyAllPdf = useCallback(async () => {
     if (!isSupabaseReady()) return;
+    if (exportFromDate > exportToDate) {
+      window.alert('Export range invalid: "From" date is after "To" date.');
+      return;
+    }
     setWeeklyExporting(true);
     try {
-      const weekRows = rowsForStaffView(await fetchWeekRows(), staffViewFilter);
-      const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      const weekRows = rowsForStaffView(await fetchRangeRows(), staffViewFilter);
+      const startIso = exportFromDate;
+      const endIso = exportToDate;
       const audience =
         staffViewFilter === STAFF_VIEW_ALL
           ? 'Audience: all staff'
@@ -1026,18 +1034,23 @@ tr:nth-child(even) td{background:#fafafa}
     } finally {
       setWeeklyExporting(false);
     }
-  }, [fetchWeekRows, taskDate, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
+  }, [fetchRangeRows, exportFromDate, exportToDate, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
 
   const exportWeeklyIndividualPdfs = useCallback(async () => {
     if (!isSupabaseReady()) return;
+    if (exportFromDate > exportToDate) {
+      window.alert('Export range invalid: "From" date is after "To" date.');
+      return;
+    }
     setWeeklyExporting(true);
     try {
-      const weekRows = rowsForStaffView(await fetchWeekRows(), staffViewFilter);
+      const weekRows = rowsForStaffView(await fetchRangeRows(), staffViewFilter);
       const owners =
         staffViewFilter === STAFF_VIEW_ALL
           ? Array.from(new Set(weekRows.map(rowStaffName))).sort((a, b) => a.localeCompare(b))
           : [staffViewFilter];
-      const { startIso, endIso } = weekBoundsFromDateISO(taskDate);
+      const startIso = exportFromDate;
+      const endIso = exportToDate;
       let generated = 0;
       owners.forEach(owner => {
         const scoped = weekRows.filter(r => rowStaffName(r) === owner);
@@ -1057,7 +1070,7 @@ tr:nth-child(even) td{background:#fafafa}
     } finally {
       setWeeklyExporting(false);
     }
-  }, [fetchWeekRows, taskDate, rowStaffName, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
+  }, [fetchRangeRows, exportFromDate, exportToDate, rowStaffName, openWeeklyPdf, rowsForStaffView, staffViewFilter]);
 
   return (
     <div className="max-w-4xl mx-auto p-3 sm:p-4 md:p-6 space-y-4">
@@ -1074,6 +1087,22 @@ tr:nth-child(even) td{background:#fafafa}
           </div>
         </div>
         <div className="flex-1" />
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-[#2a2a55]">
+          <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">From</span>
+          <input
+            type="date"
+            value={exportFromDate}
+            onChange={e => setExportFromDate(e.target.value)}
+            className="text-[11px] font-bold border-none bg-transparent text-gray-900 dark:text-white"
+          />
+          <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">To</span>
+          <input
+            type="date"
+            value={exportToDate}
+            onChange={e => setExportToDate(e.target.value)}
+            className="text-[11px] font-bold border-none bg-transparent text-gray-900 dark:text-white"
+          />
+        </div>
         <button
           type="button"
           onClick={exportWeeklyAllPdf}
