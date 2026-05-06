@@ -431,6 +431,20 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           ? parseFloat(j.outstandingBalance)
           : (j.outstandingBalance || 0);
         const total = j.orderTotal || 0;
+        const subtotal = typeof j.orderSubtotal === 'string'
+          ? parseFloat(j.orderSubtotal as any)
+          : (j.orderSubtotal || 0);
+        const billable = typeof j.billableAmount === 'string'
+          ? parseFloat(j.billableAmount as any)
+          : (j.billableAmount || 0);
+        // Some rows arrive with orderTotal=0 despite having a real invoice/
+        // balance. Treat any positive monetary signal as "priced" so newly
+        // dispatched unpaid orders cannot leak into the zero-priced bucket.
+        const hasPricedSignal =
+          total > BALANCE_OWED_EPS ||
+          subtotal > BALANCE_OWED_EPS ||
+          billable > BALANCE_OWED_EPS ||
+          balance > BALANCE_OWED_EPS;
         const anchor = j.dateShipped || j.dateOrdered;
         const daysSince = anchor
           ? Math.floor((Date.now() - new Date(anchor).getTime()) / 86400000)
@@ -441,7 +455,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           outstandingBalance: balance,
           orderTotal: total,
           daysSince,
-          isZeroPriced: total === 0,
+          isZeroPriced: !hasPricedSignal,
           hasShipped: !!j.dateShipped,
           authorisedAt: auth?.authorised_at,
           authorisedBy: auth?.authorised_by || undefined,
