@@ -145,24 +145,8 @@ function escHtml(raw: string): string {
 }
 
 function normaliseWeeklyRowsForExport(rows: DailyTaskRow[]): DailyTaskRow[] {
-  // Keep all dated rows for context, but suppress stale completed copies when
-  // the same source has an open/reviewed row in the selected range.
-  const bySource = new Map<string, DailyTaskRow[]>();
-  for (const r of rows) {
-    const hasStableRef = !!(r.source_ref && String(r.source_ref).trim());
-    if (!hasStableRef) continue;
-    const key = `${r.source_page}:${String(r.source_ref).trim()}`;
-    if (!bySource.has(key)) bySource.set(key, []);
-    bySource.get(key)!.push(r);
-  }
-  const dropIds = new Set<number>();
-  for (const group of bySource.values()) {
-    const hasActiveState = group.some(r => !r.completed);
-    if (!hasActiveState) continue;
-    // If there is at least one active state, hide completed copies for this source.
-    group.forEach(r => { if (r.completed) dropIds.add(r.id); });
-  }
-  return rows.filter(r => !dropIds.has(r.id));
+  // Weekly briefing should include all dated rows in range except fully completed.
+  return rows.filter(r => !r.completed);
 }
 
 function fmtMoney(n?: number): string | null {
