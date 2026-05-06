@@ -149,6 +149,33 @@ function normaliseWeeklyRowsForExport(rows: DailyTaskRow[]): DailyTaskRow[] {
   return rows.filter(r => !r.completed);
 }
 
+function withCarriedHoldNotes(rows: DailyTaskRow[]): DailyTaskRow[] {
+  // For repeated daily copies of the same sourced task, carry the newest
+  // non-empty hold_note across rows in the selected range so briefing PDFs
+  // don't lose context on days where a copied row has an empty note.
+  const latestNoteBySource = new Map<string, { note: string; stamp: string }>();
+  for (const r of rows) {
+    const ref = (r.source_ref || '').trim();
+    if (!ref) continue;
+    const note = (r.hold_note || '').trim();
+    if (!note) continue;
+    const key = `${r.source_page}:${ref}`;
+    const stamp = r.updated_at || r.created_at || `${r.task_date}T00:00:00`;
+    const prev = latestNoteBySource.get(key);
+    if (!prev || stamp >= prev.stamp) latestNoteBySource.set(key, { note, stamp });
+  }
+
+  return rows.map(r => {
+    if ((r.hold_note || '').trim()) return r;
+    const ref = (r.source_ref || '').trim();
+    if (!ref) return r;
+    const key = `${r.source_page}:${ref}`;
+    const latest = latestNoteBySource.get(key);
+    if (!latest) return r;
+    return { ...r, hold_note: latest.note };
+  });
+}
+
 function fmtMoney(n?: number): string | null {
   if (n == null || Number.isNaN(n)) return null;
   try {
@@ -951,7 +978,7 @@ const DailyTaskList: React.FC<Props> = ({
     audience: string,
     rowsToPrint: DailyTaskRow[],
   ) => {
-    const exportRows = normaliseWeeklyRowsForExport(rowsToPrint);
+    const exportRows = withCarriedHoldNotes(normaliseWeeklyRowsForExport(rowsToPrint));
     const byDate = new Map<string, DailyTaskRow[]>();
     exportRows.forEach(r => {
       const key = r.task_date;
