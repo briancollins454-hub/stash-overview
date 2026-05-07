@@ -803,9 +803,40 @@ const DailyTaskList: React.FC<Props> = ({
 
   const importFromAiScan = async () => {
     if (!isSupabaseReady()) return;
-    const suggestions = buildAiDailyTaskSuggestions(decoJobs, 12);
     setAiImporting(true);
     try {
+      let suggestions = buildAiDailyTaskSuggestions(decoJobs, 12);
+      try {
+        const activeJobs = decoJobs
+          .filter(j => !isDecoJobCancelled(j) && (j.status || '').toLowerCase() !== 'shipped')
+          .slice(0, 200)
+          .map(j => ({
+            jobNumber: String(j.jobNumber || ''),
+            customerName: j.customerName || '',
+            status: j.status || '',
+            dateDue: j.dateDue || '',
+            productionDueDate: j.productionDueDate || '',
+            dateOrdered: j.dateOrdered || '',
+            orderTotal: j.orderTotal ?? null,
+            outstandingBalance: j.outstandingBalance ?? null,
+            salesPerson: j.salesPerson || '',
+            notes: j.notes || '',
+          }));
+        const aiRes = await fetch('/api/ai-daily-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskDate, jobs: activeJobs, limit: 12 }),
+        });
+        if (aiRes.ok) {
+          const payload = await aiRes.json();
+          if (Array.isArray(payload?.tasks) && payload.tasks.length) {
+            suggestions = payload.tasks;
+          }
+        }
+      } catch {
+        // Fallback to local smart rules if AI endpoint unavailable.
+      }
+
       // Refresh today's open AI rows so each scan reflects current conditions.
       await supabaseFetch(
         `stash_daily_tasks?task_date=eq.${taskDate}&source_page=eq.ai_scan&completed=eq.false&reviewed=eq.false`,
@@ -842,6 +873,20 @@ const DailyTaskList: React.FC<Props> = ({
       for (const s of suggestions) {
         const key = `ai_scan:${s.sourceRef}`;
         if (workingExistingKeys.has(key)) continue;
+        const job = jobByNumber.get(String(s.jobNumber));
+        const staff = displayStaffName(job?.salesPerson) || 'Unassigned';
+        const due = fmtShortDate(job?.dateDue || job?.productionDueDate) || 'n/a';
+        const balance =
+          job?.outstandingBalance != null && !Number.isNaN(job.outstandingBalance)
+            ? `£${Math.round(job.outstandingBalance)}`
+            : '£0';
+        const detailNote = [
+          `Owner: ${staff}`,
+          `Status: ${job?.status || 'Unknown'}`,
+          `Due: ${due}`,
+          `Balance: ${balance}`,
+          s.reason ? `Why: ${s.reason}` : '',
+        ].filter(Boolean).join(' | ');
         await post({
           task_date: taskDate,
           title: s.title,
@@ -851,7 +896,7 @@ const DailyTaskList: React.FC<Props> = ({
           reviewed: false,
           reviewed_at: null,
           completed: false,
-          hold_note: s.reason,
+          hold_note: detailNote,
           created_by: createdBy,
         });
       }
