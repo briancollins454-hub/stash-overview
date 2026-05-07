@@ -681,7 +681,29 @@ const DailyTaskList: React.FC<Props> = ({
     setImporting(true);
     try {
       const progressedPriorityEver = await fetchProgressedPriorityJobRefsEver();
-      let order = nextSortOrder;
+      const autoSources = new Set([
+        'priority',
+        'finance_credit',
+        'finance_unpaid',
+        'finance_sni',
+        'production_issues',
+      ]);
+      // Refresh mode: clear today's open pulled rows so a new pull gives a fresh queue.
+      await supabaseFetch(
+        `stash_daily_tasks?task_date=eq.${taskDate}&completed=eq.false&reviewed=eq.false&source_page=in.(priority,finance_credit,finance_unpaid,finance_sni,production_issues)`,
+        'DELETE',
+      );
+      const retainedRows = rows.filter(
+        r => !(autoSources.has(r.source_page) && !r.reviewed && !r.completed),
+      );
+      setRows(retainedRows);
+      const workingExistingKeys = new Set<string>();
+      for (const r of retainedRows) {
+        if (r.source_ref) workingExistingKeys.add(`${r.source_page}:${r.source_ref}`);
+      }
+      let order = retainedRows.length === 0
+        ? 0
+        : Math.max(...retainedRows.map(r => r.sort_order)) + 1;
       let imported = 0;
       let postAttempts = 0;
       let firstError: unknown = null;
@@ -703,7 +725,7 @@ const DailyTaskList: React.FC<Props> = ({
 
       for (const s of suggestions) {
         const key = `priority:${s.jobNumber}`;
-        if (existingKeys.has(key)) continue;
+        if (workingExistingKeys.has(key)) continue;
         if (progressedPriorityEver.has(String(s.jobNumber))) continue;
         await post({
           task_date: taskDate,
@@ -721,7 +743,7 @@ const DailyTaskList: React.FC<Props> = ({
 
       for (const item of FINANCE_CHECKLIST_SUGGESTIONS) {
         const key = `${item.source_page}:${item.source_ref}`;
-        if (existingKeys.has(key)) continue;
+        if (workingExistingKeys.has(key)) continue;
         await post({
           task_date: taskDate,
           title: item.title,
@@ -737,7 +759,7 @@ const DailyTaskList: React.FC<Props> = ({
       }
 
       const pi = PRODUCTION_ISSUES_SUGGESTION;
-      if (!existingKeys.has(`${pi.source_page}:${pi.source_ref}`)) {
+      if (!workingExistingKeys.has(`${pi.source_page}:${pi.source_ref}`)) {
         await post({
           task_date: taskDate,
           title: pi.title,
