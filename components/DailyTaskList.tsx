@@ -14,6 +14,7 @@ import {
   PRODUCTION_ISSUES_SUGGESTION,
   sortDailyTaskRowsForDisplay,
 } from '../services/dailyTaskSuggestions';
+import { buildAiDailyTaskSuggestions } from '../services/aiDailyTaskScanner';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ function localDateISO(d: Date = new Date()): string {
 const TAB_FOR_SOURCE: Record<string, string> = {
   manual: 'dashboard',
   priority: 'priority',
+  ai_scan: 'priority',
   finance_sni: 'shipped-not-invoiced',
   finance_credit: 'credit-block',
   finance_unpaid: 'unpaid-orders',
@@ -63,6 +65,7 @@ const TAB_FOR_SOURCE: Record<string, string> = {
 const SOURCE_LABEL: Record<string, string> = {
   manual: 'Your note',
   priority: 'Deco job',
+  ai_scan: 'AI scan',
   finance_sni: 'Finance · invoicing',
   finance_credit: 'Finance · credit',
   finance_unpaid: 'Finance · payment',
@@ -479,6 +482,7 @@ const DailyTaskList: React.FC<Props> = ({
   const [schemaSupportsReviewed, setSchemaSupportsReviewed] = useState(true);
   const [newTitle, setNewTitle] = useState('');
   const [importing, setImporting] = useState(false);
+  const [aiImporting, setAiImporting] = useState(false);
   const [weeklyExporting, setWeeklyExporting] = useState(false);
   /** Narrow list to one Deco responsible person (finance / manual rows only show when All). */
   const [staffViewFilter, setStaffViewFilter] = useState<string>(STAFF_VIEW_ALL);
@@ -794,6 +798,78 @@ const DailyTaskList: React.FC<Props> = ({
       }
     } finally {
       setImporting(false);
+    }
+  };
+
+  const importFromAiScan = async () => {
+    if (!isSupabaseReady()) return;
+    const suggestions = buildAiDailyTaskSuggestions(decoJobs, 12);
+    setAiImporting(true);
+    try {
+      // Refresh today's open AI rows so each scan reflects current conditions.
+      await supabaseFetch(
+        `stash_daily_tasks?task_date=eq.${taskDate}&source_page=eq.ai_scan&completed=eq.false&reviewed=eq.false`,
+        'DELETE',
+      );
+      const retainedRows = rows.filter(r => !(r.source_page === 'ai_scan' && !r.reviewed && !r.completed));
+      setRows(retainedRows);
+      const workingExistingKeys = new Set<string>();
+      for (const r of retainedRows) {
+        if (r.source_ref) workingExistingKeys.add(`${r.source_page}:${r.source_ref}`);
+      }
+      let order = retainedRows.length === 0
+        ? 0
+        : Math.max(...retainedRows.map(r => r.sort_order)) + 1;
+      let imported = 0;
+      let postAttempts = 0;
+      let firstError: unknown = null;
+
+      const post = async (payload: Record<string, unknown>) => {
+        postAttempts++;
+        try {
+          if (!schemaSupportsReviewed) {
+            delete payload.reviewed;
+            delete payload.reviewed_at;
+          }
+          await supabaseFetch('stash_daily_tasks', 'POST', payload);
+          imported++;
+        } catch (e: unknown) {
+          if (isReviewedColumnMissing(e)) setSchemaSupportsReviewed(false);
+          if (!firstError) firstError = e;
+        }
+      };
+
+      for (const s of suggestions) {
+        const key = `ai_scan:${s.sourceRef}`;
+        if (workingExistingKeys.has(key)) continue;
+        await post({
+          task_date: taskDate,
+          title: s.title,
+          source_page: 'ai_scan',
+          source_ref: s.sourceRef,
+          sort_order: order++,
+          reviewed: false,
+          reviewed_at: null,
+          completed: false,
+          hold_note: s.reason,
+          created_by: createdBy,
+        });
+      }
+
+      await load();
+      if (imported === 0 && postAttempts > 0 && isDailyTasksTableMissing(firstError)) {
+        alert(friendlyDailyTasksError(firstError));
+        return;
+      }
+      if (imported === 0 && postAttempts > 0 && firstError) {
+        alert(`Could not save AI scan tasks: ${firstError instanceof Error ? firstError.message : String(firstError)}`);
+        return;
+      }
+      if (imported === 0) {
+        alert('AI scan found no fresh high-risk jobs to add right now.');
+      }
+    } finally {
+      setAiImporting(false);
     }
   };
 
@@ -1251,12 +1327,21 @@ tr:nth-child(even) td{background:#fafafa}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={importing || loading}
+            disabled={importing || aiImporting || loading}
             onClick={importFromSystem}
             className="px-3 py-2 rounded-lg bg-violet-600 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5"
           >
             {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckSquare className="w-3.5 h-3.5" />}
             Pull from system (priority order)
+          </button>
+          <button
+            type="button"
+            disabled={aiImporting || importing || loading}
+            onClick={importFromAiScan}
+            className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {aiImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            AI smart scan
           </button>
         </div>
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
