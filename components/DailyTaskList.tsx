@@ -52,6 +52,14 @@ function localDateISO(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+function isOverdueByTaskDate(rowDate?: string, taskDateIso?: string): boolean {
+  if (!rowDate || !taskDateIso) return false;
+  const due = new Date(`${rowDate.slice(0, 10)}T00:00:00`);
+  const task = new Date(`${taskDateIso}T00:00:00`);
+  if (Number.isNaN(due.getTime()) || Number.isNaN(task.getTime())) return false;
+  return due.getTime() < task.getTime();
+}
+
 const TAB_FOR_SOURCE: Record<string, string> = {
   manual: 'dashboard',
   priority: 'priority',
@@ -874,6 +882,8 @@ const DailyTaskList: React.FC<Props> = ({
         const key = `ai_scan:${s.sourceRef}`;
         if (workingExistingKeys.has(key)) continue;
         const job = jobByNumber.get(String(s.jobNumber));
+        const dueIso = (job?.dateDue || job?.productionDueDate || '').slice(0, 10);
+        if (!isOverdueByTaskDate(dueIso, taskDate)) continue;
         const staff = displayStaffName(job?.salesPerson) || 'Unassigned';
         const due = fmtShortDate(job?.dateDue || job?.productionDueDate) || 'n/a';
         const balance =

@@ -49,18 +49,10 @@ export function buildAiDailyTaskSuggestions(jobs: DecoJob[], limit = 12): AiDail
     let score = pr.score;
     const reasons: string[] = [];
 
-    if (dueInDays != null) {
-      if (dueInDays < 0) {
-        score += 50;
-        reasons.push(`overdue by ${Math.abs(dueInDays)} day${Math.abs(dueInDays) === 1 ? '' : 's'}`);
-      } else if (dueInDays <= 1) {
-        score += 30;
-        reasons.push(`due in ${dueInDays} day${dueInDays === 1 ? '' : 's'}`);
-      } else if (dueInDays <= 3) {
-        score += 16;
-        reasons.push(`due soon (${dueInDays} days)`);
-      }
-    }
+    // Strict mode: only chase overdue jobs.
+    if (dueInDays == null || dueInDays >= 0) continue;
+    score += 50;
+    reasons.push(`overdue by ${Math.abs(dueInDays)} day${Math.abs(dueInDays) === 1 ? '' : 's'}`);
 
     if (ageDays != null) {
       if (ageDays >= 30) {
