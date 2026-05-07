@@ -153,7 +153,7 @@ function withCarriedHoldNotes(rows: DailyTaskRow[]): DailyTaskRow[] {
   // For repeated daily copies of the same sourced task, carry the newest
   // non-empty hold_note across rows in the selected range so briefing PDFs
   // don't lose context on days where a copied row has an empty note.
-  const latestNoteBySource = new Map<string, { note: string; stamp: string }>();
+  const latestNoteBySource = new Map<string, { note: string; stamp: string; taskDate: string }>();
   for (const r of rows) {
     const ref = (r.source_ref || '').trim();
     if (!ref) continue;
@@ -162,7 +162,7 @@ function withCarriedHoldNotes(rows: DailyTaskRow[]): DailyTaskRow[] {
     const key = `${r.source_page}:${ref}`;
     const stamp = r.updated_at || r.created_at || `${r.task_date}T00:00:00`;
     const prev = latestNoteBySource.get(key);
-    if (!prev || stamp >= prev.stamp) latestNoteBySource.set(key, { note, stamp });
+    if (!prev || stamp >= prev.stamp) latestNoteBySource.set(key, { note, stamp, taskDate: r.task_date });
   }
 
   return rows.map(r => {
@@ -172,7 +172,10 @@ function withCarriedHoldNotes(rows: DailyTaskRow[]): DailyTaskRow[] {
     const key = `${r.source_page}:${ref}`;
     const latest = latestNoteBySource.get(key);
     if (!latest) return r;
-    return { ...r, hold_note: latest.note };
+    const fromLabel = fmtShortDate(latest.taskDate) || latest.taskDate;
+    const carried = latest.taskDate && latest.taskDate !== r.task_date;
+    const noteText = carried ? `${latest.note} (from ${fromLabel})` : latest.note;
+    return { ...r, hold_note: noteText };
   });
 }
 
@@ -277,15 +280,15 @@ async function copyTextSafe(text: string): Promise<boolean> {
 }
 
 /**
- * Deco jobs the user has ticked off as completed on any daily list date.
- * Pull from system skips these so they don't reappear the next day.
+ * Deco jobs the user has already progressed (reviewed or completed) on any day.
+ * Pull-from-system skips these so yesterday's worked items don't repopulate today.
  */
-async function fetchCompletedPriorityJobRefsEver(): Promise<Set<string>> {
+async function fetchProgressedPriorityJobRefsEver(): Promise<Set<string>> {
   const out = new Set<string>();
   if (!isSupabaseReady()) return out;
   try {
     const res = await supabaseFetch(
-      'stash_daily_tasks?source_page=eq.priority&completed=eq.true&select=source_ref&limit=10000',
+      'stash_daily_tasks?source_page=eq.priority&or=(completed.eq.true,reviewed.eq.true)&select=source_ref&limit=10000',
       'GET',
     );
     const data: { source_ref: string | null }[] = await res.json();
@@ -677,7 +680,7 @@ const DailyTaskList: React.FC<Props> = ({
     const suggestions = buildPriorityImportSuggestions(decoJobs, 25);
     setImporting(true);
     try {
-      const completedPriorityEver = await fetchCompletedPriorityJobRefsEver();
+      const progressedPriorityEver = await fetchProgressedPriorityJobRefsEver();
       let order = nextSortOrder;
       let imported = 0;
       let postAttempts = 0;
@@ -701,7 +704,7 @@ const DailyTaskList: React.FC<Props> = ({
       for (const s of suggestions) {
         const key = `priority:${s.jobNumber}`;
         if (existingKeys.has(key)) continue;
-        if (completedPriorityEver.has(String(s.jobNumber))) continue;
+        if (progressedPriorityEver.has(String(s.jobNumber))) continue;
         await post({
           task_date: taskDate,
           title: s.title,
@@ -1235,7 +1238,7 @@ tr:nth-child(even) td{background:#fafafa}
           </button>
         </div>
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
-          Adds up to 25 scored jobs (most urgent first), then finance reviews, then the production issue log. Skips rows already on this date. Jobs you previously ticked complete on any day are not pulled again — uncheck or delete that older row if you need it back.
+          Adds up to 25 scored jobs (most urgent first), then finance reviews, then the production issue log. Skips rows already on this date. Jobs you previously moved to To be completed or Completed on any day are not pulled again — reopen or delete that older row if you need it back.
         </p>
       </div>
 
