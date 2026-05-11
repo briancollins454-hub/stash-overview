@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CalendarDays, CheckSquare, ClipboardList, Copy, Check, ExternalLink, Loader2, Plus, RefreshCw,
+  CalendarDays, CheckSquare, ClipboardList, Compass, Copy, Check, ExternalLink, Loader2, Plus, RefreshCw,
   Sparkles, Trash2, AlertTriangle, UserRound, FileText,
 } from 'lucide-react';
 import type { DecoJob } from '../types';
@@ -9,6 +9,7 @@ import { calculatePriority, URGENCY_STYLE, type Urgency, type PriorityResult } f
 import { displayStaffName } from '../services/staffDisplay';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
 import {
+  activePriorityJobs,
   buildPriorityImportSuggestions,
   FINANCE_CHECKLIST_SUGGESTIONS,
   PRODUCTION_ISSUES_SUGGESTION,
@@ -188,6 +189,23 @@ function withCarriedHoldNotes(rows: DailyTaskRow[]): DailyTaskRow[] {
     const noteText = carried ? `${latest.note} (from ${fromLabel})` : latest.note;
     return { ...r, hold_note: noteText };
   });
+}
+
+/** Small “do one thing” prompts — seed picks one per calendar day. */
+const MOMENTUM_MICRO_QUESTS: readonly string[] = [
+  'Open Priority Board and pick the oldest “Awaiting PO” row — either chase or clear it.',
+  'Issue log: take the oldest open item to “done” or leave one clear next action in the notes.',
+  'Shipped not invoiced: raise one invoice or write why it waits (so finance isn’t guessing).',
+  'Unpaid orders: match one payment or send one chase with a concrete amount.',
+  'Credit block: pick one held account and record the single next step (call, email, write-off review).',
+  'Dashboard search: open one order you haven’t touched in 30+ days and check Deco vs reality.',
+  'Briefing tab: read the headline numbers once — often surfaces a tab you forgot to open.',
+];
+
+function pickMomentumMicroQuest(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return MOMENTUM_MICRO_QUESTS[h % MOMENTUM_MICRO_QUESTS.length]!;
 }
 
 function fmtMoney(n?: number): string | null {
@@ -576,6 +594,63 @@ const DailyTaskList: React.FC<Props> = ({
       return priorityRowStaffBucket(job) === staffViewFilter;
     });
   }, [displayRows, staffViewFilter, jobByNumber]);
+
+  const incompleteFilteredCount = useMemo(
+    () => filteredDisplayRows.filter(r => !r.completed).length,
+    [filteredDisplayRows],
+  );
+
+  const decoMomentum = useMemo(() => {
+    const now = new Date();
+    const active = activePriorityJobs(decoJobs);
+    let critical = 0;
+    let high = 0;
+    let medium = 0;
+    let low = 0;
+    let spotlight: {
+      job: DecoJob;
+      score: number;
+      urgency: Urgency;
+      reason: string;
+    } | null = null;
+    for (const job of active) {
+      const pr = calculatePriority(job, now);
+      if (pr.urgency === 'critical') critical += 1;
+      else if (pr.urgency === 'high') high += 1;
+      else if (pr.urgency === 'medium') medium += 1;
+      else low += 1;
+      if (!spotlight || pr.score > spotlight.score) {
+        spotlight = { job, score: pr.score, urgency: pr.urgency, reason: pr.reason };
+      }
+    }
+    return { openJobs: active.length, critical, high, medium, low, spotlight };
+  }, [decoJobs]);
+
+  const [openIssueCount, setOpenIssueCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (taskDate !== localDateISO() || !isSupabaseReady()) {
+      setOpenIssueCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await supabaseFetch(
+          'stash_production_issues?status=eq.open&select=id&limit=201',
+          'GET',
+        );
+        const data: { id: unknown }[] = await res.json();
+        if (cancelled || !Array.isArray(data)) return;
+        setOpenIssueCount(data.length >= 200 ? 200 : data.length);
+      } catch {
+        if (!cancelled) setOpenIssueCount(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [taskDate, rows.length]);
 
   const addManual = async () => {
     const title = newTitle.trim();
@@ -1371,6 +1446,155 @@ tr:nth-child(even) td{background:#fafafa}
           >
             Move To Be Completed
           </button>
+        </div>
+      )}
+
+      {taskDate === localDateISO() && (
+        <div
+          className={`rounded-xl border overflow-hidden ${
+            incompleteFilteredCount === 0
+              ? 'border-teal-300/80 dark:border-teal-600/40 bg-gradient-to-br from-teal-50 via-white to-cyan-50 dark:from-teal-950/35 dark:via-[#1a1a35] dark:to-cyan-950/25'
+              : 'border-gray-200 dark:border-gray-600 bg-white/90 dark:bg-[#1e1e3a]/90'
+          }`}
+        >
+          <div className={`flex items-start gap-3 p-4 ${incompleteFilteredCount === 0 ? 'pb-3' : 'py-3'}`}>
+            <div
+              className={`p-2.5 rounded-xl shrink-0 ${
+                incompleteFilteredCount === 0
+                  ? 'bg-teal-500 text-white shadow-md shadow-teal-500/25'
+                  : 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300'
+              }`}
+            >
+              <Compass className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <h2 className="text-sm font-black uppercase tracking-widest text-teal-900 dark:text-teal-200">
+                {incompleteFilteredCount === 0 ? 'Quiet list — wider radar' : 'Outside today’s rows'}
+              </h2>
+              {incompleteFilteredCount === 0 ? (
+                <p className="text-[13px] leading-snug text-gray-700 dark:text-gray-200">
+                  An empty daily list usually means nothing was <strong className="font-semibold">pulled</strong> yet, or Deco is calmer than the rest of Stash. Below is live signal from your synced jobs — use it to pick one honest piece of work.
+                </p>
+              ) : (
+                <p className="text-[12px] leading-snug text-gray-600 dark:text-gray-300">
+                  You have <strong className="text-gray-900 dark:text-white">{incompleteFilteredCount}</strong> open row
+                  {incompleteFilteredCount !== 1 ? 's' : ''} in view — there may still be heat elsewhere in the app.
+                  {staffViewFilter !== STAFF_VIEW_ALL ? (
+                    <span className="block mt-1 text-amber-800 dark:text-amber-300/95">
+                      Staff filter is on — switch to <strong>All staff</strong> to see finance checks and the full queue.
+                    </span>
+                  ) : null}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className={`grid gap-2 px-4 ${incompleteFilteredCount === 0 ? 'pb-3 sm:grid-cols-2' : 'pb-3 sm:grid-cols-3'}`}>
+            <div className="rounded-lg border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-black/20 px-3 py-2.5">
+              <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Open in Deco</div>
+              <div className="text-lg font-black text-gray-900 dark:text-white tabular-nums">{decoMomentum.openJobs}</div>
+              <div className="text-[11px] text-gray-500 dark:text-gray-400">Non-shipped, active</div>
+            </div>
+            <div className="rounded-lg border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-black/20 px-3 py-2.5">
+              <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Pressure band</div>
+              <div className="text-[13px] font-bold text-gray-900 dark:text-white mt-0.5">
+                <span className="text-rose-600 dark:text-rose-400">{decoMomentum.critical} critical</span>
+                <span className="text-gray-400 mx-1">·</span>
+                <span className="text-amber-600 dark:text-amber-400">{decoMomentum.high} high</span>
+                <span className="text-gray-400 mx-1">·</span>
+                <span className="text-gray-600 dark:text-gray-300">{decoMomentum.medium} med</span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-black/20 px-3 py-2.5 sm:col-span-1">
+              <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">Issue log (open)</div>
+              <div className="text-lg font-black text-gray-900 dark:text-white tabular-nums">
+                {openIssueCount == null ? '—' : openIssueCount >= 200 ? '200+' : openIssueCount}
+              </div>
+            </div>
+          </div>
+
+          {decoMomentum.openJobs === 0 ? (
+            <p className="px-4 pb-2 text-[12px] text-gray-600 dark:text-gray-400">
+              No open Deco jobs in the current sync — try <strong className="font-semibold text-gray-800 dark:text-gray-200">Dashboard</strong> or run a sync, then use Pull from system below.
+            </p>
+          ) : null}
+
+          {decoMomentum.spotlight && decoMomentum.spotlight.score > 0 ? (
+            <div className="mx-4 mb-3 rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/80 dark:bg-violet-950/30 px-3 py-2.5">
+              <div className="text-[10px] font-black uppercase tracking-widest text-violet-700 dark:text-violet-300">Highest-pressure job right now</div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white mt-1 truncate">
+                #{decoMomentum.spotlight.job.jobNumber} · {decoMomentum.spotlight.job.customerName || 'Unknown'}{' '}
+                <span className="text-gray-500 font-normal">({decoMomentum.spotlight.job.status || '—'})</span>
+              </p>
+              <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                Score {decoMomentum.spotlight.score} · {decoMomentum.spotlight.urgency}
+                {decoMomentum.spotlight.reason ? ` — ${decoMomentum.spotlight.reason}` : ''}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {onNavigateToOrder ? (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToOrder(String(decoMomentum.spotlight!.job.jobNumber))}
+                    className="px-2.5 py-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase tracking-widest"
+                  >
+                    Find order
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('priority')}
+                  className="px-2.5 py-1 rounded-md border border-violet-300 dark:border-violet-600 text-violet-800 dark:text-violet-200 text-[10px] font-black uppercase tracking-widest hover:bg-violet-100/80 dark:hover:bg-violet-900/40"
+                >
+                  Priority board
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2 px-4 pb-4">
+            <button
+              type="button"
+              onClick={() => onNavigateTab('briefing')}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-[10px] font-black uppercase tracking-widest text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5"
+            >
+              Morning briefing
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('issues')}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-[10px] font-black uppercase tracking-widest text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5"
+            >
+              Issue log
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('credit-block')}
+              className="px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-800/60 text-[10px] font-black uppercase tracking-widest text-rose-800 dark:text-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+            >
+              Credit block
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('unpaid-orders')}
+              className="px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800/60 text-[10px] font-black uppercase tracking-widest text-amber-900 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+            >
+              Unpaid orders
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateTab('shipped-not-invoiced')}
+              className="px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800/60 text-[10px] font-black uppercase tracking-widest text-emerald-900 dark:text-emerald-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+            >
+              Shipped not invoiced
+            </button>
+          </div>
+
+          {incompleteFilteredCount === 0 ? (
+            <div className="border-t border-teal-200/60 dark:border-teal-800/40 bg-teal-50/50 dark:bg-teal-950/20 px-4 py-3">
+              <div className="text-[10px] font-black uppercase tracking-widest text-teal-800 dark:text-teal-300">One concrete win (today&apos;s draw)</div>
+              <p className="text-[13px] text-gray-800 dark:text-gray-100 mt-1 leading-snug">{pickMomentumMicroQuest(taskDate)}</p>
+            </div>
+          ) : null}
         </div>
       )}
 
