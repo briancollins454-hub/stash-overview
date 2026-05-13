@@ -9,6 +9,7 @@ import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
+import { isShopifyLineItemActiveForOps } from './services/shopifyLineItems';
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
@@ -1764,7 +1765,7 @@ const App: React.FC = () => {
               };
           });
 
-          const eligibleItems = mappedItems.filter(i => isEligibleForMapping(i.name, i.productType) && i.itemStatus !== 'fulfilled');
+          const eligibleItems = mappedItems.filter(i => isEligibleForMapping(i.name, i.productType) && isShopifyLineItemActiveForOps(i));
           const stockItems = eligibleItems.filter(i => !i.name.toLowerCase().includes('mto'));
           const mtoItems = eligibleItems.filter(i => i.name.toLowerCase().includes('mto'));
           
@@ -1853,7 +1854,7 @@ const App: React.FC = () => {
     if (linkedOrders.length > 0) {
       const sample = linkedOrders.slice(0, 3);
       for (const o of sample) {
-        const unmapped = o.shopify.items.filter(i => !i.linkedDecoItemId && i.itemStatus !== 'fulfilled');
+        const unmapped = o.shopify.items.filter(i => !i.linkedDecoItemId && isShopifyLineItemActiveForOps(i));
         if (unmapped.length > 0 && o.deco) {
           const decoItems = o.deco!.items;
           console.log(`[EAN Auto-Map] Order ${o.shopify.orderNumber}: ${unmapped.length} unmapped items`);

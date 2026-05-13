@@ -63,7 +63,7 @@ export interface ShopifyOrder {
   items: {
     id: string; // UNIQUE ID (GID) - CRITICAL for mapping
     name: string;
-    quantity: number;
+    quantity: number; // Current units on the line (after removals/edits); use fulfilledQuantity for partials
     fulfilledQuantity?: number; // Added to track line-item level partial shipments
     sku: string;
     ean?: string; // Barcode

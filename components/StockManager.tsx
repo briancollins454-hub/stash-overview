@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { UnifiedOrder, PhysicalStockItem, ReturnStockItem, ShopifyOrder, ReferenceProduct } from '../types';
+import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 import { 
     Barcode, Undo2, LayoutGrid, Search, Plus, Trash2, 
     CheckCircle2, AlertCircle, ShoppingBag, ArrowRight,
@@ -282,7 +283,7 @@ const StockManager: React.FC<StockManagerProps> = ({
         const unfulfilledOrders = orders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
         const physicalMatches = physicalStock.filter(ps => ps.quantity > 0).map(ps => {
             const matches = unfulfilledOrders.filter(uo => {
-                const hasEanMatch = uo.shopify.items.some(i => i.ean === ps.ean && i.itemStatus !== 'fulfilled');
+                const hasEanMatch = uo.shopify.items.some(i => i.ean === ps.ean && isShopifyLineItemActiveForOps(i));
                 if (!hasEanMatch) return false;
                 if (ps.isEmbellished) {
                     return uo.shopify.tags.some(tag => tag.toLowerCase() === ps.clubName?.toLowerCase());
@@ -297,7 +298,7 @@ const StockManager: React.FC<StockManagerProps> = ({
                 uo.shopify.items.some(i => 
                     i.name === rs.itemName && 
                     i.ean === rs.ean && 
-                    i.itemStatus !== 'fulfilled'
+                    isShopifyLineItemActiveForOps(i)
                 )
             );
             return { stockItem: rs, source: 'return' as const, matchingOrders: matches };

@@ -1,5 +1,6 @@
 import { UnifiedOrder } from '../types';
 import { getNotesForOrder } from '../services/notesService';
+import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
@@ -35,8 +36,8 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   const notes = getNotesForOrder(order.shopify.id);
   const daysLeft = order.daysRemaining;
   const isOverdue = daysLeft < 0;
-  const unfulfilledItems = items.filter(i => i.itemStatus !== 'fulfilled');
-  const fulfilledItems = items.filter(i => i.itemStatus === 'fulfilled');
+  const unfulfilledItems = items.filter(i => isShopifyLineItemActiveForOps(i));
+  const fulfilledItems = items.filter(i => !isShopifyLineItemActiveForOps(i));
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',

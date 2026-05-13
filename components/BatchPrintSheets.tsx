@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UnifiedOrder } from '../types';
 import { Printer, Package, ChevronDown, ChevronRight, Filter, CheckSquare, Square } from 'lucide-react';
+import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 
 interface Props {
   orders: UnifiedOrder[];
@@ -48,7 +49,7 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
       .filter(o => o.shopify.fulfillmentStatus !== 'fulfilled')
       .flatMap(o =>
         o.shopify.items
-          .filter(i => i.itemStatus !== 'fulfilled')
+          .filter(i => isShopifyLineItemActiveForOps(i))
           .map(i => ({
             orderNumber: o.shopify.orderNumber,
             customer: o.shopify.customerName,

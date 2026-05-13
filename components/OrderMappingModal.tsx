@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ShopifyOrder, DecoJob, DecoItem } from '../types';
 import { standardizeSize, isEligibleForMapping } from '../services/apiService';
+import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 import { suggestMapping } from '../services/geminiService';
 import { Search, Loader2, Save, X, CheckCircle2, AlertCircle, Box, Cog, Truck, ArrowRight, Trash2, ShieldOff, Sparkles, Info, Layers, Wand2, Barcode } from 'lucide-react';
 
@@ -129,7 +130,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                   targetOrders.forEach(o => {
                       o.items.forEach(sItem => {
                           if (next[sItem.id]) return;
-                          if (!isEligibleForMapping(sItem.name, sItem.productType) || sItem.itemStatus === 'fulfilled') return;
+                          if (!isEligibleForMapping(sItem.name, sItem.productType) || !isShopifyLineItemActiveForOps(sItem)) return;
 
                           // 1. EAN barcode match — same barcode = same product, instant map
                           // Resolve EANs from item's own data OR the enrichment index (reference products + stock scans)
@@ -197,7 +198,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
     setIsAiLoading(true);
     try {
       const allShopifyItems = targetOrders.flatMap(o => 
-        o.items.filter(item => isEligibleForMapping(item.name, item.productType) && item.itemStatus !== 'fulfilled')
+        o.items.filter(item => isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item))
       );
 
       // 1. Instant Local Match for clear-cut cases
@@ -316,7 +317,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
           targetOrders.forEach(o => {
               o.items.forEach(item => {
                   // Mirror to identical items
-                  if (item.id !== itemKey && isEligibleForMapping(item.name, item.productType) && item.itemStatus !== 'fulfilled') {
+                  if (item.id !== itemKey && isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item)) {
                       const itemSig = `${item.sku}-${item.name}-${item.ean || ''}`;
                       if (itemSig === signature) {
                           // If we are setting a mapping, overwrite even if already mapped (to ensure consistency across identical items)
@@ -470,7 +471,7 @@ const OrderMappingModal: React.FC<OrderMappingModalProps> = ({
                                     // when the orders array reorders (prior version produced
                                     // console key warnings and occasional UI flicker).
                                     <React.Fragment key={o.id}>
-                                    {o.items.filter(item => isEligibleForMapping(item.name, item.productType) && item.itemStatus !== 'fulfilled').map((sItem) => {
+                                    {o.items.filter(item => isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item)).map((sItem) => {
                                         const itemKey = sItem.id;
                                         const rawSelectedId = mappings[itemKey] || '';
                                         const isNoMap = rawSelectedId === '__NO_MAP__';

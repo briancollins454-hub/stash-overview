@@ -1,4 +1,5 @@
 import { UnifiedOrder, DecoItem } from '../types';
+import { isShopifyLineItemActiveForOps } from './shopifyLineItems';
 
 export interface AutoMatchResult {
   orderNumber: string;
@@ -108,7 +109,7 @@ export function autoMatch(
       // Skip already-mapped items
       if (item.linkedDecoItemId) continue;
       // Skip fulfilled items
-      if (item.itemStatus === 'fulfilled') continue;
+      if (!isShopifyLineItemActiveForOps(item)) continue;
 
       const candidates: { decoItem: DecoItem; score: number; reason: string; decoId: string; isEanMatch?: boolean }[] = [];
       const shopifySku = (item.sku || '').trim().toLowerCase();

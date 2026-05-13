@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from
 import { UnifiedOrder, DecoJob } from '../types';
 import { ApiSettings } from './SettingsModal';
 import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
+import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
 import { 
     AlertCircle, Truck, Clock, AlertTriangle, Package, CheckCircle2, 
@@ -797,7 +798,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
 
                     // Check if any mapped items in this order were matched by EAN barcode
                     const hasEanMatch = eanIndex && eanIndex.size > 0 && order.shopify.items.some(sItem => {
-                        if (!sItem.linkedDecoItemId || sItem.itemStatus === 'fulfilled') return false;
+                        if (!sItem.linkedDecoItemId || !isShopifyLineItemActiveForOps(sItem)) return false;
                         let sEan = (sItem.ean || '').trim();
                         if ((!sEan || sEan === '-' || sEan.length < 8)) {
                             const skuKey = (sItem.sku || '').trim().toLowerCase();
@@ -1064,7 +1065,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                                {order.shopify.items.filter(item => isEligibleForMapping(item.name, item.productType)).map((item, idx) => {
+                                                {order.shopify.items.filter(item => isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item)).map((item, idx) => {
                                                     const isPartialItem = item.fulfilledQuantity !== undefined && item.fulfilledQuantity > 0 && item.fulfilledQuantity < item.quantity;
                                                     const isFullItem = item.fulfilledQuantity === item.quantity;
                                                     const isMtoItem = item.name.toLowerCase().includes('mto');
@@ -1262,7 +1263,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                 </p>
                                                 <div className="flex flex-col gap-2">
                                                     <button 
-                                                        onClick={() => onBulkScan?.(order.shopify.items.filter(i => i.name.toLowerCase().includes('mto') && i.itemStatus !== 'fulfilled').map(i => i.sku))}
+                                                        onClick={() => onBulkScan?.(order.shopify.items.filter(i => i.name.toLowerCase().includes('mto') && isShopifyLineItemActiveForOps(i)).map(i => i.sku))}
                                                         className="w-full py-1.5 bg-white text-purple-700 border border-purple-200 rounded text-[9px] font-black uppercase tracking-widest hover:bg-purple-100 transition-colors"
                                                     >
                                                         Scan MTO Lines
