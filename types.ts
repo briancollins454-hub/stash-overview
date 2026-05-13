@@ -64,6 +64,10 @@ export interface ShopifyOrder {
     id: string; // UNIQUE ID (GID) - CRITICAL for mapping
     name: string;
     quantity: number; // Current units on the line (after removals/edits); use fulfilledQuantity for partials
+    /** From Shopify GraphQL `currentQuantity` — 0 means removed/refunded off the order. */
+    currentQuantity?: number;
+    /** From Shopify GraphQL `fulfillableQuantity` — used with currentQuantity to detect removed rows. */
+    fulfillableQuantity?: number;
     fulfilledQuantity?: number; // Added to track line-item level partial shipments
     sku: string;
     ean?: string; // Barcode
