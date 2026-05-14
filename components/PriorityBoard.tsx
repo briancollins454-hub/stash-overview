@@ -53,6 +53,46 @@ interface CloudPriorityNoteRow {
   updated_at: string | null;
 }
 
+/** Merge local + cloud so newer `updatedAt` wins (avoids empty cloud wiping unsynced local notes). */
+function mergePriorityNotesByUpdatedAt(
+  local: Record<string, PriorityLineNote>,
+  cloud: Record<string, PriorityLineNote>,
+): Record<string, PriorityLineNote> {
+  const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
+  const out: Record<string, PriorityLineNote> = {};
+  for (const k of keys) {
+    const a = local[k];
+    const b = cloud[k];
+    if (!a) {
+      if (b) out[k] = { ...b };
+      continue;
+    }
+    if (!b) {
+      out[k] = { ...a };
+      continue;
+    }
+    const ta = Date.parse(a.updatedAt || '') || 0;
+    const tb = Date.parse(b.updatedAt || '') || 0;
+    out[k] = ta >= tb ? { ...a } : { ...b };
+  }
+  return out;
+}
+
+function cloudRowsToNotesByJob(rows: unknown): Record<string, PriorityLineNote> {
+  const out: Record<string, PriorityLineNote> = {};
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows as CloudPriorityNoteRow[]) {
+    const key = String(row.job_number || '').trim();
+    if (!key) continue;
+    out[key] = {
+      text: row.note_text || '',
+      excludeFromPdf: !!row.exclude_from_pdf,
+      updatedAt: row.updated_at || new Date().toISOString(),
+    };
+  }
+  return out;
+}
+
 const fmtK = (n: number) => {
   if (n >= 1000) return '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
   return '\u00a3' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -609,6 +649,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const [readyAtMap, setReadyAtMap] = useState<ReadyAtMap>({});
   const [notesByJobNumber, setNotesByJobNumber] = useState<Record<string, PriorityLineNote>>({});
   const [notesDirty, setNotesDirty] = useState(false);
+  const [notesCloudError, setNotesCloudError] = useState<string | null>(null);
 
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
@@ -617,39 +658,79 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   }, [lastSyncTime]);
 
   useEffect(() => {
-    getItem<Record<string, PriorityLineNote>>(PRIORITY_NOTES_KEY).then(cached => {
-      if (cached) setNotesByJobNumber(cached);
-    }).catch(() => { /* non-fatal */ });
+    let cancelled = false;
+    const pull = async () => {
+      let fromIdb: Record<string, PriorityLineNote> = {};
+      try {
+        const cached = await getItem<Record<string, PriorityLineNote>>(PRIORITY_NOTES_KEY);
+        if (cached && typeof cached === 'object') fromIdb = cached;
+      } catch { /* non-fatal */ }
+
+      let fromCloud: Record<string, PriorityLineNote> = {};
+      if (isSupabaseReady()) {
+        try {
+          const res = await supabaseFetch(
+            `${PRIORITY_NOTES_TABLE}?select=job_number,note_text,exclude_from_pdf,updated_at`,
+            'GET',
+          );
+          const rows = await res.json();
+          if (cancelled) return;
+          fromCloud = cloudRowsToNotesByJob(rows);
+          if (!cancelled) setNotesCloudError(null);
+        } catch {
+          if (!cancelled) {
+            setNotesCloudError(
+              'Could not load shared notes from the cloud (check network or Supabase). Showing this device’s cached copy only.',
+            );
+          }
+        }
+      }
+
+      if (cancelled) return;
+      const merged = mergePriorityNotesByUpdatedAt(fromIdb, fromCloud);
+      setNotesByJobNumber(merged);
+      setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
+    };
+
+    void pull();
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void pull();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
     if (!isSupabaseReady()) return;
-    (async () => {
+    let cancelled = false;
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
       try {
         const res = await supabaseFetch(
           `${PRIORITY_NOTES_TABLE}?select=job_number,note_text,exclude_from_pdf,updated_at`,
           'GET',
         );
-        const rows: CloudPriorityNoteRow[] = await res.json();
-        if (cancelled || !Array.isArray(rows)) return;
-        const fromCloud: Record<string, PriorityLineNote> = {};
-        for (const row of rows) {
-          const key = String(row.job_number || '').trim();
-          if (!key) continue;
-          fromCloud[key] = {
-            text: row.note_text || '',
-            excludeFromPdf: !!row.exclude_from_pdf,
-            updatedAt: row.updated_at || new Date().toISOString(),
-          };
-        }
-        setNotesByJobNumber(fromCloud);
-        setItem(PRIORITY_NOTES_KEY, fromCloud).catch(console.error);
+        const rows = await res.json();
+        if (cancelled) return;
+        const fromCloud = cloudRowsToNotesByJob(rows);
+        setNotesByJobNumber(prev => {
+          const merged = mergePriorityNotesByUpdatedAt(prev, fromCloud);
+          setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
+          return merged;
+        });
       } catch {
-        // keep local-only notes if cloud isn't reachable
+        /* keep showing merged local */
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    const id = window.setInterval(poll, 45_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
@@ -684,7 +765,16 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           );
         }
         setNotesDirty(false);
-      } catch {
+        setNotesCloudError(null);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isMissingTable =
+          /stash_priority_notes|relation|does not exist|42P01|PGRST205/i.test(msg);
+        setNotesCloudError(
+          isMissingTable
+            ? 'Shared notes are not saving to the cloud — the stash_priority_notes table is missing in Supabase. Run migrations/stash_priority_notes.sql in the SQL editor, then reload.'
+            : `Notes did not sync to the cloud (${msg}). Other staff will not see them until this is fixed.`,
+        );
         // keep dirty flag true; next edit triggers another sync attempt
       }
     }, 700);
@@ -963,6 +1053,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 pb-12">
+      {notesCloudError && (
+        <div
+          className="rounded-xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-[11px] font-semibold text-amber-100 shadow-sm"
+          role="alert"
+        >
+          {notesCloudError}
+        </div>
+      )}
       {/* Header */}
       <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 px-6 py-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
