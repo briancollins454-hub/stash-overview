@@ -68,6 +68,8 @@ export interface ShopifyOrder {
     currentQuantity?: number;
     /** From Shopify GraphQL `fulfillableQuantity` — used with currentQuantity to detect removed rows. */
     fulfillableQuantity?: number;
+    /** Units on this line Shopify marks as not fulfillable (refunded portion, tips, etc.). */
+    nonFulfillableQuantity?: number;
     fulfilledQuantity?: number; // Added to track line-item level partial shipments
     sku: string;
     ean?: string; // Barcode

@@ -21,13 +21,14 @@ export function shopifyLineRemainingQuantity(item: ShopifyLineItem): number {
  * with nothing left to fulfill.
  */
 export function isShopifyLineItemActiveForOps(item: ShopifyLineItem): boolean {
-  // New syncs persist `currentQuantity` (effective units still on the order). Old cache may omit it.
-  if (Object.prototype.hasOwnProperty.call(item, 'currentQuantity')) {
-    const cur = toNum(item.currentQuantity);
-    if (cur !== undefined && cur <= 0) return false;
-  }
+  const cur = toNum(item.currentQuantity) ?? toNum(item.quantity);
+  if (cur !== undefined && cur <= 0) return false;
+
+  const nfl = toNum(item.nonFulfillableQuantity);
+  if (cur !== undefined && nfl !== undefined && nfl >= cur) return false;
+
   const fb = toNum(item.fulfillableQuantity);
-  if (fb !== undefined && fb <= 0 && shopifyLineRemainingQuantity(item) <= 0) return false;
+  if (fb !== undefined && fb <= 0) return false;
 
   const st = (item.itemStatus || 'unfulfilled').toLowerCase();
   if (st === 'fulfilled' || st === 'restocked') return false;
@@ -43,8 +44,13 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
   if (!node) return null;
   const originalQty = toNum(node.quantity) ?? 0;
   const currentQtyParsed = toNum(node.currentQuantity);
-  const currentQty = currentQtyParsed !== undefined ? currentQtyParsed : originalQty;
+  const refundableQty = toNum(node.refundableQuantity);
+  const currentQty =
+    currentQtyParsed !== undefined ? currentQtyParsed : refundableQty !== undefined ? refundableQty : originalQty;
   if (currentQty <= 0) return null;
+
+  const nonFulfill = toNum(node.nonFulfillableQuantity) ?? 0;
+  if (currentQty > 0 && nonFulfill >= currentQty) return null;
 
   const fulfillable = toNum(node.fulfillableQuantity);
 
@@ -52,8 +58,11 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
   const unfulfilled = unfulfilledRaw !== undefined ? unfulfilledRaw : currentQty;
   if (unfulfilled <= 0) return null;
 
-  // Removed / closed lines: nothing left to ship from Shopify's perspective.
   if (fulfillable !== undefined && fulfillable <= 0 && unfulfilled <= 0) return null;
+
+  // Removed / exchange / allocation edge cases: Shopify can leave unfulfilledQuantity > 0 while
+  // fulfillableQuantity is 0 — deprecated fulfillmentStatus may still read "unfulfilled".
+  if (fulfillable !== undefined && fulfillable <= 0 && unfulfilled > 0) return null;
 
   const fulfilledQuantity = Math.max(0, currentQty - unfulfilled);
   const fsRaw = node.fulfillmentStatus ? String(node.fulfillmentStatus).toLowerCase() : 'unfulfilled';
@@ -65,6 +74,7 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
     name: node.name || 'Unknown',
     quantity: currentQty,
     currentQuantity: currentQty,
+    nonFulfillableQuantity: nonFulfill,
     fulfillableQuantity: fulfillable,
     fulfilledQuantity,
     sku: node.sku || '',
@@ -77,4 +87,32 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
     price: node.originalUnitPriceSet?.shopMoney?.amount || undefined,
     properties: (node.customAttributes || []).map((a: any) => ({ name: a.key, value: a.value })),
   };
+}
+
+/**
+ * Line item GIDs that Shopify classifies as non-fulfillable (removed, fully refunded, tips, etc.).
+ * Those rows can still appear under `lineItems` in Admin GraphQL — we must skip them for Stash.
+ */
+export function nonFulfillableLineItemIdSetFromOrderNode(o: unknown): Set<string> {
+  const out = new Set<string>();
+  const edges = (o as { nonFulfillableLineItems?: { edges?: { node?: { id?: string } }[] } })?.nonFulfillableLineItems?.edges;
+  if (!Array.isArray(edges)) return out;
+  for (const e of edges) {
+    const id = e?.node?.id;
+    if (typeof id === 'string' && id.length > 0) out.add(id);
+  }
+  return out;
+}
+
+/** Map `order.lineItems` to persisted items, dropping anything in `nonFulfillableLineItems`. */
+export function mapLineItemsFromOrderNode(o: unknown): ShopifyOrder['items'] {
+  const skip = nonFulfillableLineItemIdSetFromOrderNode(o);
+  const edges = (o as { lineItems?: { edges?: { node?: unknown }[] } })?.lineItems?.edges || [];
+  return edges
+    .map((edge: { node?: unknown }) => {
+      const id = (edge?.node as { id?: string } | undefined)?.id;
+      if (id && skip.has(id)) return null;
+      return mapGraphQLLineItemNode(edge?.node);
+    })
+    .filter(Boolean) as ShopifyOrder['items'];
 }

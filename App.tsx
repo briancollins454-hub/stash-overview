@@ -49,6 +49,7 @@ const DecoDashboard = lazyRetry(() => import('./components/DecoDashboard'));
 import MultiSelectFilter from './components/MultiSelectFilter';
 const StockManager = lazyRetry(() => import('./components/StockManager'));
 const ShopifyInventory = lazyRetry(() => import('./components/ShopifyInventory'));
+const ShopifyTagBundles = lazyRetry(() => import('./components/ShopifyTagBundles'));
 const KanbanBoard = lazyRetry(() => import('./components/KanbanBoard'));
 const AutoMatchPanel = lazyRetry(() => import('./components/AutoMatchPanel'));
 const DuplicateDetector = lazyRetry(() => import('./components/DuplicateDetector'));
@@ -284,7 +285,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2689,7 +2690,7 @@ const App: React.FC = () => {
                 ))}
                 {/* Grouped dropdowns */}
                 {[
-                  { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
+                  { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                   { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                   { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
@@ -2785,7 +2786,7 @@ const App: React.FC = () => {
                     ))}
                     {/* Grouped sections */}
                     {[
-                      { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
+                      { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                       { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                       { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
@@ -3117,6 +3118,22 @@ const App: React.FC = () => {
                     shopifyDomain={apiSettings.shopifyDomain}
                     onManualLink={handleManualJobLink}
                     onNavigateToJob={(id) => { setSearchTerm(id); setActiveTab('deco'); }}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'tag-bundles' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Orders by tag">
+                  <ShopifyTagBundles
+                    orders={unifiedOrders}
+                    excludedTags={excludedTags}
+                    shopifyDomain={apiSettings.shopifyDomain}
+                    onNavigateToOrder={(num) => {
+                      setSearchTerm(num);
+                      setActiveTab('dashboard');
+                    }}
                   />
                 </ErrorBoundary>
               </Suspense>

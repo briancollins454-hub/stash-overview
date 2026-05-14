@@ -2,7 +2,7 @@ import { DecoJob, ShopifyOrder, DecoItem } from '../types';
 import { normalizeDecoCancelStatusString } from './decoJobFilters';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
-import { mapGraphQLLineItemNode } from './shopifyLineItems';
+import { mapLineItemsFromOrderNode } from './shopifyLineItems';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
 
@@ -440,7 +440,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     let pageCount = 0;
     
     const filterField = isDelta ? 'updated_at' : 'created_at';
-    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+    const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity nonFulfillableQuantity refundableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } nonFulfillableLineItems(first: 250) { edges { node { id } } } } } pageInfo { hasNextPage endCursor } } }`;
     
     while (hasNextPage && pageCount < 100) { 
         const pct = Math.min(99, Math.round((pageCount / Math.max(pageCount + 1, 10)) * 100));
@@ -461,8 +461,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (100%) — Complete`);
 
     return allRawOrders.map((o: any) => {
-        const edges = o.lineItems?.edges || [];
-        const mappedItems = edges.map((edge: any) => mapGraphQLLineItemNode(edge?.node)).filter(Boolean);
+        const mappedItems = mapLineItemsFromOrderNode(o);
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
         if (fStatus === 'partially_fulfilled') fStatus = 'partial';
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
@@ -503,7 +502,7 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
         let hasNextPage = true;
         let endCursor: string | null = null;
         let pageCount = 0;
-        const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } } } pageInfo { hasNextPage endCursor } } }`;
+        const query = `query getOrders($cursor: String, $query: String) { orders(first: 50, after: $cursor, query: $query, sortKey: UPDATED_AT, reverse: true) { edges { node { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity nonFulfillableQuantity refundableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } nonFulfillableLineItems(first: 250) { edges { node { id } } } } } pageInfo { hasNextPage endCursor } } }`;
         while (hasNextPage && pageCount < 100) {
             if (onProgress) onProgress(`Unfulfilled: ${allRawOrders.length} orders — Page ${pageCount + 1}...`);
             const variables = { cursor: endCursor, query: `(fulfillment_status:unshipped OR fulfillment_status:partial) status:open` };
@@ -520,8 +519,7 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
             pageCount++;
         }
         return allRawOrders.map((o: any) => {
-            const edges = o.lineItems?.edges || [];
-            const mappedItems = edges.map((edge: any) => mapGraphQLLineItemNode(edge?.node)).filter(Boolean);
+            const mappedItems = mapLineItemsFromOrderNode(o);
             let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
             if (fStatus === 'partially_fulfilled') fStatus = 'partial';
             const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
@@ -808,7 +806,7 @@ export const fetchBulkDecoJobs = async (
 export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: string): Promise<ShopifyOrder | null> => {
     if (!settings.useLiveData) return MOCK_SHOPIFY_ORDERS.find(o => o.id === orderId) || null;
     
-    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } } }`;
+    const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity nonFulfillableQuantity refundableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } nonFulfillableLineItems(first: 250) { edges { node { id } } } } }`;
     
     try {
         const res = await fetchServerRoute('/api/shopify', { query, variables: { id: orderId } });
@@ -816,8 +814,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
         const o = json.data?.order;
         if (!o) return null;
 
-        const edges = o.lineItems?.edges || [];
-        const mappedItems = edges.map((edge: any) => mapGraphQLLineItemNode(edge?.node)).filter(Boolean);
+        const mappedItems = mapLineItemsFromOrderNode(o);
 
         let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
         if (fStatus === 'partially_fulfilled') fStatus = 'partial';
