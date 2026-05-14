@@ -7,6 +7,12 @@ export interface SavedView {
   filters: {
     activeQuickFilter: string | null;
     showFulfilled: boolean;
+    /** When true, refunded orders appear in the default (non–7-day-fulfilled) list. */
+    showRefunded?: boolean;
+    /** Include orders that have a primary Deco job # linked. Default true. */
+    includeWithDecoJob?: boolean;
+    /** Include orders with no Deco job #. Default true. */
+    includeWithoutDecoJob?: boolean;
     includeMto: boolean;
     searchTerm: string;
     startDate: string;

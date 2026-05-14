@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import type { UnifiedOrder } from '../types';
-import { Tags, ChevronDown, ChevronRight, Search, ExternalLink, LayoutList } from 'lucide-react';
+import { Tags, ChevronDown, ChevronRight, Search, ExternalLink, LayoutList, CheckSquare, Square } from 'lucide-react';
 
 const UNTAGGED = 'Other (no visible tag)';
 
@@ -9,6 +9,13 @@ export interface ShopifyTagBundlesProps {
   excludedTags: string[];
   shopifyDomain?: string;
   onNavigateToOrder: (orderNumber: string) => void;
+  /** Same filters as the main dashboard — keeps one list definition. */
+  showRefunded: boolean;
+  setShowRefunded: (next: boolean) => void;
+  includeWithDecoJob: boolean;
+  setIncludeWithDecoJob: (next: boolean) => void;
+  includeWithoutDecoJob: boolean;
+  setIncludeWithoutDecoJob: (next: boolean) => void;
 }
 
 function orderAdminUrl(domain: string | undefined, orderGid: string): string | null {
@@ -34,11 +41,22 @@ function sortByDateDesc(a: UnifiedOrder, b: UnifiedOrder): number {
   return tb - ta;
 }
 
+function hasPrimaryDecoJob(o: UnifiedOrder): boolean {
+  const id = o.decoJobId;
+  return !!id && String(id).trim().length > 0;
+}
+
 const ShopifyTagBundles: React.FC<ShopifyTagBundlesProps> = ({
   orders,
   excludedTags,
   shopifyDomain,
   onNavigateToOrder,
+  showRefunded,
+  setShowRefunded,
+  includeWithDecoJob,
+  setIncludeWithDecoJob,
+  includeWithoutDecoJob,
+  setIncludeWithoutDecoJob,
 }) => {
   const excluded = useMemo(() => new Set(excludedTags.map(t => t.trim())), [excludedTags]);
   const [query, setQuery] = useState('');
@@ -62,6 +80,13 @@ const ShopifyTagBundles: React.FC<ShopifyTagBundlesProps> = ({
         return t >= cutoff;
       });
     }
+    if (!showRefunded) {
+      list = list.filter(o => (o.shopify.fulfillmentStatus || '').toLowerCase() !== 'refunded');
+    }
+    if (includeWithDecoJob !== includeWithoutDecoJob) {
+      if (includeWithDecoJob) list = list.filter(o => hasPrimaryDecoJob(o));
+      else list = list.filter(o => !hasPrimaryDecoJob(o));
+    }
     const q = query.trim().toLowerCase();
     if (!q) return list;
     return list.filter(o => {
@@ -70,7 +95,7 @@ const ShopifyTagBundles: React.FC<ShopifyTagBundlesProps> = ({
       const tags = o.shopify.tags.join(' ').toLowerCase();
       return num.includes(q) || name.includes(q) || tags.includes(q);
     });
-  }, [orders, cutoff, query]);
+  }, [orders, cutoff, query, showRefunded, includeWithDecoJob, includeWithoutDecoJob]);
 
   const bundles = useMemo(() => {
     const byTag = new Map<string, UnifiedOrder[]>();
@@ -149,14 +174,24 @@ const ShopifyTagBundles: React.FC<ShopifyTagBundlesProps> = ({
                   <td className="px-3 py-2">
                     <span
                       className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-black uppercase border ${
-                        o.shopify.fulfillmentStatus === 'fulfilled'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : o.shopify.fulfillmentStatus === 'partial'
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        o.shopify.fulfillmentStatus === 'refunded'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : o.shopify.fulfillmentStatus === 'fulfilled'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : o.shopify.fulfillmentStatus === 'partial'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : o.shopify.paymentStatus === 'paid'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-50 text-slate-600 border-slate-200'
                       }`}
                     >
-                      {o.shopify.fulfillmentStatus}
+                      {o.shopify.fulfillmentStatus === 'refunded'
+                        ? 'Refunded'
+                        : o.shopify.fulfillmentStatus === 'fulfilled'
+                          ? 'Fulfilled'
+                          : o.shopify.fulfillmentStatus === 'partial'
+                            ? 'Partial'
+                            : o.shopify.paymentStatus}
                     </span>
                   </td>
                   <td className="px-3 py-2 font-mono text-indigo-600">{o.decoJobId || '—'}</td>
@@ -223,6 +258,41 @@ const ShopifyTagBundles: React.FC<ShopifyTagBundlesProps> = ({
             <option value="90">Last 90 days</option>
             <option value="365">Last 12 months</option>
           </select>
+          <div className="hidden sm:block w-px h-6 bg-gray-200 shrink-0" aria-hidden />
+          <button
+            type="button"
+            title={showRefunded ? 'Refunded orders are listed (in Done when closed)' : 'Refunded orders are hidden'}
+            onClick={() => setShowRefunded(!showRefunded)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all ${
+              showRefunded ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            {showRefunded ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+            Refunds
+          </button>
+          <button
+            type="button"
+            title="Include orders with a linked Deco job #"
+            onClick={() => setIncludeWithDecoJob(!includeWithDecoJob)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all ${
+              includeWithDecoJob ? 'bg-teal-50 text-teal-800 border-teal-200' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            {includeWithDecoJob ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+            Has Deco #
+          </button>
+          <button
+            type="button"
+            title="Include orders with no Deco job #"
+            onClick={() => setIncludeWithoutDecoJob(!includeWithoutDecoJob)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all ${
+              includeWithoutDecoJob ? 'bg-slate-50 text-slate-700 border-slate-200' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            {includeWithoutDecoJob ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+            No Deco #
+          </button>
+          <div className="hidden sm:block w-px h-6 bg-gray-200 shrink-0" aria-hidden />
           <button
             type="button"
             onClick={expandAll}

@@ -372,6 +372,11 @@ const App: React.FC = () => {
   const [groupingMode, setGroupingMode] = useState<'club' | 'vendor'>('club');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [showFulfilled, setShowFulfilled] = useState(false);
+  /** Refunded orders hidden from default list unless this is on (independent of quick filters). */
+  const [showRefunded, setShowRefunded] = useState(false);
+  /** Filter by whether a primary Deco job # exists — both true = no extra filter; both false = no extra filter. */
+  const [includeWithDecoJob, setIncludeWithDecoJob] = useState(true);
+  const [includeWithoutDecoJob, setIncludeWithoutDecoJob] = useState(true);
   const [includeMto, setIncludeMto] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearch = useDebounce(searchTerm, 300);
@@ -1099,9 +1104,10 @@ const App: React.FC = () => {
     if (filters.selectedGroups) setSelectedGroups(new Set(filters.selectedGroups));
     if (filters.groupingMode) setGroupingMode(filters.groupingMode);
     if (filters.partialThreshold !== undefined) setPartialThreshold(filters.partialThreshold);
+    if (filters.showRefunded !== undefined) setShowRefunded(filters.showRefunded);
+    if (filters.includeWithDecoJob !== undefined) setIncludeWithDecoJob(filters.includeWithDecoJob);
+    if (filters.includeWithoutDecoJob !== undefined) setIncludeWithoutDecoJob(filters.includeWithoutDecoJob);
   };
-
-  // Keep a ref to the latest auto-refresh callback so setInterval/visibility
   // handlers never call a stale closure (which would merge against old state
   // and wipe orders — the "103 → 3" bug).
   autoRefreshRef.current = () => {
@@ -2439,7 +2445,12 @@ const App: React.FC = () => {
   const stats = useMemo(() => {
       let baseSet = unifiedOrders;
       if (!includeMto) baseSet = baseSet.filter(o => !o.isMto || o.hasStockItems);
-      const active = baseSet.filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
+      const active = baseSet.filter(o => {
+          const s = (o.shopify.fulfillmentStatus || '').toLowerCase();
+          if (s === 'fulfilled') return false;
+          if (s === 'refunded' && !showRefunded) return false;
+          return true;
+      });
       const fulfilled7d = baseSet.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
       return {
           notOnDeco: active.filter(o => !o.decoJobId).length,
@@ -2465,7 +2476,7 @@ const App: React.FC = () => {
               && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000)
           ).length
       };
-  }, [unifiedOrders, includeMto, partialThreshold]);
+  }, [unifiedOrders, includeMto, partialThreshold, showRefunded]);
 
   const baseFilteredOrders = useMemo(() => {
       let filtered = [...unifiedOrders];
@@ -2483,7 +2494,12 @@ const App: React.FC = () => {
       if (!hasSearch) {
           if (showFulfilled) filtered = filtered.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
           else {
-              filtered = filtered.filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
+              filtered = filtered.filter(o => {
+                  const s = (o.shopify.fulfillmentStatus || '').toLowerCase();
+                  if (s === 'fulfilled') return false;
+                  if (s === 'refunded' && !showRefunded) return false;
+                  return true;
+              });
               if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
               else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
               else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
@@ -2504,12 +2520,20 @@ const App: React.FC = () => {
               filtered = filtered.filter(o => { const d = new Date(o.shopify.date); return d >= s && d <= e; });
           }
       }
+      const hasPrimaryDeco = (o: (typeof unifiedOrders)[number]) => {
+          const id = o.decoJobId;
+          return !!id && String(id).trim().length > 0;
+      };
+      if (includeWithDecoJob !== includeWithoutDecoJob) {
+          if (includeWithDecoJob) filtered = filtered.filter(o => hasPrimaryDeco(o));
+          else filtered = filtered.filter(o => !hasPrimaryDeco(o));
+      }
       if (hasSearch) { 
           const lower = debouncedSearch.toLowerCase(); 
           filtered = filtered.filter(o => o.shopify.orderNumber.includes(lower) || o.shopify.customerName.toLowerCase().includes(lower) || (o.decoJobId && o.decoJobId.includes(lower))); 
       }
       return filtered;
-  }, [unifiedOrders, debouncedSearch, showFulfilled, includeMto, activeQuickFilter, startDate, endDate, partialThreshold, excludedTags]);
+  }, [unifiedOrders, debouncedSearch, showFulfilled, showRefunded, includeWithDecoJob, includeWithoutDecoJob, includeMto, activeQuickFilter, startDate, endDate, partialThreshold, excludedTags]);
 
   const tableOrders = useMemo(() => {
       let filtered = [...baseFilteredOrders];
@@ -2844,6 +2868,9 @@ const App: React.FC = () => {
 
                     <button onClick={() => setIncludeMto(!includeMto)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${includeMto ? 'bg-purple-50 text-purple-700 border-purple-200 shadow-inner' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'}`}>{includeMto ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />} MTO Inclusion</button>
                     <button onClick={() => setShowFulfilled(!showFulfilled)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${showFulfilled ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-inner' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'}`}>{showFulfilled ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />} Show Fulfilled</button>
+                    <button type="button" onClick={() => setShowRefunded(!showRefunded)} title={showRefunded ? 'Refunded orders are visible in the list' : 'Refunded orders are hidden from the list'} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${showRefunded ? 'bg-rose-50 text-rose-700 border-rose-200 shadow-inner' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'}`}>{showRefunded ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />} Refunds</button>
+                    <button type="button" onClick={() => setIncludeWithDecoJob(!includeWithDecoJob)} title="Include orders with a linked Deco job number" className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${includeWithDecoJob ? 'bg-teal-50 text-teal-800 border-teal-200 shadow-inner' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'}`}>{includeWithDecoJob ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />} Has Deco #</button>
+                    <button type="button" onClick={() => setIncludeWithoutDecoJob(!includeWithoutDecoJob)} title="Include orders with no Deco job number" className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all ${includeWithoutDecoJob ? 'bg-slate-50 text-slate-700 border-slate-200 shadow-inner' : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'}`}>{includeWithoutDecoJob ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />} No Deco #</button>
                     <button 
                         onClick={() => {
                             setGroupingMode(prev => prev === 'club' ? 'vendor' : 'club');
@@ -2885,6 +2912,9 @@ const App: React.FC = () => {
                     currentFilters={{
                       activeQuickFilter,
                       showFulfilled,
+                      showRefunded,
+                      includeWithDecoJob,
+                      includeWithoutDecoJob,
                       includeMto,
                       searchTerm,
                       startDate,
@@ -3136,6 +3166,12 @@ const App: React.FC = () => {
                       setSearchTerm(num);
                       setActiveTab('dashboard');
                     }}
+                    showRefunded={showRefunded}
+                    setShowRefunded={setShowRefunded}
+                    includeWithDecoJob={includeWithDecoJob}
+                    setIncludeWithDecoJob={setIncludeWithDecoJob}
+                    includeWithoutDecoJob={includeWithoutDecoJob}
+                    setIncludeWithoutDecoJob={setIncludeWithoutDecoJob}
                   />
                 </ErrorBoundary>
               </Suspense>
