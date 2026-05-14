@@ -461,7 +461,7 @@ const DecoDashboard: React.FC<DecoDashboardProps> = ({
                                             {allJobs.length === 0 && <span className="text-gray-400 italic text-[10px]">N/A</span>}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4"><div className="flex flex-col items-start"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border ${order.shopify.fulfillmentStatus === 'fulfilled' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>{order.shopify.fulfillmentStatus}</span><span className="text-[10px] text-indigo-600 font-bold mt-1 uppercase tracking-widest">{order.completionPercentage}% Ready</span></div></td>
+                                    <td className="px-6 py-4"><div className="flex flex-col items-start"><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border ${order.shopify.fulfillmentStatus === 'fulfilled' ? 'bg-green-100 text-green-700 border-green-200' : order.shopify.fulfillmentStatus === 'refunded' ? 'bg-violet-100 text-violet-800 border-violet-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>{order.shopify.fulfillmentStatus}</span><span className="text-[10px] text-indigo-600 font-bold mt-1 uppercase tracking-widest">{order.completionPercentage}% Ready</span></div></td>
                                 </tr>
                             )})}</tbody></table></div>
                         </div>

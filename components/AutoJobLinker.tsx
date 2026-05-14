@@ -3,6 +3,7 @@ import { UnifiedOrder, DecoJob, ShopifyOrder } from '../types';
 import { Link2, Zap, CheckCircle2, XCircle, Search, ChevronDown, Loader2, AlertTriangle } from 'lucide-react';
 import { fetchSingleDecoJob } from '../services/apiService';
 import { ApiSettings } from './SettingsModal';
+import { isShopifyOrderClosedForCloud } from '../services/shopifyOrderStatus';
 
 interface Props {
   orders: UnifiedOrder[];
@@ -50,8 +51,7 @@ const AutoJobLinker: React.FC<Props> = ({ orders, decoJobs, settings, itemJobLin
 
     const unlinkedOrders = orders.filter(o =>
       o.matchStatus === 'unlinked' &&
-      o.shopify.fulfillmentStatus !== 'fulfilled' &&
-      o.shopify.fulfillmentStatus !== 'restocked'
+      !isShopifyOrderClosedForCloud(o.shopify.fulfillmentStatus)
     );
 
     unlinkedOrders.forEach(o => {

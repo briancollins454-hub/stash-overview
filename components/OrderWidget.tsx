@@ -70,7 +70,7 @@ const OrderWidget: React.FC<OrderWidgetProps> = ({
                     <div className="flex items-center gap-2">
                         <span className="text-lg font-black tracking-tighter">ORDER #{order.shopify.orderNumber}</span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border ${
-                            order.shopify.fulfillmentStatus === 'fulfilled' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                            order.shopify.fulfillmentStatus === 'fulfilled' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : order.shopify.fulfillmentStatus === 'refunded' ? 'bg-violet-50 text-violet-800 border-violet-200' : 'bg-blue-50 text-blue-700 border-blue-100'
                         }`}>
                             {order.shopify.fulfillmentStatus}
                         </span>

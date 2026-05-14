@@ -40,6 +40,7 @@ import {
   getAuditEvents,
   subscribeAuditEvents,
 } from '../services/syncAuditService';
+import { isShopifyOrderClosedForCloud } from '../services/shopifyOrderStatus';
 
 interface Props {
   /** Counts passed from App state so we don't reload huge blobs from IDB. */
@@ -89,9 +90,9 @@ const TABLES: TableDef[] = [
     // Compare like-for-like by filtering the local side the same way.
     cloudScope: (o: any) => {
       const s = o?.fulfillmentStatus;
-      return s !== 'fulfilled' && s !== 'restocked';
+      return !isShopifyOrderClosedForCloud(s);
     },
-    cloudScopeNote: 'Cloud intentionally excludes fulfilled & restocked orders',
+    cloudScopeNote: 'Cloud intentionally excludes fulfilled, restocked & refunded orders',
   },
   {
     table: 'stash_deco_jobs',

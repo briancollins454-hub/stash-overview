@@ -3,6 +3,7 @@ import { normalizeDecoCancelStatusString } from './decoJobFilters';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
 import { mapLineItemsFromOrderNode } from './shopifyLineItems';
+import { mapShopifyFulfillmentStatusForStash } from './shopifyOrderStatus';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
 
@@ -462,8 +463,7 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
 
     return allRawOrders.map((o: any) => {
         const mappedItems = mapLineItemsFromOrderNode(o);
-        let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
-        if (fStatus === 'partially_fulfilled') fStatus = 'partial';
+        const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
@@ -520,8 +520,7 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
         }
         return allRawOrders.map((o: any) => {
             const mappedItems = mapLineItemsFromOrderNode(o);
-            let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
-            if (fStatus === 'partially_fulfilled') fStatus = 'partial';
+            const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
             const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
             const sa = o.shippingAddress;
             const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
@@ -816,8 +815,7 @@ export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: st
 
         const mappedItems = mapLineItemsFromOrderNode(o);
 
-        let fStatus = o.displayFulfillmentStatus ? o.displayFulfillmentStatus.toLowerCase() : 'unfulfilled';
-        if (fStatus === 'partially_fulfilled') fStatus = 'partial';
+        const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;

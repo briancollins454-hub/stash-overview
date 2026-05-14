@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UnifiedOrder } from '../types';
 import { Printer, Package, ChevronDown, ChevronRight, Filter, CheckSquare, Square } from 'lucide-react';
 import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
+import { isHiddenFromDefaultDashboard } from '../services/shopifyOrderStatus';
 
 interface Props {
   orders: UnifiedOrder[];
@@ -46,7 +47,7 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
 
   const lines = useMemo<PrintLine[]>(() => {
     return orders
-      .filter(o => o.shopify.fulfillmentStatus !== 'fulfilled')
+      .filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus))
       .flatMap(o =>
         o.shopify.items
           .filter(i => isShopifyLineItemActiveForOps(i))

@@ -25,7 +25,7 @@ function validTagsForOrder(o: UnifiedOrder, excluded: Set<string>): string[] {
 
 function isFulfilledBucket(o: UnifiedOrder): boolean {
   const s = o.shopify.fulfillmentStatus;
-  return s === 'fulfilled' || s === 'restocked';
+  return s === 'fulfilled' || s === 'restocked' || s === 'refunded';
 }
 
 function sortByDateDesc(a: UnifiedOrder, b: UnifiedOrder): number {

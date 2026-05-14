@@ -10,6 +10,7 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
 import { isShopifyLineItemActiveForOps } from './services/shopifyLineItems';
+import { isShopifyOrderClosedForCloud, isHiddenFromDefaultDashboard, reconcileShopifyOrderFinancialFulfillment } from './services/shopifyOrderStatus';
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
@@ -649,10 +650,10 @@ const App: React.FC = () => {
                 // so cloud's copy is permanently stuck on the pre-fulfillment state).
                 // Also skip if local updatedAt is newer — local data is authoritative.
                 (cloudData.orders || []).forEach((o: ShopifyOrder) => {
-                  if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                  if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
                   const existing = orderMap.get(o.id);
                   if (existing) {
-                    if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                    if (isShopifyOrderClosedForCloud(existing.fulfillmentStatus)) return;
                     const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                     const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
                     if (localMs && cloudMs && localMs >= cloudMs) return;
@@ -695,7 +696,7 @@ const App: React.FC = () => {
                 // it sits in cache insertion order.
                 const allStale: ShopifyOrder[] = [];
                 for (const o of orderMap.values()) {
-                    const isLocallyOpen = o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked';
+                    const isLocallyOpen = !isShopifyOrderClosedForCloud(o.fulfillmentStatus);
                     if (!isLocallyOpen) continue;
                     if (currentUnfulfilledIds.has(o.id)) continue;
                     const updatedMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
@@ -852,10 +853,7 @@ const App: React.FC = () => {
             // Track API-fresh deco jobs — only these get pushed to cloud
             const apiFreshJobs = [...dRecentJobs, ...decoStaleRefreshed];
 
-            const unfulfilledShopifyOrders = mergedOrders.filter(o => 
-                o.fulfillmentStatus !== 'fulfilled' && 
-                o.fulfillmentStatus !== 'restocked'
-            );
+            const unfulfilledShopifyOrders = mergedOrders.filter(o => !isShopifyOrderClosedForCloud(o.fulfillmentStatus));
 
             const linkedJobIdsToSync = new Set<string>();
             const currentLinks: Record<string, string> = itemJobLinks;
@@ -897,9 +895,9 @@ const App: React.FC = () => {
                 // Also pass the IDs of orders that are now fulfilled/restocked locally
                 // so saveCloudOrders can prune any stale copies still sitting in cloud
                 // marked as unfulfilled (accumulated drift — fixes CloudHealth delta).
-                const cloudOrders = mergedOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked');
+                const cloudOrders = mergedOrders.filter(o => !isShopifyOrderClosedForCloud(o.fulfillmentStatus));
                 const staleIds = mergedOrders
-                    .filter(o => o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked')
+                    .filter(o => isShopifyOrderClosedForCloud(o.fulfillmentStatus))
                     .map(o => o.id);
                 saveCloudOrders(apiSettings, cloudOrders, staleIds).catch(console.error);
             }
@@ -1268,10 +1266,10 @@ const App: React.FC = () => {
                               // permanently out-of-date). Also skip if our local updatedAt is
                               // newer than cloud's — local reconciliation is authoritative.
                               cloudData.orders.forEach(o => {
-                                if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                                if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
                                 const existing = orderMap.get(o.id);
                                 if (existing) {
-                                  if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                                  if (isShopifyOrderClosedForCloud(existing.fulfillmentStatus)) return;
                                   const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                                   const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
                                   if (localMs && cloudMs && localMs >= cloudMs) return;
@@ -1352,10 +1350,10 @@ const App: React.FC = () => {
                               // saveCloudOrders excludes fulfilled records. Also skip when our
                               // local copy is newer than cloud's (updatedAt comparison).
                               cloudData.orders.forEach(o => {
-                                if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                                if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
                                 const existing = orderMap.get(o.id);
                                 if (existing) {
-                                  if (existing.fulfillmentStatus === 'fulfilled' || existing.fulfillmentStatus === 'restocked') return;
+                                  if (isShopifyOrderClosedForCloud(existing.fulfillmentStatus)) return;
                                   const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
                                   const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
                                   if (localMs && cloudMs && localMs >= cloudMs) return;
@@ -1443,9 +1441,9 @@ const App: React.FC = () => {
             // bootstrap mid-flight sync data that isn't user-authored).
             const hasLocalOrders = initialOrders.length > 0;
             if (hasLocalOrders) {
-                const activeOrders = initialOrders.filter(o => o.fulfillmentStatus !== 'fulfilled' && o.fulfillmentStatus !== 'restocked');
+                const activeOrders = initialOrders.filter(o => !isShopifyOrderClosedForCloud(o.fulfillmentStatus));
                 const staleIds = initialOrders
-                    .filter(o => o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked')
+                    .filter(o => isShopifyOrderClosedForCloud(o.fulfillmentStatus))
                     .map(o => o.id);
                 saveCloudOrders(apiSettings, activeOrders, staleIds).catch(e => console.warn('Order cache push failed:', e));
             }
@@ -1505,7 +1503,7 @@ const App: React.FC = () => {
                     initialOrders.forEach(o => orderMap.set(o.id, o));
                     cloudData.orders.forEach(o => {
                         // Skip fulfilled/restocked orders from cloud to prevent count inflation
-                        if (o.fulfillmentStatus === 'fulfilled' || o.fulfillmentStatus === 'restocked') return;
+                        if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
                         const existing = orderMap.get(o.id);
                         if (!existing) {
                             orderMap.set(o.id, o);
@@ -1698,7 +1696,8 @@ const App: React.FC = () => {
       const currentLinks: Record<string, string> = itemJobLinks;
       const currentMatches: Record<string, string> = confirmedMatches;
       
-      return rawShopifyOrders.map((order: ShopifyOrder): UnifiedOrder => {
+      return rawShopifyOrders.map((rawOrder: ShopifyOrder): UnifiedOrder => {
+          const order = reconcileShopifyOrderFinancialFulfillment(rawOrder);
           const orderIdKey = String(order.id);
           const timelineJobId = (order.timelineComments || []).join(' ').match(/(?:^|[^0-9])(2\d{5})(?![0-9])/)?.[1];
           const mainJobId = currentLinks[orderIdKey] || timelineJobId;
@@ -1787,6 +1786,8 @@ const App: React.FC = () => {
               currentStatus = decoJob.status;
           } else if (resolvedDecoJobId) {
               currentStatus = 'Awaiting Deco Detail...'; 
+          } else if (order.fulfillmentStatus === 'refunded') {
+              currentStatus = 'Refunded';
           } else if (order.fulfillmentStatus === 'fulfilled') {
               currentStatus = 'Shipped';
           } else if (20 - sla.daysRemaining < 5) {
@@ -1795,8 +1796,9 @@ const App: React.FC = () => {
 
           // Segregate fully produced Deco jobs out of the live queue, treating them as effectively fulfilled.
           const hasShippingTracking = shipStationData.has(order.orderNumber);
-          const isPhysicallyShipped = currentStatus === 'Shipped' || currentStatus === 'Invoiced' || (currentStatus === 'Completed' && hasShippingTracking);
-          const effectiveFulfillmentStatus = isPhysicallyShipped ? 'fulfilled' : order.fulfillmentStatus;
+          const isRefunded = order.fulfillmentStatus === 'refunded';
+          const isPhysicallyShipped = !isRefunded && (currentStatus === 'Shipped' || currentStatus === 'Invoiced' || (currentStatus === 'Completed' && hasShippingTracking));
+          const effectiveFulfillmentStatus = isRefunded ? 'refunded' : isPhysicallyShipped ? 'fulfilled' : order.fulfillmentStatus;
           const effectiveClosedAt = isPhysicallyShipped && !order.closedAt ? (decoJob?.productionDueDate || order.date) : order.closedAt;
 
           return {
@@ -1851,7 +1853,7 @@ const App: React.FC = () => {
     if (unifiedOrders.length === 0) return;
     console.log(`[EAN Auto-Map] eanIndex size: ${eanIndex.size}, orders: ${unifiedOrders.length}`);
     // Debug: log sample items with EAN/SKU data
-    const linkedOrders = unifiedOrders.filter(o => o.deco && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const linkedOrders = unifiedOrders.filter(o => o.deco && !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
     if (linkedOrders.length > 0) {
       const sample = linkedOrders.slice(0, 3);
       for (const o of sample) {
@@ -2047,7 +2049,7 @@ const App: React.FC = () => {
     
     // 1. Identify active orders that have links
     const activeLinkedOrders = unifiedOrders.filter(o => 
-        o.shopify.fulfillmentStatus !== 'fulfilled' && 
+        !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus) && 
         (o.decoJobId || o.shopify.items.some(i => i.itemDecoJobId))
     );
 
@@ -2303,7 +2305,7 @@ const App: React.FC = () => {
   // Auto-link "Not On Deco" orders by matching customer names against cached Deco jobs + API search
   const handleAutoLinkNotOnDeco = async () => {
     if (isScanning) return;
-    const notOnDeco = unifiedOrders.filter(o => !o.decoJobId && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const notOnDeco = unifiedOrders.filter(o => !o.decoJobId && !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
     if (notOnDeco.length === 0) return;
 
     setIsScanning(true); setScanProgress(0); setScanLog([]); setShowScanConsole(true); stopScanRef.current = false;
@@ -2437,7 +2439,7 @@ const App: React.FC = () => {
   const stats = useMemo(() => {
       let baseSet = unifiedOrders;
       if (!includeMto) baseSet = baseSet.filter(o => !o.isMto || o.hasStockItems);
-      const active = baseSet.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
+      const active = baseSet.filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
       const fulfilled7d = baseSet.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
       return {
           notOnDeco: active.filter(o => !o.decoJobId).length,
@@ -2481,7 +2483,7 @@ const App: React.FC = () => {
       if (!hasSearch) {
           if (showFulfilled) filtered = filtered.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
           else {
-              filtered = filtered.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled');
+              filtered = filtered.filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus));
               if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
               else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
               else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
@@ -3114,7 +3116,7 @@ const App: React.FC = () => {
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <ErrorBoundary fallbackTitle="Kanban Error">
                   <KanbanBoard
-                    orders={unifiedOrders.filter(o => o.shopify.fulfillmentStatus !== 'fulfilled')}
+                    orders={unifiedOrders.filter(o => !isHiddenFromDefaultDashboard(o.shopify.fulfillmentStatus))}
                     shopifyDomain={apiSettings.shopifyDomain}
                     onManualLink={handleManualJobLink}
                     onNavigateToJob={(id) => { setSearchTerm(id); setActiveTab('deco'); }}

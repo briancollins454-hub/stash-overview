@@ -175,7 +175,7 @@ export const saveCloudOrders = async (
         try {
             // 1. Delete anything in the cloud that's marked fulfilled/restocked.
             try {
-                await fetchWithProxy(`stash_orders?order_data->>fulfillmentStatus=in.(fulfilled,restocked)`, 'DELETE');
+                await fetchWithProxy(`stash_orders?order_data->>fulfillmentStatus=in.(fulfilled,restocked,refunded)`, 'DELETE');
             } catch (cleanupErr) {
                 console.warn('Cloud order cleanup failed (non-fatal):', cleanupErr);
             }

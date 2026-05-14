@@ -44,7 +44,7 @@ export interface ShopifyOrder {
   totalPrice: string;
   paymentStatus: 'paid' | 'pending' | 'refunded';
   // Fix: Added 'restocked' to the fulfillmentStatus union to match line-item possibilities and fix App.tsx logic
-  fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial' | 'restocked';
+  fulfillmentStatus: 'fulfilled' | 'unfulfilled' | 'partial' | 'restocked' | 'refunded';
   shippingAddress?: {
     name: string;
     address1: string;

@@ -12,6 +12,7 @@ import {
 } from '../services/shipstationService';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
 import { ApiSettings } from './SettingsModal';
+import { isShopifyOrderClosedForCloud } from '../services/shopifyOrderStatus';
 
 interface Props {
   orders: UnifiedOrder[];
@@ -94,7 +95,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   // Ready orders
   const readyOrders = useMemo(() => {
     let filtered = orders.filter(o => {
-      if (o.shopify.fulfillmentStatus === 'fulfilled' || o.shopify.fulfillmentStatus === 'restocked') return false;
+      if (isShopifyOrderClosedForCloud(o.shopify.fulfillmentStatus)) return false;
       if (filter === 'ready') {
         return o.isStockDispatchReady || o.completionPercentage >= 100;
       }
@@ -243,7 +244,7 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
 
   // Batch Print + Ship: print packing slips, create labels for all selected, auto-fulfill via ShipStation
   const handleBatchShip = useCallback(async () => {
-    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled');
+    const selected = readyOrders.filter(o => selectedIds.has(o.shopify.id) && !isShopifyOrderClosedForCloud(o.shopify.fulfillmentStatus));
     if (selected.length === 0) return;
 
     setShowBatchConfirm(false);
@@ -459,11 +460,11 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
             <div>
               <p className="text-[11px] font-black text-amber-300 mb-1">Confirm Batch Ship</p>
               <p className="text-[10px] text-amber-200/80 font-bold leading-relaxed">
-                This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled').length} orders using the default carrier/service from ShipStation.
+                This will print packing slips and create shipping labels for {readyOrders.filter(o => selectedIds.has(o.shopify.id) && !isShopifyOrderClosedForCloud(o.shopify.fulfillmentStatus)).length} orders using the default carrier/service from ShipStation.
                 Each label will charge your ShipStation account and auto-fulfil the order on Shopify.
               </p>
               {(() => {
-                const addrIssueCount = readyOrders.filter(o => selectedIds.has(o.shopify.id) && o.shopify.fulfillmentStatus !== 'fulfilled' && getAddressWarnings(o).some(w => w !== 'No phone number')).length;
+                const addrIssueCount = readyOrders.filter(o => selectedIds.has(o.shopify.id) && !isShopifyOrderClosedForCloud(o.shopify.fulfillmentStatus) && getAddressWarnings(o).some(w => w !== 'No phone number')).length;
                 return addrIssueCount > 0 ? (
                   <p className="text-[10px] text-red-400 font-bold mt-1 flex items-center gap-1">
                     <AlertCircle className="w-3.5 h-3.5" /> {addrIssueCount} order{addrIssueCount !== 1 ? 's have' : ' has'} address issues and will be skipped

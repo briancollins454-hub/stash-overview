@@ -1,5 +1,6 @@
 import { UnifiedOrder, DecoItem } from '../types';
 import { isShopifyLineItemActiveForOps } from './shopifyLineItems';
+import { isShopifyOrderClosedForCloud } from './shopifyOrderStatus';
 
 export interface AutoMatchResult {
   orderNumber: string;
@@ -102,7 +103,7 @@ export function autoMatch(
 
   for (const order of orders) {
     // Only process unfulfilled orders that have a linked deco job
-    if (order.shopify.fulfillmentStatus === 'fulfilled') continue;
+    if (isShopifyOrderClosedForCloud(order.shopify.fulfillmentStatus)) continue;
     if (!order.decoJobId || !order.deco) continue;
 
     for (const item of order.shopify.items) {

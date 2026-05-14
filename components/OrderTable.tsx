@@ -3,6 +3,7 @@ import { UnifiedOrder, DecoJob } from '../types';
 import { ApiSettings } from './SettingsModal';
 import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
 import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
+import { isHiddenFromDefaultDashboard } from '../services/shopifyOrderStatus';
 import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
 import { 
     AlertCircle, Truck, Clock, AlertTriangle, Package, CheckCircle2, 
@@ -547,6 +548,8 @@ const OrderTable: React.FC<OrderTableProps> = ({
   const getShopifyStatusBadge = (status: string) => {
       switch (status) {
           case 'fulfilled': return 'bg-emerald-50 border-emerald-200 text-emerald-700';
+          case 'refunded': return 'bg-violet-50 border-violet-200 text-violet-800';
+          case 'restocked': return 'bg-slate-50 border-slate-300 text-slate-700';
           case 'partial':
           case 'partially_fulfilled': return 'bg-orange-50 border-orange-200 text-orange-700';
           case 'unfulfilled':
@@ -1234,7 +1237,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                     </div>
                                                 </div>
                                                 <div className="mt-4">
-                                                    {order.shopify.fulfillmentStatus !== 'fulfilled' && (
+                                                    {!isHiddenFromDefaultDashboard(order.shopify.fulfillmentStatus) && (
                                                         <button onClick={(e) => handleOpenMapper(order, e)} className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-bold text-[10px] hover:bg-indigo-100 uppercase tracking-widest"><RefreshCw className="w-3 h-3" /> Map Items</button>
                                                     )}
                                                 </div>
@@ -1252,7 +1255,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                             <Printer className="w-3 h-3" /> Print Order Sheet
                                         </button>
 
-                                        {order.isMto && order.shopify.fulfillmentStatus !== 'fulfilled' && (
+                                        {order.isMto && !isHiddenFromDefaultDashboard(order.shopify.fulfillmentStatus) && (
                                             <div className="bg-purple-50 p-4 rounded-lg border border-purple-100 text-sm shadow-sm font-bold uppercase tracking-widest">
                                                 <div className="flex items-center gap-2 text-purple-800 mb-2">
                                                     <Scissors className="w-5 h-5" />
