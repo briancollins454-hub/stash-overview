@@ -667,6 +667,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       } catch { /* non-fatal */ }
 
       let fromCloud: Record<string, PriorityLineNote> = {};
+      let cloudFetchOk = false;
       if (isSupabaseReady()) {
         try {
           const res = await supabaseFetch(
@@ -676,6 +677,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           const rows = await res.json();
           if (cancelled) return;
           fromCloud = cloudRowsToNotesByJob(rows);
+          cloudFetchOk = true;
           if (!cancelled) setNotesCloudError(null);
         } catch {
           if (!cancelled) {
@@ -690,6 +692,19 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       const merged = mergePriorityNotesByUpdatedAt(fromIdb, fromCloud);
       setNotesByJobNumber(merged);
       setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
+
+      // While the Supabase table was missing, notes only lived in this browser’s
+      // IndexedDB — nothing to merge from cloud. After the table exists, queue a
+      // one-time upload so teammates get those rows without re-typing.
+      if (cloudFetchOk && !cancelled) {
+        const needsPush = Object.entries(merged).some(([k, v]) => {
+          if ((v.text || '').trim() === '' && !v.excludeFromPdf) return false;
+          const c = fromCloud[k];
+          if (!c) return true;
+          return (Date.parse(v.updatedAt || '') || 0) > (Date.parse(c.updatedAt || '') || 0);
+        });
+        if (needsPush) setNotesDirty(true);
+      }
     };
 
     void pull();
