@@ -42,6 +42,18 @@ export function formatCameraError(err: unknown): CameraAccessResult {
     || err.name === 'DevicesNotFoundError'
   );
   const overconstrained = err instanceof DOMException && err.name === 'OverconstrainedError';
+  const transitionConflict = /already under transition|transition to a new state/i.test(
+    err instanceof Error ? err.message : String(err),
+  );
+
+  if (transitionConflict) {
+    return {
+      ok: false,
+      denied: false,
+      message: 'Camera is still starting or stopping.',
+      hint: 'Wait two seconds, tap Close, then Enable camera again.',
+    };
+  }
 
   if (denied) {
     return {

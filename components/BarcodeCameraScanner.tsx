@@ -14,40 +14,79 @@ import { releaseAllCameraStreams } from '../utils/cameraRelease';
 
 const SCAN_COOLDOWN_MS = 900;
 const SCAN_COOLDOWN_HANDLED_MS = 2800;
+const STOP_SETTLE_MS = 400;
 
 type Phase = 'idle' | 'starting' | 'live' | 'error';
 
+type Html5QrcodeInstance = {
+  start: (
+    camera: string | MediaTrackConstraints,
+    config: object,
+    onSuccess: (text: string) => void,
+    onError: () => void,
+  ) => Promise<null>;
+  stop: () => Promise<void>;
+  clear: () => Promise<void>;
+  pause: (shouldPauseVideo?: boolean) => void;
+  resume: () => void;
+  getState: () => number;
+};
+
 interface Props {
   active: boolean;
-  /** When true, decoding is paused (e.g. unknown-barcode form open). */
   paused?: boolean;
-  /** Return true if the scan was consumed (counted or unknown form shown). */
   onScan: (code: string) => boolean | void;
   onError?: (message: string) => void;
-  /** Fired after the camera stream is fully stopped (Close button or parent sets active=false). */
   onClose?: () => void;
 }
 
+const STATE_NOT_STARTED = 1;
+const STATE_SCANNING = 2;
+const STATE_PAUSED = 3;
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function isTransitionError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /already under transition|transition to a new state/i.test(msg);
+}
+
+async function safeScannerStop(scanner: Html5QrcodeInstance | null): Promise<void> {
+  if (!scanner) return;
+  try {
+    const state = scanner.getState?.();
+    if (state === STATE_NOT_STARTED) {
+      try {
+        await scanner.clear();
+      } catch { /* */ }
+      return;
+    }
+    await scanner.stop();
+    await scanner.clear();
+  } catch (e) {
+    if (!isTransitionError(e)) return;
+    await delay(STOP_SETTLE_MS);
+    try {
+      await scanner.stop();
+      await scanner.clear();
+    } catch { /* */ }
+  }
+}
+
 async function startScannerWithFallback(
-  scanner: {
-    start: (
-      camera: string | MediaTrackConstraints,
-      config: object,
-      onSuccess: (text: string) => void,
-      onError: () => void,
-    ) => Promise<null>;
-    stop: () => Promise<void>;
-    clear: () => Promise<void>;
-  },
+  scanner: Html5QrcodeInstance,
   elementId: string,
   Html5QrcodeSupportedFormats: typeof import('html5-qrcode').Html5QrcodeSupportedFormats,
   onDecoded: (text: string) => void,
 ): Promise<void> {
+  await safeScannerStop(scanner);
+
   const scanConfig = {
     fps: 15,
     disableFlip: false,
     useBarCodeDetectorIfSupported: true,
-    /** Scan almost the full frame — small qrbox forces you to hold the phone very close. */
     qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
       width: Math.floor(viewfinderWidth * 0.98),
       height: Math.floor(viewfinderHeight * 0.88),
@@ -73,9 +112,7 @@ async function startScannerWithFallback(
       cameraAttempts.push(buildBarcodeCameraConstraints(pick.id));
       cameraAttempts.push(buildBarcodeCameraConstraintsFallback(pick.id));
     }
-  } catch {
-    /* getCameras may fail before permission on some browsers */
-  }
+  } catch { /* */ }
 
   cameraAttempts.push(buildBarcodeCameraConstraints());
   cameraAttempts.push(buildBarcodeCameraConstraintsFallback());
@@ -92,72 +129,71 @@ async function startScannerWithFallback(
       return;
     } catch (e) {
       lastErr = e;
-      try {
-        await scanner.stop();
-      } catch { /* */ }
-      try {
-        await scanner.clear();
-      } catch { /* */ }
+      if (!isTransitionError(e)) {
+        await safeScannerStop(scanner);
+      } else {
+        await delay(STOP_SETTLE_MS);
+        await safeScannerStop(scanner);
+      }
     }
   }
   throw lastErr ?? new Error('Could not start camera');
 }
 
-/** Phone / tablet camera barcode reader (EAN, UPC, Code 128). */
 const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan, onError, onClose }) => {
   const regionId = useId().replace(/:/g, '');
   const regionRef = useRef<HTMLDivElement>(null);
+  const elementId = `stash-barcode-camera-${regionId}`;
   const [phase, setPhase] = useState<Phase>('idle');
   const [accessError, setAccessError] = useState<CameraAccessResult | null>(null);
+  const [showShell, setShowShell] = useState(active);
+
   const runningRef = useRef(false);
   const scanLockedRef = useRef(false);
   const lastDecodeRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
-  const scannerRef = useRef<{
-    stop: () => Promise<void>;
-    clear: () => Promise<void>;
-    pause: (shouldPauseVideo?: boolean) => void;
-    resume: () => void;
-  } | null>(null);
+  const scannerRef = useRef<Html5QrcodeInstance | null>(null);
+  const opChainRef = useRef<Promise<void>>(Promise.resolve());
+  const startingRef = useRef(false);
+  const lifecycleRef = useRef(0);
+
   const pausedRef = useRef(paused);
   const onScanRef = useRef(onScan);
   const onErrorRef = useRef(onError);
   const onCloseRef = useRef(onClose);
-  const lifecycleRef = useRef(0);
   pausedRef.current = paused;
   onScanRef.current = onScan;
   onErrorRef.current = onError;
   onCloseRef.current = onClose;
 
+  const enqueue = useCallback((op: () => Promise<void>) => {
+    opChainRef.current = opChainRef.current.then(op).catch(() => {});
+    return opChainRef.current;
+  }, []);
+
   const stopScanner = useCallback(async () => {
     scanLockedRef.current = false;
     lastDecodeRef.current = { code: '', at: 0 };
     lifecycleRef.current += 1;
-    if (scannerRef.current && runningRef.current) {
-      try {
-        await scannerRef.current.stop();
-        await scannerRef.current.clear();
-      } catch { /* */ }
-    }
-    runningRef.current = false;
+    const scanner = scannerRef.current;
     scannerRef.current = null;
+    runningRef.current = false;
+    await safeScannerStop(scanner);
     releaseAllCameraStreams(regionRef.current);
     releaseAllCameraStreams();
+    await delay(STOP_SETTLE_MS);
   }, []);
 
   const runScanner = useCallback(async () => {
-    if (!regionRef.current || runningRef.current) return;
+    if (!regionRef.current) return;
 
+    const runId = lifecycleRef.current + 1;
     setPhase('starting');
     setAccessError(null);
     onErrorRef.current?.('');
 
-    const elementId = `stash-barcode-camera-${regionId}`;
-    const runId = lifecycleRef.current + 1;
-    lifecycleRef.current = runId;
-
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
-      const scanner = new Html5Qrcode(elementId);
+      const scanner = new Html5Qrcode(elementId) as unknown as Html5QrcodeInstance;
 
       const onDecoded = (decodedText: string) => {
         if (lifecycleRef.current !== runId || scanLockedRef.current || pausedRef.current) return;
@@ -173,20 +209,9 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         const handled = onScanRef.current(code) !== false;
         lastDecodeRef.current = { code, at: now };
 
-        try {
-          scanner.pause(true);
-        } catch { /* */ }
-
         const pauseMs = handled ? SCAN_COOLDOWN_HANDLED_MS : SCAN_COOLDOWN_MS;
         window.setTimeout(() => {
           if (lifecycleRef.current !== runId) return;
-          if (pausedRef.current) {
-            scanLockedRef.current = false;
-            return;
-          }
-          try {
-            scanner.resume();
-          } catch { /* */ }
           scanLockedRef.current = false;
         }, pauseMs);
       };
@@ -194,10 +219,10 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
       await startScannerWithFallback(scanner, elementId, Html5QrcodeSupportedFormats, onDecoded);
 
       if (lifecycleRef.current !== runId) {
-        await scanner.stop().catch(() => {});
-        releaseAllCameraStreams(regionRef.current);
+        await safeScannerStop(scanner);
         return;
       }
+
       await applyBarcodeCameraEnhancements(elementId);
       scannerRef.current = scanner;
       runningRef.current = true;
@@ -210,79 +235,106 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         onErrorRef.current?.(formatted.message);
       }
     }
-  }, [regionId]);
+  }, [elementId]);
 
-  const enableCamera = useCallback(async () => {
-    const env = isCameraEnvironmentOk();
-    if (!env.ok) {
-      const fail: CameraAccessResult = {
-        ok: false,
-        denied: false,
-        message: env.message,
-        hint: 'Bookmark your https:// Stash URL for stock take on your phone.',
-      };
-      setAccessError(fail);
-      setPhase('error');
-      onErrorRef.current?.(fail.message);
-      return;
-    }
+  const enableCamera = useCallback(() => {
+    if (startingRef.current) return;
+    startingRef.current = true;
 
-    setPhase('starting');
-    const perm = await requestCameraPermission();
-    if (!perm.ok) {
-      setAccessError(perm);
-      setPhase('error');
-      onErrorRef.current?.(perm.message);
-      return;
-    }
+    void enqueue(async () => {
+      try {
+        const env = isCameraEnvironmentOk();
+        if (!env.ok) {
+          const fail: CameraAccessResult = {
+            ok: false,
+            denied: false,
+            message: env.message,
+            hint: 'Bookmark your https:// Stash URL for stock take on your phone.',
+          };
+          setAccessError(fail);
+          setPhase('error');
+          onErrorRef.current?.(fail.message);
+          return;
+        }
 
-    await runScanner();
-  }, [runScanner]);
+        await stopScanner();
+        const perm = await requestCameraPermission();
+        if (!perm.ok) {
+          setAccessError(perm);
+          setPhase('error');
+          onErrorRef.current?.(perm.message);
+          return;
+        }
 
-  const closeCamera = useCallback(async () => {
-    await stopScanner();
-    setPhase('idle');
-    setAccessError(null);
-    onErrorRef.current?.('');
-    onCloseRef.current?.();
-  }, [stopScanner]);
+        await runScanner();
+      } finally {
+        startingRef.current = false;
+      }
+    });
+  }, [enqueue, runScanner, stopScanner]);
 
-  useEffect(() => {
-    if (!active) {
-      void stopScanner();
+  const closeCamera = useCallback(() => {
+    void enqueue(async () => {
+      await stopScanner();
       setPhase('idle');
       setAccessError(null);
+      onErrorRef.current?.('');
+      onCloseRef.current?.();
+    });
+  }, [enqueue, stopScanner]);
+
+  useEffect(() => {
+    if (active) {
+      setShowShell(true);
+      return;
     }
-    return () => {
-      void stopScanner();
-    };
-  }, [active, stopScanner]);
+    void enqueue(async () => {
+      await stopScanner();
+      setPhase('idle');
+      setAccessError(null);
+      if (!active) setShowShell(false);
+    });
+  }, [active, enqueue, stopScanner]);
 
   useEffect(() => () => {
+    lifecycleRef.current += 1;
     void stopScanner();
   }, [stopScanner]);
 
   useEffect(() => {
-    if (phase !== 'live' || !scannerRef.current) return;
+    if (phase !== 'live' || !scannerRef.current || !paused) return;
+    const scanner = scannerRef.current;
     try {
-      if (paused) scannerRef.current.pause(true);
-      else scannerRef.current.resume();
+      if (scanner.getState?.() === STATE_SCANNING) {
+        scanner.pause(true);
+      }
     } catch { /* */ }
+    return () => {
+      try {
+        if (scanner.getState?.() === STATE_PAUSED) {
+          scanner.resume();
+        }
+      } catch { /* */ }
+    };
   }, [paused, phase]);
 
-  if (!active) return null;
+  if (!showShell) return null;
 
   const env = isCameraEnvironmentOk();
 
   return (
-    <div className="relative rounded-xl overflow-hidden border-2 border-indigo-400 bg-black shadow-inner min-h-[min(70vw,380px)] [&_#qr-shaded-region]:!hidden">
+    <div className="relative rounded-xl overflow-hidden border-2 border-indigo-400 bg-black shadow-inner min-h-[min(85vw,440px)] [&_#qr-shaded-region]:!hidden">
       <div
         ref={regionRef}
-        id={`stash-barcode-camera-${regionId}`}
-        className={`w-full min-h-[min(85vw,440px)] [&_video]:object-cover [&_video]:min-h-[min(85vw,440px)] [&_video]:w-full ${phase === 'live' ? '' : 'invisible h-0 min-h-0 overflow-hidden'}`}
+        id={elementId}
+        className={`w-full min-h-[min(85vw,440px)] [&_video]:object-cover [&_video]:min-h-[min(85vw,440px)] [&_video]:w-full ${phase === 'live' || phase === 'starting' ? '' : 'invisible h-0 min-h-0 overflow-hidden'}`}
       />
 
-      {phase === 'idle' && (
+      {!active && (
+        <div className="absolute inset-0 z-10 bg-gray-50/95" aria-hidden />
+      )}
+
+      {active && phase === 'idle' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 bg-slate-900 text-center">
           {!env.ok ? (
             <>
@@ -298,8 +350,9 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
               </p>
               <button
                 type="button"
-                onClick={() => void enableCamera()}
-                className="px-5 py-3 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-indigo-500"
+                disabled={startingRef.current}
+                onClick={() => enableCamera()}
+                className="px-5 py-3 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-indigo-500 disabled:opacity-50"
               >
                 Enable camera
               </button>
@@ -308,22 +361,23 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         </div>
       )}
 
-      {phase === 'starting' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 text-white">
+      {active && phase === 'starting' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/80 text-white z-20">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-300" />
           <span className="text-[10px] font-black uppercase tracking-widest">Starting camera…</span>
           <span className="text-[10px] text-white/50">Allow camera if prompted</span>
         </div>
       )}
 
-      {(phase === 'error' || (phase === 'idle' && accessError)) && accessError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-5 bg-slate-900 text-center">
+      {active && (phase === 'error' || (phase === 'idle' && accessError)) && accessError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-5 bg-slate-900 text-center z-20">
           <p className="text-sm font-bold text-amber-200">{accessError.message}</p>
           <p className="text-[11px] text-white/70 max-w-sm leading-relaxed">{accessError.hint}</p>
           <button
             type="button"
-            onClick={() => void enableCamera()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest"
+            disabled={startingRef.current}
+            onClick={() => enableCamera()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
           >
             <RefreshCw className="w-4 h-4" />
             Try again
@@ -331,18 +385,18 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         </div>
       )}
 
-      {phase === 'live' && (
+      {active && phase === 'live' && (
         <>
           <button
             type="button"
-            onClick={() => void closeCamera()}
-            className="absolute top-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/70 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black/90 border border-white/20"
+            onClick={() => closeCamera()}
+            className="absolute top-2 right-2 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/70 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black/90 border border-white/20"
             aria-label="Close camera"
           >
             <X className="w-3.5 h-3.5" />
             Close
           </button>
-          <div className="absolute bottom-0 inset-x-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
+          <div className="absolute bottom-0 inset-x-0 z-20 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
             <p className="text-[10px] font-bold text-white/90 text-center flex items-center justify-center gap-1.5">
               <Camera className="w-3.5 h-3.5" />
               Hold 25–50cm away — centre the barcode in frame
