@@ -15,6 +15,7 @@ import { releaseAllCameraStreams } from '../utils/cameraRelease';
 const SCAN_COOLDOWN_MS = 900;
 const SCAN_COOLDOWN_HANDLED_MS = 2800;
 const STOP_SETTLE_MS = 400;
+const START_TIMEOUT_MS = 20_000;
 
 type Phase = 'idle' | 'starting' | 'live' | 'error';
 
@@ -46,6 +47,22 @@ const STATE_PAUSED = 3;
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function waitForLayout(): Promise<void> {
+  return new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      v => { window.clearTimeout(timer); resolve(v); },
+      e => { window.clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 function isTransitionError(e: unknown): boolean {
@@ -184,12 +201,16 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
   }, []);
 
   const runScanner = useCallback(async () => {
-    if (!regionRef.current) return;
-
-    const runId = lifecycleRef.current + 1;
+    const runId = ++lifecycleRef.current;
     setPhase('starting');
     setAccessError(null);
     onErrorRef.current?.('');
+
+    await waitForLayout();
+    if (lifecycleRef.current !== runId || !regionRef.current) {
+      if (lifecycleRef.current === runId) setPhase('idle');
+      return;
+    }
 
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
@@ -216,7 +237,11 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         }, pauseMs);
       };
 
-      await startScannerWithFallback(scanner, elementId, Html5QrcodeSupportedFormats, onDecoded);
+      await withTimeout(
+        startScannerWithFallback(scanner, elementId, Html5QrcodeSupportedFormats, onDecoded),
+        START_TIMEOUT_MS,
+        'Camera took too long to start. Tap Close, wait a moment, then Enable camera again.',
+      );
 
       if (lifecycleRef.current !== runId) {
         await safeScannerStop(scanner);
@@ -327,7 +352,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
       <div
         ref={regionRef}
         id={elementId}
-        className={`w-full min-h-[min(85vw,440px)] [&_video]:object-cover [&_video]:min-h-[min(85vw,440px)] [&_video]:w-full ${phase === 'live' || phase === 'starting' ? '' : 'invisible h-0 min-h-0 overflow-hidden'}`}
+        className="w-full min-h-[min(85vw,440px)] [&_video]:object-cover [&_video]:min-h-[min(85vw,440px)] [&_video]:w-full"
       />
 
       {!active && (
