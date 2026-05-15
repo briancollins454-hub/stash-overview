@@ -505,7 +505,7 @@ const StockTakeScanner: React.FC<Props> = ({
               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[10px] font-black uppercase tracking-widest">
                 <button
                   type="button"
-                  onClick={() => { setScanMode('camera'); setCameraError(null); }}
+                  onClick={() => { setScanMode('camera'); setCameraError(null); setCameraFlash(null); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${scanMode === 'camera' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                 >
                   <Camera className="w-3.5 h-3.5" /> Camera
@@ -535,7 +535,7 @@ const StockTakeScanner: React.FC<Props> = ({
                 <BarcodeCameraScanner active onScan={handleCameraScan} onError={handleCameraError} />
                 {cameraError && (
                   <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    {cameraError}. Allow camera access in your browser settings, or switch to Type.
+                    {cameraError}
                   </p>
                 )}
                 {cameraFlash && (
