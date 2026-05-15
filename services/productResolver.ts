@@ -1,6 +1,6 @@
-import type { DecoJob, PhysicalStockItem, ReferenceProduct } from '../types';
+import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem } from '../types';
 
-export type ProductResolveSource = 'reference' | 'physical_stock' | 'deco' | 'unknown';
+export type ProductResolveSource = 'supplier' | 'reference' | 'physical_stock' | 'deco' | 'unknown';
 
 export interface ResolvedProduct {
   ean: string;
@@ -46,9 +46,16 @@ export function resolvedToStockKey(
   });
 }
 
+function matchEanValue(a: string | undefined, ean: string): boolean {
+  if (!a) return false;
+  const b = normalizeBarcodeInput(a);
+  return b === ean || b.replace(/^0/, '') === ean.replace(/^0/, '');
+}
+
 export function resolveProductByBarcode(
   code: string,
   ctx: {
+    supplierCatalog?: SupplierCatalogItem[];
     referenceProducts: ReferenceProduct[];
     physicalStock: PhysicalStockItem[];
     decoJobs: DecoJob[];
@@ -57,11 +64,20 @@ export function resolveProductByBarcode(
   const ean = normalizeBarcodeInput(code);
   if (!ean || ean.length < 4) return null;
 
-  const matchEan = (a: string | undefined) => {
-    if (!a) return false;
-    const b = normalizeBarcodeInput(a);
-    return b === ean || b.replace(/^0/, '') === ean.replace(/^0/, '');
-  };
+  const matchEan = (a: string | undefined) => matchEanValue(a, ean);
+
+  const supplier = ctx.supplierCatalog?.find(s => matchEan(s.ean));
+  if (supplier) {
+    return {
+      ean: supplier.ean.trim(),
+      vendor: supplier.vendor || supplier.supplierName,
+      productCode: supplier.productCode || '',
+      description: supplier.description || '',
+      colour: supplier.colour || '',
+      size: supplier.size || '',
+      source: 'supplier',
+    };
+  }
 
   const ref = ctx.referenceProducts.find(r => matchEan(r.ean));
   if (ref) {

@@ -33,6 +33,29 @@ export interface ReferenceProduct {
   size: string;
 }
 
+/** Barcode row from a supplier CSV feed (stock take matching). */
+export interface SupplierCatalogItem {
+  id: string;
+  supplierName: string;
+  importId: string | null;
+  ean: string;
+  vendor: string;
+  productCode: string;
+  description: string;
+  colour: string;
+  size: string;
+  updatedAt: string;
+}
+
+export interface SupplierImport {
+  id: string;
+  supplierName: string;
+  fileName: string | null;
+  rowCount: number;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
 export interface ShopifyOrder {
   id: string;
   orderNumber: string;

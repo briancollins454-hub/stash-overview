@@ -128,6 +128,8 @@ const TABLES: TableDef[] = [
   { table: 'stash_stock', label: 'Physical Stock' },
   { table: 'stash_returns', label: 'Return Stock' },
   { table: 'stash_reference_products', label: 'Reference Products' },
+  { table: 'stash_supplier_catalog', label: 'Supplier Barcode Feeds' },
+  { table: 'stash_supplier_imports', label: 'Supplier Feed Imports' },
   // stash_settings was reserved for cloud-syncing API settings but never
   // provisioned in Supabase, so polling it just produced a flood of 404s
   // on every refresh. Re-add this entry if/when the table is created.

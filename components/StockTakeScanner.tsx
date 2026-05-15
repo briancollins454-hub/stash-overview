@@ -3,7 +3,9 @@ import {
   AlertTriangle, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Save, ScanLine, Trash2,
 } from 'lucide-react';
 import BarcodeCameraScanner from './BarcodeCameraScanner';
-import type { DecoJob, PhysicalStockItem, ReferenceProduct } from '../types';
+import SupplierCatalogPanel from './SupplierCatalogPanel';
+import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem } from '../types';
+import { fetchSupplierCatalog } from '../services/supplierCatalogService';
 import { isSupabaseReady } from '../services/supabase';
 import {
   normalizeBarcodeInput,
@@ -82,6 +84,7 @@ const StockTakeScanner: React.FC<Props> = ({
   );
   const [cameraFlash, setCameraFlash] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
   const lastCamScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -95,18 +98,27 @@ const StockTakeScanner: React.FC<Props> = ({
     return m;
   }, [physicalStock]);
 
+  const reloadSupplierCatalog = useCallback(async () => {
+    try {
+      setSupplierCatalog(await fetchSupplierCatalog());
+    } catch {
+      /* feeds optional until migration run */
+    }
+  }, []);
+
   const loadOpen = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const open = await fetchOpenStockTakeSessions();
+      await reloadSupplierCatalog();
       setOpenSessions(open);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not load sessions');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reloadSupplierCatalog]);
 
   useEffect(() => {
     void loadOpen();
@@ -220,6 +232,7 @@ const StockTakeScanner: React.FC<Props> = ({
       const code = normalizeBarcodeInput(raw);
       if (!code || !sessionRef.current) return;
       const product = resolveProductByBarcode(code, {
+        supplierCatalog,
         referenceProducts,
         physicalStock,
         decoJobs,
@@ -231,7 +244,7 @@ const StockTakeScanner: React.FC<Props> = ({
       }
       addScan(product, Math.max(1, addQty));
     },
-    [referenceProducts, physicalStock, decoJobs, addQty],
+    [supplierCatalog, referenceProducts, physicalStock, decoJobs, addQty],
   );
 
   const handleCameraScan = useCallback(
@@ -349,6 +362,19 @@ const StockTakeScanner: React.FC<Props> = ({
         <div className="rounded-xl border border-amber-500/40 bg-amber-50 px-4 py-3 text-[11px] font-semibold text-amber-900" role="alert">
           {error}
         </div>
+      )}
+
+      <SupplierCatalogPanel
+        referenceProducts={referenceProducts}
+        onCatalogUpdated={reloadSupplierCatalog}
+        onReferenceMerged={onUpdateReferenceProducts}
+        uploadedBy={currentUser?.email || currentUser?.displayName || undefined}
+      />
+
+      {supplierCatalog.length > 0 && (
+        <p className="text-[10px] text-gray-500 font-semibold px-1">
+          {supplierCatalog.length.toLocaleString()} supplier barcodes loaded for scan matching.
+        </p>
       )}
 
       {!session ? (
