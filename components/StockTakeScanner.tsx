@@ -304,8 +304,13 @@ const StockTakeScanner: React.FC<Props> = ({
         navigator.vibrate?.(35);
       } catch { /* unsupported */ }
       if (opts?.fromCamera) {
-        setCameraFlash(code);
-        window.setTimeout(() => setCameraFlash(null), 700);
+        const matchedEan = normalizeBarcodeInput(product.ean);
+        setCameraFlash(
+          matchedEan !== code
+            ? `Scanned ${code} → ${matchedEan}`
+            : code,
+        );
+        window.setTimeout(() => setCameraFlash(null), 1200);
       }
       addScan(product, Math.max(1, addQty));
     },
@@ -732,6 +737,9 @@ const StockTakeScanner: React.FC<Props> = ({
                       <div className="flex-1 min-w-[180px]">
                         <p className="font-bold text-gray-900 text-sm leading-tight">{line.description}</p>
                         <p className="text-[10px] font-mono text-indigo-600 mt-0.5">{line.ean}</p>
+                        {line.productCode && line.productCode !== line.ean && (
+                          <p className="text-[9px] font-mono text-gray-500">Style / SKU {line.productCode}</p>
+                        )}
                         <p className="text-[9px] text-gray-400 uppercase tracking-widest mt-0.5">
                           {[line.colour, line.size].filter(Boolean).join(' · ') || '—'}
                           {' · '}{line.resolvedVia}

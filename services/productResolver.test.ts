@@ -53,7 +53,7 @@ describe('resolveProductByBarcode', () => {
     expect(r?.description).toBe('Feed Jersey');
   });
 
-  it('matches by product code when EAN differs', () => {
+  it('matches alphanumeric SKU scans to product code', () => {
     const r = resolveProductByBarcode('001MBLK28R', {
       referenceProducts: [{
         ean: '506043210099',
@@ -67,6 +67,39 @@ describe('resolveProductByBarcode', () => {
       decoJobs: [],
     });
     expect(r?.description).toBe('Sock');
+  });
+
+  it('does not match a 13-digit barcode to another product style code', () => {
+    const r = resolveProductByBarcode('5051595439930', {
+      referenceProducts: [{
+        ean: '6052782439930',
+        vendor: 'Test',
+        productCode: '5051595439930',
+        description: 'Wrong row',
+        colour: '',
+        size: '',
+      }],
+      physicalStock: [],
+      decoJobs: [],
+    });
+    expect(r).toBeNull();
+  });
+
+  it('matches 13-digit barcode to EAN column', () => {
+    const r = resolveProductByBarcode('5051595439930', {
+      referenceProducts: [{
+        ean: '5051595439930',
+        vendor: 'Test',
+        productCode: '6052782439930',
+        description: 'Correct row',
+        colour: '',
+        size: '',
+      }],
+      physicalStock: [],
+      decoJobs: [],
+    });
+    expect(r?.ean).toBe('5051595439930');
+    expect(r?.description).toBe('Correct row');
   });
 
   it('matches reference catalogue first', () => {

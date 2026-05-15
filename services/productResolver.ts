@@ -50,8 +50,41 @@ function scanKey(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
 }
 
-/** All lookup keys for a stored or scanned barcode / SKU. */
-export function scanKeysForValue(value: string | undefined): string[] {
+/** True when the scan looks like a GTIN / EAN barcode (not an alphanumeric SKU). */
+export function isGtinScan(code: string): boolean {
+  const n = normalizeBarcodeInput(code);
+  return /^\d{12,13}$/.test(n);
+}
+
+/** Lookup keys for EAN / UPC values only (no partial suffixes). */
+export function scanKeysForEan(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  const keys = new Set<string>();
+  const add = (v: string) => {
+    const k = scanKey(v);
+    if (k) keys.add(k);
+  };
+
+  const trimmed = value.trim();
+  add(trimmed);
+  const n = normalizeBarcodeInput(trimmed);
+  add(n);
+
+  const excel = normalizeExcelNumeric(trimmed);
+  if (excel) add(normalizeBarcodeInput(excel));
+
+  if (/^\d+$/.test(n)) {
+    const stripped = n.replace(/^0+/, '') || '0';
+    add(stripped);
+    if (n.length === 12) add(`0${n}`);
+    if (n.length === 13 && n.startsWith('0')) add(n.slice(1));
+  }
+
+  return [...keys];
+}
+
+/** Lookup keys for style / SKU codes (not used for 12–13 digit GTIN scans). */
+export function scanKeysForSku(value: string | undefined): string[] {
   if (!value?.trim()) return [];
   const keys = new Set<string>();
   const add = (v: string) => {
@@ -64,26 +97,12 @@ export function scanKeysForValue(value: string | undefined): string[] {
   add(normalizeBarcodeInput(trimmed));
   add(trimmed.replace(/-/g, ''));
 
-  const excel = normalizeExcelNumeric(trimmed);
-  if (excel) add(normalizeBarcodeInput(excel));
-
-  const n = normalizeBarcodeInput(trimmed);
-  if (/^\d+$/.test(n)) {
-    const stripped = n.replace(/^0+/, '') || '0';
-    add(stripped);
-    if (n.length === 12) add(`0${n}`);
-    if (n.length === 13 && n.startsWith('0')) add(n.slice(1));
-    if (n.length >= 12) add(n.slice(-12));
-    if (n.length >= 13) add(n.slice(-13));
-  }
-
   return [...keys];
 }
 
-function matchesScanInput(stored: string | undefined, input: string): boolean {
-  if (!stored?.trim()) return false;
-  const inputKeys = new Set(scanKeysForValue(input));
-  return scanKeysForValue(stored).some(k => inputKeys.has(k));
+/** @deprecated Use scanKeysForEan / scanKeysForSku */
+export function scanKeysForValue(value: string | undefined): string[] {
+  return [...new Set([...scanKeysForEan(value), ...scanKeysForSku(value)])];
 }
 
 export interface BarcodeLookupStats {
@@ -104,17 +123,23 @@ export function createBarcodeLookup(ctx: {
   physicalStock: PhysicalStockItem[];
   decoJobs: DecoJob[];
 }): BarcodeLookup {
-  const map = new Map<string, ResolvedProduct>();
+  const eanMap = new Map<string, ResolvedProduct>();
+  const skuMap = new Map<string, ResolvedProduct>();
   let supplierKeys = 0;
   let referenceKeys = 0;
   let physicalKeys = 0;
 
   const indexProduct = (product: ResolvedProduct) => {
     let added = 0;
-    for (const field of [product.ean, product.productCode]) {
-      for (const key of scanKeysForValue(field)) {
-        if (!key || map.has(key)) continue;
-        map.set(key, product);
+    for (const key of scanKeysForEan(product.ean)) {
+      if (!key || eanMap.has(key)) continue;
+      eanMap.set(key, product);
+      added += 1;
+    }
+    if (product.productCode?.trim()) {
+      for (const key of scanKeysForSku(product.productCode)) {
+        if (!key || skuMap.has(key)) continue;
+        skuMap.set(key, product);
         added += 1;
       }
     }
@@ -179,13 +204,27 @@ export function createBarcodeLookup(ctx: {
       supplierKeys,
       referenceKeys,
       physicalKeys,
-      totalKeys: map.size,
+      totalKeys: eanMap.size + skuMap.size,
     },
     resolve(code: string) {
       const normalized = normalizeBarcodeInput(code);
       if (!normalized || normalized.length < 4) return null;
-      for (const key of scanKeysForValue(normalized)) {
-        const hit = map.get(key);
+
+      // GTIN scans must match the EAN column only — not a different row's style/SKU code.
+      if (isGtinScan(normalized)) {
+        for (const key of scanKeysForEan(normalized)) {
+          const hit = eanMap.get(key);
+          if (hit) return hit;
+        }
+        return null;
+      }
+
+      for (const key of scanKeysForSku(normalized)) {
+        const hit = skuMap.get(key);
+        if (hit) return hit;
+      }
+      for (const key of scanKeysForEan(normalized)) {
+        const hit = eanMap.get(key);
         if (hit) return hit;
       }
       return null;
