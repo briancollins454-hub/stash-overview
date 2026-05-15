@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Barcode, CheckCircle2, Loader2, Package, Save, ScanLine, Trash2,
+  AlertTriangle, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Save, ScanLine, Trash2,
 } from 'lucide-react';
+import BarcodeCameraScanner from './BarcodeCameraScanner';
 import type { DecoJob, PhysicalStockItem, ReferenceProduct } from '../types';
 import { isSupabaseReady } from '../services/supabase';
 import {
@@ -27,6 +28,11 @@ import {
 } from '../services/stockTakeService';
 
 const DRAFT_KEY = 'stash_stock_take_draft';
+
+function prefersCameraScan(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(max-width: 768px)').matches || 'ontouchstart' in window;
+}
 
 const LOCATION_LABELS: Record<StockTakeLocation, string> = {
   church_st: '20 Church Street',
@@ -71,6 +77,14 @@ const StockTakeScanner: React.FC<Props> = ({
     colour: '',
     size: '',
   });
+  const [scanMode, setScanMode] = useState<'camera' | 'keyboard'>(() =>
+    prefersCameraScan() ? 'camera' : 'keyboard',
+  );
+  const [cameraFlash, setCameraFlash] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const lastCamScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   const bookByKey = useMemo(() => {
     const m = new Map<string, number>();
@@ -105,8 +119,8 @@ const StockTakeScanner: React.FC<Props> = ({
   }, [session, lines]);
 
   useEffect(() => {
-    scanRef.current?.focus();
-  }, [session, unknownCode]);
+    if (scanMode === 'keyboard' && !unknownCode) scanRef.current?.focus();
+  }, [session, unknownCode, scanMode]);
 
   const totals = useMemo(() => {
     const skus = lines.length;
@@ -201,21 +215,46 @@ const StockTakeScanner: React.FC<Props> = ({
     setAddQty(1);
   };
 
+  const processBarcode = useCallback(
+    (raw: string) => {
+      const code = normalizeBarcodeInput(raw);
+      if (!code || !sessionRef.current) return;
+      const product = resolveProductByBarcode(code, {
+        referenceProducts,
+        physicalStock,
+        decoJobs,
+      });
+      if (!product) {
+        setUnknownCode(code);
+        setRegForm(f => ({ ...f, description: '' }));
+        return;
+      }
+      addScan(product, Math.max(1, addQty));
+    },
+    [referenceProducts, physicalStock, decoJobs, addQty],
+  );
+
+  const handleCameraScan = useCallback(
+    (raw: string) => {
+      const code = normalizeBarcodeInput(raw);
+      if (!code) return;
+      const now = Date.now();
+      if (lastCamScanRef.current.code === code && now - lastCamScanRef.current.at < 1600) return;
+      lastCamScanRef.current = { code, at: now };
+      try {
+        navigator.vibrate?.(35);
+      } catch { /* unsupported */ }
+      setCameraFlash(code);
+      window.setTimeout(() => setCameraFlash(null), 900);
+      processBarcode(code);
+    },
+    [processBarcode],
+  );
+
   const handleScanSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    const code = normalizeBarcodeInput(scanValue);
-    if (!code || !session) return;
-    const product = resolveProductByBarcode(code, {
-      referenceProducts,
-      physicalStock,
-      decoJobs,
-    });
-    if (!product) {
-      setUnknownCode(code);
-      setRegForm(f => ({ ...f, description: '' }));
-      return;
-    }
-    addScan(product, Math.max(1, addQty));
+    if (!scanValue.trim()) return;
+    processBarcode(scanValue);
   };
 
   const registerUnknown = () => {
@@ -385,40 +424,78 @@ const StockTakeScanner: React.FC<Props> = ({
             </button>
           </div>
 
-          <form onSubmit={handleScanSubmit} className="bg-white rounded-xl border-2 border-indigo-200 shadow-sm p-4 space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
-              <Barcode className="w-4 h-4" /> Scan or type barcode
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={scanRef}
-                value={scanValue}
-                onChange={e => setScanValue(e.target.value)}
-                placeholder="EAN / barcode — Enter to add"
-                className="flex-1 min-w-[200px] px-4 py-3 text-lg font-mono border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500/30 outline-none"
-                autoComplete="off"
-              />
-              <div className="flex items-center gap-1 border border-gray-200 rounded-lg px-2">
-                <span className="text-[9px] font-black uppercase text-gray-400">Qty</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={addQty}
-                  onChange={e => setAddQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                  className="w-14 py-2 text-center font-black text-sm border-none focus:ring-0"
-                />
+          <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-sm p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
+                <Barcode className="w-4 h-4" /> Add items
+              </label>
+              <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[10px] font-black uppercase tracking-widest">
+                <button
+                  type="button"
+                  onClick={() => { setScanMode('camera'); setCameraError(null); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${scanMode === 'camera' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                >
+                  <Camera className="w-3.5 h-3.5" /> Camera
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScanMode('keyboard')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-gray-200 transition-colors ${scanMode === 'keyboard' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                >
+                  <Keyboard className="w-3.5 h-3.5" /> Type
+                </button>
               </div>
-              <button
-                type="submit"
-                className="px-4 py-3 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
-              >
-                Add
-              </button>
             </div>
-            <p className="text-[10px] text-gray-400">
-              USB scanners usually type the code and send Enter — focus stays in this box.
-            </p>
-          </form>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[9px] font-black uppercase text-gray-400">Qty per scan</span>
+              <input
+                type="number"
+                min={1}
+                value={addQty}
+                onChange={e => setAddQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-16 py-1.5 text-center font-black text-sm border border-gray-200 rounded-lg"
+              />
+              <span className="text-[10px] text-gray-400">1 for singles; higher for cartons</span>
+            </div>
+            {scanMode === 'camera' && !unknownCode && (
+              <>
+                <BarcodeCameraScanner active onScan={handleCameraScan} onError={msg => setCameraError(msg)} />
+                {cameraError && (
+                  <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    {cameraError}. Allow camera access in your browser settings, or switch to Type.
+                  </p>
+                )}
+                {cameraFlash && (
+                  <p className="text-center text-sm font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2 font-mono">
+                    ✓ {cameraFlash}
+                  </p>
+                )}
+              </>
+            )}
+            {scanMode === 'keyboard' && (
+              <form onSubmit={handleScanSubmit} className="space-y-2">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={scanRef}
+                    value={scanValue}
+                    onChange={e => setScanValue(e.target.value)}
+                    placeholder="EAN / barcode — Enter to add"
+                    className="flex-1 min-w-[200px] px-4 py-3 text-lg font-mono border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500/30 outline-none"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-3 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
+                  >
+                    Add
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400">
+                  USB wedge scanners work here — focus stays in the box.
+                </p>
+              </form>
+            )}
+          </div>
 
           {unknownCode && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">

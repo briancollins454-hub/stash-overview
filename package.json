@@ -10,7 +10,10 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "start": "tsx server.ts"
+    "start": "tsx server.ts",
+    "mizuno:scrape-full": "node scripts/mizuno-teamwear/scrape-full.mjs",
+    "mizuno:shopify-import": "node scripts/mizuno-teamwear/import-shopify-csv.mjs",
+    "mizuno:syncx-xlsx": "python3 scripts/mizuno-teamwear/build-syncx-xlsx-from-shopify-export.py"
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
@@ -18,6 +21,7 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "firebase": "^12.11.0",
+    "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.460.0",
     "node-fetch": "^2.7.0",
     "react": "^19.0.0",
@@ -39,6 +43,7 @@
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.0",
     "jsdom": "^29.0.1",
+    "playwright": "^1.59.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.0.0",
     "vite": "^6.0.0",
