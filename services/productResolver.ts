@@ -117,6 +117,47 @@ export type BarcodeLookup = {
   stats: BarcodeLookupStats;
 };
 
+export interface BarcodeLookupExplanation {
+  scanned: string;
+  resolved: ResolvedProduct | null;
+  /** Human-readable hint when not found */
+  hint: string;
+}
+
+function eanKeysMatch(a: string, b: string): boolean {
+  const keysA = new Set(scanKeysForEan(a));
+  return scanKeysForEan(b).some(k => keysA.has(k));
+}
+
+/** Index a product's EAN / numeric product code into the GTIN map. */
+function indexProductEanKeys(eanMap: Map<string, ResolvedProduct>, product: ResolvedProduct): number {
+  let added = 0;
+  const indexField = (raw: string | undefined, entry: ResolvedProduct) => {
+    for (const key of scanKeysForEan(raw)) {
+      if (!key || eanMap.has(key)) continue;
+      eanMap.set(key, entry);
+      added += 1;
+    }
+  };
+
+  const ean = product.ean?.trim();
+  const pc = product.productCode?.trim();
+  const pcNorm = pc ? normalizeBarcodeInput(pc) : '';
+  const eanNorm = ean ? normalizeBarcodeInput(ean) : '';
+
+  if (eanNorm) indexField(ean, product);
+
+  if (pc && isGtinScan(pc)) {
+    const entry =
+      eanNorm && !eanKeysMatch(eanNorm, pcNorm)
+        ? { ...product, ean: pcNorm }
+        : product;
+    indexField(pc, entry);
+  }
+
+  return added;
+}
+
 export function createBarcodeLookup(ctx: {
   supplierCatalog?: SupplierCatalogItem[];
   referenceProducts: ReferenceProduct[];
@@ -130,12 +171,7 @@ export function createBarcodeLookup(ctx: {
   let physicalKeys = 0;
 
   const indexProduct = (product: ResolvedProduct) => {
-    let added = 0;
-    for (const key of scanKeysForEan(product.ean)) {
-      if (!key || eanMap.has(key)) continue;
-      eanMap.set(key, product);
-      added += 1;
-    }
+    let added = indexProductEanKeys(eanMap, product);
     if (product.productCode?.trim()) {
       for (const key of scanKeysForSku(product.productCode)) {
         if (!key || skuMap.has(key)) continue;
@@ -207,28 +243,88 @@ export function createBarcodeLookup(ctx: {
       totalKeys: eanMap.size + skuMap.size,
     },
     resolve(code: string) {
-      const normalized = normalizeBarcodeInput(code);
-      if (!normalized || normalized.length < 4) return null;
-
-      // GTIN scans must match the EAN column only — not a different row's style/SKU code.
-      if (isGtinScan(normalized)) {
-        for (const key of scanKeysForEan(normalized)) {
-          const hit = eanMap.get(key);
-          if (hit) return hit;
-        }
-        return null;
-      }
-
-      for (const key of scanKeysForSku(normalized)) {
-        const hit = skuMap.get(key);
-        if (hit) return hit;
-      }
-      for (const key of scanKeysForEan(normalized)) {
-        const hit = eanMap.get(key);
-        if (hit) return hit;
-      }
-      return null;
+      return resolveFromMaps(code, eanMap, skuMap);
     },
+  };
+}
+
+function resolveFromMaps(
+  code: string,
+  eanMap: Map<string, ResolvedProduct>,
+  skuMap: Map<string, ResolvedProduct>,
+): ResolvedProduct | null {
+  const normalized = normalizeBarcodeInput(code);
+  if (!normalized || normalized.length < 4) return null;
+
+  if (isGtinScan(normalized)) {
+    for (const key of scanKeysForEan(normalized)) {
+      const hit = eanMap.get(key);
+      if (hit) return hit;
+    }
+    // Style/SKU column may hold the scannable barcode when EAN column is blank or wrong.
+    for (const key of scanKeysForSku(normalized)) {
+      const hit = skuMap.get(key);
+      if (!hit) continue;
+      const storedEan = normalizeBarcodeInput(hit.ean);
+      if (!storedEan || eanKeysMatch(storedEan, normalized)) return hit;
+    }
+    return null;
+  }
+
+  for (const key of scanKeysForSku(normalized)) {
+    const hit = skuMap.get(key);
+    if (hit) return hit;
+  }
+  for (const key of scanKeysForEan(normalized)) {
+    const hit = eanMap.get(key);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export function explainBarcodeLookup(
+  code: string,
+  ctx: {
+    supplierCatalog?: SupplierCatalogItem[];
+    referenceProducts: ReferenceProduct[];
+    physicalStock: PhysicalStockItem[];
+    decoJobs: DecoJob[];
+  },
+): BarcodeLookupExplanation {
+  const lookup = createBarcodeLookup(ctx);
+  const scanned = normalizeBarcodeInput(code);
+  const resolved = lookup.resolve(code);
+  if (resolved) {
+    return {
+      scanned,
+      resolved,
+      hint: `Matched via ${resolved.source.replace('_', ' ')}.`,
+    };
+  }
+
+  const { stats } = lookup;
+  if (stats.totalKeys === 0) {
+    return {
+      scanned,
+      resolved: null,
+      hint: 'No barcodes loaded — upload a supplier CSV above or sync reference products from the cloud.',
+    };
+  }
+
+  if (isGtinScan(scanned)) {
+    return {
+      scanned,
+      resolved: null,
+      hint:
+        `Not in the ${stats.totalKeys.toLocaleString()} loaded scan keys (supplier ${stats.supplierKeys.toLocaleString()}, reference ${stats.referenceKeys.toLocaleString()}, stock ${stats.physicalKeys.toLocaleString()}). ` +
+        'Check the supplier feed maps this number to the Barcode/EAN column, or add it in Stock Manager reference products.',
+    };
+  }
+
+  return {
+    scanned,
+    resolved: null,
+    hint: `SKU "${scanned}" not in loaded catalogs. Try scanning the EAN barcode on the label.`,
   };
 }
 

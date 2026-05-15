@@ -10,6 +10,7 @@ import { fetchSupplierCatalog } from '../services/supplierCatalogService';
 import { isSupabaseReady } from '../services/supabase';
 import {
   createBarcodeLookup,
+  explainBarcodeLookup,
   isPlausibleScanCode,
   normalizeBarcodeInput,
   physicalStockAggregateKey,
@@ -89,6 +90,7 @@ const StockTakeScanner: React.FC<Props> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
   const [catalogLoadError, setCatalogLoadError] = useState<string | null>(null);
+  const [unknownHint, setUnknownHint] = useState<string | null>(null);
   const lastCamScanRef = useRef<{ code: string; at: number; counted?: boolean }>({ code: '', at: 0 });
   const dismissedCodesRef = useRef<Map<string, number>>(new Map());
   const sessionRef = useRef(session);
@@ -267,15 +269,23 @@ const StockTakeScanner: React.FC<Props> = ({
   };
 
   const showUnknown = useCallback((code: string) => {
+    const explanation = explainBarcodeLookup(code, {
+      supplierCatalog,
+      referenceProducts,
+      physicalStock,
+      decoJobs,
+    });
     setUnknownCode(code);
+    setUnknownHint(explanation.hint);
     setRegForm({ description: '', vendor: '', productCode: '', colour: '', size: '' });
-  }, []);
+  }, [supplierCatalog, referenceProducts, physicalStock, decoJobs]);
 
   const cancelUnknown = useCallback(() => {
     if (unknownCode) {
       dismissedCodesRef.current.set(unknownCode, Date.now() + 10_000);
     }
     setUnknownCode(null);
+    setUnknownHint(null);
     setRegForm({ description: '', vendor: '', productCode: '', colour: '', size: '' });
   }, [unknownCode]);
 
@@ -463,15 +473,24 @@ const StockTakeScanner: React.FC<Props> = ({
         uploadedBy={currentUser?.email || currentUser?.displayName || undefined}
       />
 
-      <p className="text-[10px] text-gray-500 font-semibold px-1">
-        Scan index:{' '}
-        {barcodeLookup.stats.supplierKeys.toLocaleString()} supplier ·{' '}
-        {barcodeLookup.stats.referenceKeys.toLocaleString()} reference ·{' '}
-        {barcodeLookup.stats.physicalKeys.toLocaleString()} branch stock
-        {barcodeLookup.stats.totalKeys === 0 && (
-          <span className="text-amber-700"> — upload a supplier CSV or sync reference products first</span>
-        )}
-      </p>
+      <div className="flex flex-wrap items-center gap-2 px-1 text-[10px] text-gray-500 font-semibold">
+        <span>
+          Scan index:{' '}
+          {supplierCatalog.length.toLocaleString()} supplier rows ·{' '}
+          {barcodeLookup.stats.referenceKeys.toLocaleString()} reference ·{' '}
+          {barcodeLookup.stats.physicalKeys.toLocaleString()} branch stock
+          {barcodeLookup.stats.totalKeys === 0 && (
+            <span className="text-amber-700"> — upload a supplier CSV or sync reference products first</span>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => void reloadSupplierCatalog()}
+          className="px-2 py-0.5 rounded border border-gray-200 text-[9px] font-black uppercase tracking-wider text-indigo-600 hover:bg-indigo-50"
+        >
+          Reload catalog
+        </button>
+      </div>
       {catalogLoadError && (
         <p className="text-[10px] text-amber-800 font-semibold px-1" role="alert">
           Supplier catalog failed to load: {catalogLoadError}. Run migrations/stash_supplier_catalog.sql if needed.
@@ -651,8 +670,8 @@ const StockTakeScanner: React.FC<Props> = ({
                       <p className="text-sm font-black text-amber-900">
                         Unknown barcode: <span className="font-mono">{unknownCode}</span>
                       </p>
-                      <p className="text-[11px] text-amber-800">
-                        Not in your supplier feeds or master list. Add once, or cancel to keep scanning.
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        {unknownHint || 'Not in your supplier feeds or master list. Add once, or cancel to keep scanning.'}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isPlausibleScanCode, normalizeBarcodeInput, resolveProductByBarcode } from './productResolver';
+import {
+  explainBarcodeLookup,
+  isPlausibleScanCode,
+  normalizeBarcodeInput,
+  resolveProductByBarcode,
+} from './productResolver';
 
 describe('normalizeBarcodeInput', () => {
   it('pads 12-digit UPC to EAN-13', () => {
@@ -69,20 +74,59 @@ describe('resolveProductByBarcode', () => {
     expect(r?.description).toBe('Sock');
   });
 
-  it('does not match a 13-digit barcode to another product style code', () => {
+  it('uses product code as GTIN when EAN column has a different number', () => {
     const r = resolveProductByBarcode('5051595439930', {
       referenceProducts: [{
         ean: '6052782439930',
         vendor: 'Test',
         productCode: '5051595439930',
-        description: 'Wrong row',
+        description: 'Correct label barcode',
         colour: '',
         size: '',
       }],
       physicalStock: [],
       decoJobs: [],
     });
-    expect(r).toBeNull();
+    expect(r?.ean).toBe('5051595439930');
+    expect(r?.description).toBe('Correct label barcode');
+  });
+
+  it('matches GTIN stored only in product code when EAN is empty', () => {
+    const r = resolveProductByBarcode('5051595439930', {
+      referenceProducts: [{
+        ean: '',
+        vendor: 'Test',
+        productCode: '5051595439930',
+        description: 'Via SKU column',
+        colour: '',
+        size: '',
+      }],
+      physicalStock: [],
+      decoJobs: [],
+    });
+    expect(r?.description).toBe('Via SKU column');
+  });
+
+  it('indexes numeric product code as GTIN when EAN column differs', () => {
+    const r = resolveProductByBarcode('5051595439930', {
+      supplierCatalog: [{
+        id: '1',
+        supplierName: 'FC',
+        importId: null,
+        ean: '6052782439930',
+        vendor: 'FC',
+        productCode: '5051595439930',
+        description: 'Wrong EAN col',
+        colour: '',
+        size: '',
+        updatedAt: '',
+      }],
+      referenceProducts: [],
+      physicalStock: [],
+      decoJobs: [],
+    });
+    expect(r?.ean).toBe('5051595439930');
+    expect(r?.description).toBe('Wrong EAN col');
   });
 
   it('matches 13-digit barcode to EAN column', () => {
