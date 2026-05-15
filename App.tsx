@@ -49,6 +49,7 @@ import ScanConsoleModal, { ScanLog } from './components/ScanConsoleModal';
 const DecoDashboard = lazyRetry(() => import('./components/DecoDashboard'));
 import MultiSelectFilter from './components/MultiSelectFilter';
 const StockManager = lazyRetry(() => import('./components/StockManager'));
+const StockTakeScanner = lazyRetry(() => import('./components/StockTakeScanner'));
 const ShopifyInventory = lazyRetry(() => import('./components/ShopifyInventory'));
 const ShopifyTagBundles = lazyRetry(() => import('./components/ShopifyTagBundles'));
 const KanbanBoard = lazyRetry(() => import('./components/KanbanBoard'));
@@ -286,7 +287,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2717,7 +2718,7 @@ const App: React.FC = () => {
                 {/* Grouped dropdowns */}
                 {[
                   { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
-                  { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
+                  { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                   { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
                   { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
@@ -2813,7 +2814,7 @@ const App: React.FC = () => {
                     {/* Grouped sections */}
                     {[
                       { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
-                      { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
+                      { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                       { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
                       { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
@@ -3080,6 +3081,23 @@ const App: React.FC = () => {
               />
             )}
             {activeTab === 'stock' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Stock Manager Error"><StockManager physicalStock={physicalStock} setPhysicalStock={updatePhysicalStock} returnStock={returnStock} setReturnStock={updateReturnStock} referenceProducts={referenceProducts} setReferenceProducts={updateReferenceProducts} orders={unifiedOrders} availableTags={allAvailableTags} /></ErrorBoundary></Suspense>}
+            {activeTab === 'stock-take' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Stock take">
+                  <StockTakeScanner
+                    physicalStock={physicalStock}
+                    referenceProducts={referenceProducts}
+                    decoJobs={rawDecoJobs}
+                    currentUser={{
+                      email: isCustomUser ? (customUserData?.username || '') : (user?.email || ''),
+                      displayName: isCustomUser ? (customUserData?.displayName || customUserData?.username || '') : (user?.displayName || ''),
+                    }}
+                    onCommitStock={next => updatePhysicalStock(() => next)}
+                    onUpdateReferenceProducts={updateReferenceProducts}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
             {activeTab === 'inventory' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Inventory Error"><ShopifyInventory /></ErrorBoundary></Suspense>}
             {activeTab === 'efficiency' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Dashboard Error"><EfficiencyDashboard orders={unifiedOrders} excludedTags={excludedTags} /></ErrorBoundary></Suspense>}
             {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); await persistJobLinks([{ itemId, jobId }]); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
