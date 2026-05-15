@@ -1,7 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
-
-const REGION_ID = 'stash-barcode-camera-region';
 
 interface Props {
   active: boolean;
@@ -11,11 +9,15 @@ interface Props {
 
 /** Phone / tablet camera barcode reader (EAN, UPC, Code 128). */
 const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
+  const regionId = useId().replace(/:/g, '');
+  const regionRef = useRef<HTMLDivElement>(null);
   const [starting, setStarting] = useState(false);
   const runningRef = useRef(false);
   const scannerRef = useRef<{ stop: () => Promise<void>; clear: () => Promise<void> } | null>(null);
   const onScanRef = useRef(onScan);
+  const onErrorRef = useRef(onError);
   onScanRef.current = onScan;
+  onErrorRef.current = onError;
 
   useEffect(() => {
     if (!active) {
@@ -33,15 +35,20 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
       return;
     }
 
+    if (runningRef.current) return;
+
     let cancelled = false;
     setStarting(true);
 
+    const elementId = `stash-barcode-camera-${regionId}`;
+
     const start = async () => {
+      if (!regionRef.current || cancelled) return;
       try {
         const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
         if (cancelled) return;
 
-        const scanner = new Html5Qrcode(REGION_ID);
+        const scanner = new Html5Qrcode(elementId);
         await scanner.start(
           { facingMode: 'environment' },
           {
@@ -75,7 +82,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : 'Could not start camera';
-          onError?.(msg);
+          onErrorRef.current?.(msg);
         }
       } finally {
         if (!cancelled) setStarting(false);
@@ -97,13 +104,17 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
         }
       })();
     };
-  }, [active, onError]);
+  }, [active, regionId]);
 
   if (!active) return null;
 
   return (
     <div className="relative rounded-xl overflow-hidden border-2 border-indigo-400 bg-black shadow-inner">
-      <div id={REGION_ID} className="w-full min-h-[min(52vw,280px)] [&_video]:object-cover" />
+      <div
+        ref={regionRef}
+        id={`stash-barcode-camera-${regionId}`}
+        className="w-full min-h-[min(52vw,280px)] [&_video]:object-cover"
+      />
       {starting && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 text-white">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-300" />
@@ -120,4 +131,4 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
   );
 };
 
-export default BarcodeCameraScanner;
+export default React.memo(BarcodeCameraScanner, (prev, next) => prev.active === next.active);

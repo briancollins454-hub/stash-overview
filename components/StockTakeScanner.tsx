@@ -251,6 +251,8 @@ const StockTakeScanner: React.FC<Props> = ({
     [processBarcode],
   );
 
+  const handleCameraError = useCallback((msg: string) => setCameraError(msg), []);
+
   const handleScanSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!scanValue.trim()) return;
@@ -459,7 +461,7 @@ const StockTakeScanner: React.FC<Props> = ({
             </div>
             {scanMode === 'camera' && !unknownCode && (
               <>
-                <BarcodeCameraScanner active onScan={handleCameraScan} onError={msg => setCameraError(msg)} />
+                <BarcodeCameraScanner active onScan={handleCameraScan} onError={handleCameraError} />
                 {cameraError && (
                   <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     {cameraError}. Allow camera access in your browser settings, or switch to Type.
