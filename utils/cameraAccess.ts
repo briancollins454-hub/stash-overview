@@ -50,8 +50,8 @@ export function formatCameraError(err: unknown): CameraAccessResult {
     return {
       ok: false,
       denied: false,
-      message: 'Camera is still starting or stopping.',
-      hint: 'Wait two seconds, tap Close, then Enable camera again.',
+      message: 'Camera did not restart cleanly.',
+      hint: 'Tap Close, wait three seconds, then Enable camera. If it keeps failing, close this tab completely and reopen Stock Take.',
     };
   }
 
