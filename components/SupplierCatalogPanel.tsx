@@ -10,7 +10,7 @@ import {
 import { isSupabaseReady } from '../services/supabase';
 
 const FIELD_LABELS: Record<SupplierCsvField, string> = {
-  ean: 'EAN / barcode *',
+  ean: 'Barcode / SKU (scan key) *',
   vendor: 'Vendor / brand',
   productCode: 'Style / SKU code',
   description: 'Description',
@@ -107,8 +107,11 @@ const SupplierCatalogPanel: React.FC<Props> = ({
       onReferenceMerged(result.mergedReference);
       await onCatalogUpdated();
       await loadImports();
+      const dupNote = result.skippedDuplicates > 0
+        ? ` (${result.skippedDuplicates.toLocaleString()} duplicate keys merged from ${result.sourceRows.toLocaleString()} file rows)`
+        : '';
       setSuccess(
-        `Uploaded ${result.import.rowCount} barcodes for ${result.import.supplierName}. Master reference updated.`,
+        `Uploaded ${result.import.rowCount.toLocaleString()} scan keys for ${result.import.supplierName}${dupNote}. Master reference updated.`,
       );
       setFile(null);
       setCsvText('');

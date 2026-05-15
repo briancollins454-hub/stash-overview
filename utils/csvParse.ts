@@ -21,28 +21,61 @@ export function parseCsvText(text: string): { headers: string[]; rows: string[][
 
 export type SupplierCsvField = 'ean' | 'vendor' | 'productCode' | 'description' | 'colour' | 'size';
 
+const EAN_BLOCKLIST = /commodity|supplier\s*code|style\s*code|colourway\s*code|hs\s*code/i;
+
+function headerMatches(h: string, pattern: RegExp): boolean {
+  return pattern.test(h.trim());
+}
+
+/** Guess CSV columns for supplier feeds (Full Collection, etc.). */
 export function guessSupplierColumnMapping(headers: string[]): Record<SupplierCsvField, string> {
   const mapping: Record<SupplierCsvField, string> = {
     ean: '', vendor: '', productCode: '', description: '', colour: '', size: '',
   };
+
   for (const h of headers) {
-    const low = h.toLowerCase();
-    if (!mapping.ean && (low.includes('ean') || low.includes('barcode') || low.includes('upc') || low.includes('gtin'))) {
+    const low = h.toLowerCase().trim();
+    if (low === 'sku' || low === 'barcode' || low === 'ean' || low === 'upc' || low === 'gtin') {
       mapping.ean = h;
     }
-    if (!mapping.vendor && (low.includes('vendor') || low.includes('supplier') || low.includes('brand'))) {
-      mapping.vendor = h;
-    }
-    if (!mapping.productCode && (low.includes('sku') || low.includes('style') || low.includes('code') || low.includes('ref'))) {
-      mapping.productCode = h;
-    }
-    if (!mapping.description && (low.includes('name') || low.includes('description') || low.includes('title') || low.includes('item'))) {
-      mapping.description = h;
-    }
-    if (!mapping.colour && (low.includes('color') || low.includes('colour') || low.includes('shade'))) {
+    if (headerMatches(h, /^style\s*code$/i)) mapping.productCode = h;
+    if (low === 'title') mapping.description = h;
+    if (headerMatches(h, /^colourway\s*name$/i) || low === 'colour' || low === 'color') {
       mapping.colour = h;
     }
-    if (!mapping.size && low.includes('size')) mapping.size = h;
+    if (low === 'brand') mapping.vendor = h;
+    if (low === 'size' && !low.includes('conversion')) mapping.size = h;
   }
+
+  for (const h of headers) {
+    const low = h.toLowerCase();
+    if (
+      !mapping.ean
+      && !EAN_BLOCKLIST.test(h)
+      && (low.includes('ean') || low.includes('barcode') || low.includes('upc') || low.includes('gtin'))
+    ) {
+      mapping.ean = h;
+    }
+    if (!mapping.vendor && (low.includes('brand') || (low.includes('vendor') && !low.includes('supplier')))) {
+      mapping.vendor = h;
+    }
+    if (
+      !mapping.productCode
+      && !EAN_BLOCKLIST.test(h)
+      && (low.includes('style') || low.includes('product code') || low === 'ref')
+    ) {
+      mapping.productCode = h;
+    }
+    if (!mapping.description && (low.includes('title') || low.includes('description') || low.includes('name'))) {
+      mapping.description = h;
+    }
+    if (!mapping.colour && (low.includes('colour') || low.includes('color') || low.includes('shade'))) {
+      mapping.colour = h;
+    }
+    if (!mapping.size && low.includes('size') && !low.includes('conversion')) {
+      mapping.size = h;
+    }
+  }
+
   return mapping;
 }

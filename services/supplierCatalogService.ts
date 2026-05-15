@@ -31,6 +31,19 @@ function rowToItem(row: Record<string, unknown>): SupplierCatalogItem {
 }
 
 /** Latest row per EAN when multiple suppliers share a barcode. */
+/** One row per supplier + scan key (last row in file wins). */
+export function dedupeSupplierCatalogRows(
+  rows: SupplierCatalogItem[],
+): { rows: SupplierCatalogItem[]; skippedDuplicates: number } {
+  const byKey = new Map<string, SupplierCatalogItem>();
+  for (const row of rows) {
+    const key = `${row.supplierName.toLowerCase()}|${normalizeBarcodeInput(row.ean)}`;
+    byKey.set(key, row);
+  }
+  const deduped = Array.from(byKey.values());
+  return { rows: deduped, skippedDuplicates: rows.length - deduped.length };
+}
+
 export function collapseSupplierCatalogByEan(items: SupplierCatalogItem[]): SupplierCatalogItem[] {
   const byEan = new Map<string, SupplierCatalogItem>();
   const sorted = [...items].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -129,7 +142,7 @@ function cellsToCatalogRows(
   for (const [field, hdr] of Object.entries(mapping) as [SupplierCsvField, string][]) {
     idx[field] = hdr ? headers.indexOf(hdr) : -1;
   }
-  if (idx.ean < 0) throw new Error('Map the EAN / barcode column before uploading.');
+  if (idx.ean < 0) throw new Error('Map the barcode / SKU column before uploading.');
 
   const now = new Date().toISOString();
   const out: SupplierCatalogItem[] = [];
@@ -172,6 +185,8 @@ export interface UploadSupplierCsvResult {
   import: SupplierImport;
   catalogRows: SupplierCatalogItem[];
   mergedReference: ReferenceProduct[];
+  skippedDuplicates: number;
+  sourceRows: number;
 }
 
 export async function uploadSupplierCsv(
@@ -183,17 +198,32 @@ export async function uploadSupplierCsv(
   if (!supplierName) throw new Error('Supplier name is required.');
 
   const { headers, rows } = parseCsvText(params.csvText);
-  const catalogRows = cellsToCatalogRows(
+  const sourceRows = cellsToCatalogRows(
     supplierName,
     '',
     headers,
     rows,
     params.mapping,
   );
-  if (catalogRows.length === 0) throw new Error('No rows with valid barcodes found.');
+  if (sourceRows.length === 0) {
+    throw new Error('No rows with valid barcodes found. Map the SKU or EAN column (not Style Code).');
+  }
+
+  const { rows: catalogRows, skippedDuplicates } = dedupeSupplierCatalogRows(sourceRows);
+  if (catalogRows.length === 0) {
+    throw new Error('No unique scan keys after deduplication.');
+  }
+  if (catalogRows.length === 1 && sourceRows.length > 10) {
+    throw new Error(
+      'Every row mapped to the same scan key — use the SKU column (unique per size/colour), not Style Code or Supplier Code.',
+    );
+  }
 
   const importId = newSupplierImportId();
-  catalogRows.forEach(r => { r.importId = importId; });
+  catalogRows.forEach((r, i) => {
+    r.importId = importId;
+    r.id = `${importId}_${i + 1}`;
+  });
 
   const importRow = {
     id: importId,
@@ -244,5 +274,7 @@ export async function uploadSupplierCsv(
     },
     catalogRows,
     mergedReference,
+    skippedDuplicates,
+    sourceRows: sourceRows.length,
   };
 }
