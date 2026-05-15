@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Printer, Save, ScanLine, Trash2,
+  AlertTriangle, ArrowLeft, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Printer, Save, ScanLine,
+  Trash2,
 } from 'lucide-react';
 import { openStockTakePrint } from '../utils/stockTakePrint';
 import BarcodeCameraScanner from './BarcodeCameraScanner';
@@ -20,6 +21,7 @@ import {
   buildPhysicalStockFromStockTake,
   createStockTakeSession,
   deleteStockTakeLine,
+  fetchCommittedStockTakeSessions,
   fetchOpenStockTakeSessions,
   fetchStockTakeSession,
   lineFromResolved,
@@ -45,6 +47,17 @@ const LOCATION_LABELS: Record<StockTakeLocation, string> = {
   all: 'All locations (book)',
 };
 
+function formatSessionWhen(iso: string | null | undefined): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 interface Props {
   physicalStock: PhysicalStockItem[];
   referenceProducts: ReferenceProduct[];
@@ -66,6 +79,7 @@ const StockTakeScanner: React.FC<Props> = ({
   const [session, setSession] = useState<StockTakeSession | null>(null);
   const [lines, setLines] = useState<StockTakeLineView[]>([]);
   const [openSessions, setOpenSessions] = useState<StockTakeSession[]>([]);
+  const [committedSessions, setCommittedSessions] = useState<StockTakeSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanValue, setScanValue] = useState('');
   const [addQty, setAddQty] = useState(1);
@@ -145,9 +159,13 @@ const StockTakeScanner: React.FC<Props> = ({
     setLoading(true);
     setError(null);
     try {
-      const open = await fetchOpenStockTakeSessions();
+      const [open, committed] = await Promise.all([
+        fetchOpenStockTakeSessions(),
+        fetchCommittedStockTakeSessions(),
+      ]);
       await reloadSupplierCatalog();
       setOpenSessions(open);
+      setCommittedSessions(committed);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not load sessions');
     } finally {
@@ -164,7 +182,7 @@ const StockTakeScanner: React.FC<Props> = ({
   }, [session?.id, reloadSupplierCatalog]);
 
   useEffect(() => {
-    if (session) {
+    if (session && session.status === 'open') {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ sessionId: session.id, lines }));
     }
   }, [session, lines]);
@@ -216,17 +234,32 @@ const StockTakeScanner: React.FC<Props> = ({
 
   const resumeSession = async (id: string) => {
     setLoading(true);
+    setError(null);
     try {
       const { session: s, lines: ls } = await fetchStockTakeSession(id);
       if (!s) throw new Error('Session not found');
       setSession(s);
       setLines(ls);
+      setCameraOpen(s.status === 'open');
+      setUnknownCode(null);
+      setCameraFlash(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load session');
     } finally {
       setLoading(false);
     }
   };
+
+  const exitSession = () => {
+    setSession(null);
+    setLines([]);
+    setUnknownCode(null);
+    setCameraFlash(null);
+    setCameraError(null);
+    localStorage.removeItem(DRAFT_KEY);
+  };
+
+  const isReadOnly = session?.status === 'committed';
 
   const persistLine = async (line: StockTakeLineView) => {
     if (!session || session.id.startsWith('local_')) return;
@@ -416,14 +449,14 @@ const StockTakeScanner: React.FC<Props> = ({
       onCommitStock(next);
       const refs = mergeReferenceFromLines(lines, referenceProducts);
       onUpdateReferenceProducts(refs);
+      const committedAt = new Date().toISOString();
       if (!session.id.startsWith('local_')) {
         await markSessionCommitted(session.id);
       }
-      setSession(null);
-      setLines([]);
+      setSession({ ...session, status: 'committed', committed_at: committedAt });
       localStorage.removeItem(DRAFT_KEY);
       window.alert(
-        `Stock take committed.\nUpdated: ${summary.updated}\nNew: ${summary.created}\nDuplicate rows removed: ${summary.removed}`,
+        `Stock take committed.\nUpdated: ${summary.updated}\nNew: ${summary.created}\nDuplicate rows removed: ${summary.removed}\n\nYou can open PDF or review lines below.`,
       );
       void loadOpen();
     } catch (e: unknown) {
@@ -529,7 +562,9 @@ const StockTakeScanner: React.FC<Props> = ({
 
           {loading ? (
             <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
-          ) : openSessions.length > 0 ? (
+          ) : (
+            <div className="space-y-6">
+              {openSessions.length > 0 && (
             <div>
               <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Resume open session</h2>
               <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
@@ -549,7 +584,35 @@ const StockTakeScanner: React.FC<Props> = ({
                 ))}
               </ul>
             </div>
-          ) : null}
+              )}
+              {committedSessions.length > 0 && (
+                <div>
+                  <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">
+                    Committed counts
+                  </h2>
+                  <p className="text-[11px] text-gray-500 mb-2">
+                    Reopen a finished count to view lines or print the PDF report.
+                  </p>
+                  <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
+                    {committedSessions.map(s => (
+                      <li key={s.id}>
+                        <button
+                          type="button"
+                          onClick={() => void resumeSession(s.id)}
+                          className="w-full text-left px-4 py-3 hover:bg-emerald-50/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1"
+                        >
+                          <span className="font-bold text-gray-900 text-sm">{s.label}</span>
+                          <span className="text-[10px] font-bold text-emerald-700 uppercase shrink-0">
+                            Committed {formatSessionWhen(s.committed_at || s.created_at)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -559,9 +622,25 @@ const StockTakeScanner: React.FC<Props> = ({
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                 {LOCATION_LABELS[session.location as StockTakeLocation] || session.location}
                 {' · '}{totals.skus} lines · {totals.units} units
+                {isReadOnly && session.committed_at && (
+                  <> · Committed {formatSessionWhen(session.committed_at)}</>
+                )}
               </p>
+              {isReadOnly && (
+                <span className="inline-block mt-1 px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase tracking-widest">
+                  Committed — view only
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={exitSession}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-gray-50"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back
+              </button>
               <button
                 type="button"
                 disabled={lines.length === 0}
@@ -571,18 +650,21 @@ const StockTakeScanner: React.FC<Props> = ({
                 <Printer className="w-4 h-4" />
                 PDF
               </button>
-              <button
-                type="button"
-                disabled={committing || lines.length === 0}
-                onClick={() => void handleCommit()}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
-              >
-                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Commit to stock
-              </button>
+              {!isReadOnly && (
+                <button
+                  type="button"
+                  disabled={committing || lines.length === 0}
+                  onClick={() => void handleCommit()}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
+                >
+                  {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Commit to stock
+                </button>
+              )}
             </div>
           </div>
 
+          {!isReadOnly && (
           <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-sm p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
@@ -751,14 +833,16 @@ const StockTakeScanner: React.FC<Props> = ({
               </form>
             )}
           </div>
-
+          )}
 
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-500">
-              <Package className="w-3.5 h-3.5" /> Counted lines
+              <Package className="w-3.5 h-3.5" /> {isReadOnly ? 'Counted lines (committed)' : 'Counted lines'}
             </div>
             {lines.length === 0 ? (
-              <p className="p-8 text-center text-sm text-gray-400 font-bold">No scans yet — start scanning.</p>
+              <p className="p-8 text-center text-sm text-gray-400 font-bold">
+                {isReadOnly ? 'No lines were saved for this session.' : 'No scans yet — start scanning.'}
+              </p>
             ) : (
               <ul className="divide-y divide-gray-50 max-h-[50vh] overflow-y-auto">
                 {lines.map(line => {
@@ -781,37 +865,41 @@ const StockTakeScanner: React.FC<Props> = ({
                           {book > 0 ? ` · was ${book} on book` : ' · not on book'}
                         </p>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setLineQty(line.id, line.qty - 1)}
-                          className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
-                        >
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          min={0}
-                          value={line.qty}
-                          onChange={e => setLineQty(line.id, parseInt(e.target.value, 10) || 0)}
-                          className="w-14 h-8 text-center font-black border border-gray-200 rounded-lg"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setLineQty(line.id, line.qty + 1)}
-                          className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
-                        >
-                          +
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void removeLine(line.id)}
-                          className="p-2 text-gray-400 hover:text-red-600"
-                          title="Remove line"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {isReadOnly ? (
+                        <p className="text-lg font-black text-indigo-700 tabular-nums">{line.qty}</p>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setLineQty(line.id, line.qty - 1)}
+                            className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
+                          >
+                            −
+                          </button>
+                          <input
+                            type="number"
+                            min={0}
+                            value={line.qty}
+                            onChange={e => setLineQty(line.id, parseInt(e.target.value, 10) || 0)}
+                            className="w-14 h-8 text-center font-black border border-gray-200 rounded-lg"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setLineQty(line.id, line.qty + 1)}
+                            className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void removeLine(line.id)}
+                            className="p-2 text-gray-400 hover:text-red-600"
+                            title="Remove line"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     </li>
                   );
                 })}
@@ -821,8 +909,14 @@ const StockTakeScanner: React.FC<Props> = ({
 
           <p className="text-[10px] text-gray-500 flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
-            Commit replaces on-hand quantity for scanned products only. Run{' '}
-            <code className="bg-gray-100 px-1 rounded">stash_stock_take.sql</code> in Supabase if sessions fail to save.
+            {isReadOnly
+              ? 'This count is committed. Use PDF for a printable report, or Back to open another session.'
+              : (
+                <>
+                  Commit replaces on-hand quantity for scanned products only. Run{' '}
+                  <code className="bg-gray-100 px-1 rounded">stash_stock_take.sql</code> in Supabase if sessions fail to save.
+                </>
+              )}
           </p>
         </>
       )}

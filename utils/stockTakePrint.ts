@@ -28,6 +28,15 @@ export function openStockTakePrint(opts: {
     year: 'numeric',
   });
   const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const committedAt = session.committed_at
+    ? new Date(session.committed_at).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    : null;
 
   const sorted = [...rows].sort((a, b) => {
     const da = a.line.description.localeCompare(b.line.description);
@@ -94,6 +103,7 @@ export function openStockTakePrint(opts: {
   <p class="meta">
     ${esc(locationLabel)} · ${esc(dateStr)} ${esc(timeStr)}<br />
     Session ${esc(session.id)}${session.created_by ? ` · ${esc(session.created_by)}` : ''}
+    ${committedAt ? `<br />Committed ${esc(committedAt)}` : ''}
   </p>
   <div class="kpis">
     <div class="kpi"><span>SKU lines</span><strong>${totals.skus}</strong></div>

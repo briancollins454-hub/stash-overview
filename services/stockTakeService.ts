@@ -118,6 +118,16 @@ export async function fetchOpenStockTakeSessions(): Promise<StockTakeSession[]> 
   return Array.isArray(rows) ? rows : [];
 }
 
+export async function fetchCommittedStockTakeSessions(limit = 30): Promise<StockTakeSession[]> {
+  if (!isSupabaseReady()) return [];
+  const res = await supabaseFetch(
+    `${SESSIONS_TABLE}?status=eq.committed&order=committed_at.desc&limit=${limit}`,
+    'GET',
+  );
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function fetchStockTakeSession(sessionId: string): Promise<{
   session: StockTakeSession | null;
   lines: StockTakeLineView[];
