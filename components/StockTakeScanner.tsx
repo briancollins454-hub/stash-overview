@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Save, ScanLine, Trash2,
+  AlertTriangle, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Printer, Save, ScanLine, Trash2,
 } from 'lucide-react';
+import { openStockTakePrint } from '../utils/stockTakePrint';
 import BarcodeCameraScanner from './BarcodeCameraScanner';
 import SupplierCatalogPanel from './SupplierCatalogPanel';
 import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem } from '../types';
@@ -299,6 +300,19 @@ const StockTakeScanner: React.FC<Props> = ({
     } catch { /* */ }
   };
 
+  const handlePrintPdf = () => {
+    if (!session || lines.length === 0) return;
+    openStockTakePrint({
+      session,
+      locationLabel: LOCATION_LABELS[session.location as StockTakeLocation] || session.location,
+      rows: lines.map(line => ({
+        line,
+        bookQty: bookByKey.get(line.stockKey) ?? 0,
+      })),
+      totals,
+    });
+  };
+
   const handleCommit = async () => {
     if (!session || lines.length === 0) return;
     const msg =
@@ -441,15 +455,26 @@ const StockTakeScanner: React.FC<Props> = ({
                 {' · '}{totals.skus} lines · {totals.units} units
               </p>
             </div>
-            <button
-              type="button"
-              disabled={committing || lines.length === 0}
-              onClick={() => void handleCommit()}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
-            >
-              {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Commit to stock
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={lines.length === 0}
+                onClick={handlePrintPdf}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-gray-50"
+              >
+                <Printer className="w-4 h-4" />
+                PDF
+              </button>
+              <button
+                type="button"
+                disabled={committing || lines.length === 0}
+                onClick={() => void handleCommit()}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
+              >
+                {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Commit to stock
+              </button>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-sm p-4 space-y-3">
