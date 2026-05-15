@@ -303,7 +303,7 @@
   <h1>Stash Shop Overview</h1>
   <div class="subtitle">Shopify × DecoNetwork Production Bridge</div>
   <div class="tagline">Complete Instruction Manual</div>
-  <div class="cover-badge">Version 4.0 &mdash; April 2026</div>
+  <div class="cover-badge">Version 4.2 &mdash; May 2026</div>
   <div class="cover-meta">stashoverview.co.uk &bull; Stash Sportswear</div>
 </div>
 
@@ -349,10 +349,12 @@
 
   <div class="toc-section">
     <div class="toc-section-title">Other Features</div>
-    <div class="toc-item"><span class="num">15</span><span class="title">Stock Management</span><span class="dots"></span></div>
-    <div class="toc-item"><span class="num">16</span><span class="title">Notes, Chat &amp; Notifications</span><span class="dots"></span></div>
-    <div class="toc-item"><span class="num">17</span><span class="title">Syncing &amp; Data Refresh</span><span class="dots"></span></div>
-    <div class="toc-item"><span class="num">18</span><span class="title">Quick Reference — Status Cheat Sheet</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">15</span><span class="title">Stock Manager</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">16</span><span class="title">Stock Take — Barcode Counting</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">17</span><span class="title">Notes, Chat &amp; Notifications</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">18</span><span class="title">Syncing &amp; Data Refresh</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">19</span><span class="title">Complete Tab Reference</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">20</span><span class="title">Quick Reference — Status Cheat Sheet</span><span class="dots"></span></div>
   </div>
 </div>
 
@@ -368,28 +370,86 @@
     </div>
   </div>
 
-  <p>Stash Shop Overview runs entirely in your browser at <strong>stashoverview.co.uk</strong>. The top navigation bar gives you access to every area of the system. Here's what each tab does:</p>
+  <p>Stash Shop Overview runs entirely in your browser at <strong>stashoverview.co.uk</strong>. The top navigation bar gives you access to every area of the system.</p>
 
+  <p>Navigation matches the app: <strong>daily tabs</strong> on the bar, then <strong>ORDERS</strong>, <strong>PRODUCTION</strong>, <strong>ANALYTICS</strong>, <strong>FINANCE</strong>, and <strong>ADMIN</strong> dropdowns. Your role may hide some tabs.</p>
+
+  <h4>Daily tabs (top bar)</h4>
   <table class="status-table">
-    <thead>
-      <tr><th>Tab</th><th>What It Does</th></tr>
-    </thead>
+    <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><strong>DASHBOARD</strong></td><td>Your home base. Every Shopify order in one table, grouped by club/vendor with filters, search, and summary cards.</td></tr>
-      <tr><td><strong>KANBAN</strong></td><td>Visual board with columns: <strong>New → Linked → In Production → Ready to Ship</strong>. Drag-and-drop style overview.</td></tr>
-      <tr><td><strong>INTEL</strong></td><td>Intelligence tools: auto-matching engine, duplicate detection, and production forecasting.</td></tr>
-      <tr><td><strong>PRODUCTION</strong></td><td>Priority queue, production calendar, and batch print sheets.</td></tr>
-      <tr><td><strong>REPORTS</strong></td><td>Analytics suite: profitability, club leaderboard, late orders, EAN coverage, carrier performance, bottlenecks, and more.</td></tr>
-      <tr><td><strong>OPS</strong></td><td>Operations dashboard — alert rules, returns tracker, artwork approvals.</td></tr>
-      <tr><td><strong>STOCK</strong></td><td>Physical inventory management: stock counts, EAN barcodes, reorder points.</td></tr>
-      <tr><td><strong>EFFICIENCY</strong></td><td>Efficiency metrics and workflow analysis.</td></tr>
-      <tr><td><strong>MTO</strong></td><td>Make-To-Order dashboard for bespoke/custom items with per-item job tracking.</td></tr>
-      <tr><td><strong>DECO</strong></td><td>DecoNetwork job search: find, view, and manage Deco production jobs.</td></tr>
-      <tr><td><strong>REVENUE</strong></td><td>Revenue dashboard with sales breakdowns and trends.</td></tr>
-      <tr><td><strong>LINKER</strong></td><td>Auto job linking tools for bulk matching Shopify orders to Deco jobs.</td></tr>
-      <tr><td><strong>FULFILL</strong></td><td>Batch fulfillment &amp; shipping — create ShipStation labels and ship multiple orders at once.</td></tr>
-      <tr><td><strong>ANALYST</strong></td><td>Process analysis tools for workflow optimisation.</td></tr>
-      <tr><td><strong>USERS</strong></td><td>User management (admin only) — add/remove users, assign roles.</td></tr>
+      <tr><td><strong>DASHBOARD</strong></td><td>All Shopify orders — table, filters, linking, notes. Sections 4–7.</td></tr>
+      <tr><td><strong>BRIEFING</strong></td><td>Morning briefing: KPIs, risks, and what needs attention today.</td></tr>
+      <tr><td><strong>DAILY</strong></td><td>Daily task list: Deco priorities, finance checks, manual to-dos (synced to cloud).</td></tr>
+      <tr><td><strong>SUMMARY</strong></td><td>Mobile-friendly snapshot — priority counts, quick jumps to other tabs.</td></tr>
+      <tr><td><strong>LIVE (Command)</strong></td><td>Live command centre — real-time production overview.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Orders menu</h4>
+  <table class="status-table">
+    <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Priority Board</strong></td><td>Deco jobs by stage: Awaiting PO, Stock, Processing, Shipping. Follow-up notes sync live. Section 19.</td></tr>
+      <tr><td><strong>Kanban</strong></td><td>Visual pipeline: New → Linked → In Production → Ready to Ship. Section 8.</td></tr>
+      <tr><td><strong>Ops Centre</strong></td><td>Alert rules, returns tracker, artwork approvals.</td></tr>
+      <tr><td><strong>Orders by tag</strong></td><td>Bundle and filter orders by Shopify tags (e.g. club campaigns).</td></tr>
+      <tr><td><strong>Fulfillment</strong></td><td>Batch ShipStation shipping. Sections 12–13.</td></tr>
+      <tr><td><strong>Auto Linker</strong></td><td>Bulk link Shopify orders to Deco jobs. Section 10.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Production menu</h4>
+  <table class="status-table">
+    <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Production</strong></td><td>Priority queue, production calendar, batch print sheets.</td></tr>
+      <tr><td><strong>Shop Floor</strong></td><td>Shop-floor view of active production work.</td></tr>
+      <tr><td><strong>Deco Network</strong></td><td>Search and open Deco jobs directly.</td></tr>
+      <tr><td><strong>Made to Order</strong></td><td>MTO / bespoke items with per-line Deco linking.</td></tr>
+      <tr><td><strong>Stock Manager</strong></td><td>Branch physical stock, reference products, returns. Section 15.</td></tr>
+      <tr><td><strong>Stock Take</strong></td><td>Barcode counts on site → commit to stock. Section 16.</td></tr>
+      <tr><td><strong>Shopify Inventory</strong></td><td>Shopify location inventory — view and adjust.</td></tr>
+      <tr><td><strong>Wholesale Lookup</strong></td><td>Search a code — compare price and stock across wholesaler feeds.</td></tr>
+      <tr><td><strong>Issue Log</strong></td><td>Production issues log — track and resolve problems.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Analytics menu</h4>
+  <table class="status-table">
+    <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Intel</strong></td><td>Auto-match engine, duplicate detector, production forecasting.</td></tr>
+      <tr><td><strong>Reports</strong></td><td>Full analytics suite. Section 14.</td></tr>
+      <tr><td><strong>Efficiency</strong></td><td>Workflow efficiency metrics from order data.</td></tr>
+      <tr><td><strong>Process Analyst</strong></td><td>Process analysis and optimisation insights.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Finance menu</h4>
+  <table class="status-table">
+    <thead><tr><th>Tab</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Revenue</strong></td><td>Revenue dashboard and trends.</td></tr>
+      <tr><td><strong>Sales Analytics</strong></td><td>Sales breakdowns and performance.</td></tr>
+      <tr><td><strong>Finance hub</strong> (£ icon)</td><td>Shortcut to financial tools in the header.</td></tr>
+      <tr><td><strong>Shipped Not Invoiced</strong></td><td>Orders shipped but not yet invoiced in accounts.</td></tr>
+      <tr><td><strong>Credit Block List</strong></td><td>Customers on credit hold — block fulfilment until cleared.</td></tr>
+      <tr><td><strong>Unpaid Orders</strong></td><td>Outstanding payment tracking.</td></tr>
+      <tr><td><strong>Email Digest</strong></td><td>Configure and preview scheduled email digests.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Admin &amp; tools</h4>
+  <table class="status-table">
+    <thead><tr><th>Tab / icon</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>User Management</strong></td><td>Add users, roles, and per-tab permissions (admin).</td></tr>
+      <tr><td><strong>Cloud Health</strong></td><td>Supabase / sync health and data diagnostics.</td></tr>
+      <tr><td><strong>Alerts</strong></td><td>Configure alert rules (also under Ops Centre).</td></tr>
+      <tr><td><strong>Manual</strong> (book icon)</td><td>This instruction manual.</td></tr>
+      <tr><td><strong>Settings</strong> (gear)</td><td>API keys, excluded tags, preferences — not a main tab.</td></tr>
+      <tr><td><strong>Integration Guide</strong></td><td>First-time Shopify / Deco setup wizard (<code>?tab=guide</code>).</td></tr>
     </tbody>
   </table>
 
@@ -1069,8 +1129,8 @@
   <div class="section-header">
     <div class="section-num">15</div>
     <div>
-      <h2>Stock Management</h2>
-      <span class="tab-badge">Stock Tab</span>
+      <h2>Stock Manager</h2>
+      <span class="tab-badge">Stock Manager Tab</span>
     </div>
   </div>
 
@@ -1089,12 +1149,53 @@
 </div>
 
 
-<!-- ████████████████████████████████████████████████████ -->
-<!-- SECTION 16: NOTES, CHAT & NOTIFICATIONS             -->
-<!-- ████████████████████████████████████████████████████ -->
+
+<!-- SECTION 16: STOCK TAKE -->
 <div class="section page-break">
   <div class="section-header">
     <div class="section-num">16</div>
+    <div>
+      <h2>Stock Take — Barcode Counting</h2>
+      <span class="tab-badge">Stock Take Tab</span>
+    </div>
+  </div>
+
+  <p>The <strong>Stock Take</strong> tab is for physical counts on site. Scan barcodes (phone camera or USB scanner), build a session, then <strong>Commit to stock</strong> to update quantities in Stock Manager. Scanned lines <em>replace</em> on-hand quantity for those products; items you did not scan are left unchanged.</p>
+
+  <h3>Before you start</h3>
+  <ul>
+    <li>Wait for the <strong>Scan index</strong> line to finish loading (supplier catalog + reference products). If counts are zero, tap <span class="ui-label">Reload catalog</span> after uploading a supplier CSV.</li>
+    <li>Use <strong>https://</strong> on phones so the camera can start. Allow camera permission when prompted.</li>
+  </ul>
+
+  <h3>Workflow</h3>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Start</strong> a new session (name + location) or resume an <strong>open session</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Scan</strong> — Camera mode (tap Enable camera) or Type mode for a USB wedge scanner. Set <strong>Qty per scan</strong> for cartons.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Unknown barcodes can be registered once with description/vendor/code, or cancelled to keep scanning.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>PDF</strong> — Print or save a count report (counted vs on-book variance) any time before or after commit.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text"><strong>Commit to stock</strong> — Writes counted quantities to branch stock. Confirm the dialog.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text"><strong>Committed counts</strong> — On the home screen, reopen any finished session (view-only) to review lines or print the PDF again.</div></div>
+  </div>
+
+  <div class="callout callout-warn">
+    <div class="callout-title">⚠️ Important</div>
+    Stock Take does not use the main <span class="ui-label">SYNC</span> button. Sessions and lines save to Supabase (<code>stash_stock_take</code> tables). Supplier barcodes come from the catalog upload panel at the top of Stock Take.
+  </div>
+
+  <div class="callout callout-tip">
+    <div class="callout-title">💡 Tip</div>
+    If the camera fails to start, tap <strong>Close</strong>, wait a few seconds, then <strong>Enable camera</strong> again. Hold the barcode 25–50&nbsp;cm from the lens.
+  </div>
+</div>
+
+
+<!-- ████████████████████████████████████████████████████ -->
+<!-- SECTION 17: NOTES, CHAT & NOTIFICATIONS             -->
+<!-- ████████████████████████████████████████████████████ -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">17</div>
     <div>
       <h2>Notes, Chat &amp; Notifications</h2>
     </div>
@@ -1128,11 +1229,11 @@
 
 
 <!-- ████████████████████████████████████████████████████ -->
-<!-- SECTION 17: SYNCING & DATA REFRESH                  -->
+<!-- SECTION 18: SYNCING & DATA REFRESH                  -->
 <!-- ████████████████████████████████████████████████████ -->
 <div class="section page-break">
   <div class="section-header">
-    <div class="section-num">17</div>
+    <div class="section-num">18</div>
     <div>
       <h2>Syncing &amp; Data Refresh</h2>
     </div>
@@ -1171,12 +1272,109 @@
 </div>
 
 
+
+<!-- SECTION 19: COMPLETE TAB REFERENCE -->
+<div class="section page-break">
+  <div class="section-header">
+    <div class="section-num">19</div>
+    <div>
+      <h2>Complete Tab Reference</h2>
+    </div>
+  </div>
+
+  <p>This section documents every major tab not covered in detail earlier. Cross-references point to section numbers above.</p>
+
+  <h3>Briefing</h3>
+  <p>Start-of-day overview: order volume, late risk, production pressure, and suggested focus areas. Use after <span class="ui-label">SYNC</span> so numbers are current.</p>
+
+  <h3>Daily tasks</h3>
+  <ul>
+    <li>Tasks are stored per day in Supabase and shared across devices.</li>
+    <li><strong>Import from Priority</strong> — pulls urgent Deco jobs into today&apos;s list.</li>
+    <li><strong>Finance checks</strong> — shortcuts to Shipped Not Invoiced, Credit Block, Unpaid Orders.</li>
+    <li><strong>AI scan</strong> — optional suggestions from live job data.</li>
+    <li>Mark complete or <strong>reviewed</strong>; filter by Deco responsible person.</li>
+  </ul>
+
+  <h3>Mobile summary</h3>
+  <p>Compact layout for phones: priority board counts (Awaiting PO / Stock / Processing), quick tiles, and links into full tabs.</p>
+
+  <h3>Live command centre</h3>
+  <p>Real-time dashboard for who is working on what — suited to floor managers monitoring active production.</p>
+
+  <h3>Priority Board</h3>
+  <p>Deco jobs sorted into columns by production stage. Each row shows urgency (critical / high / normal), days waiting, and value.</p>
+  <ul>
+    <li><strong>Follow-up notes</strong> on Awaiting Stock / PO rows save automatically and sync to all PCs (no manual Sync button).</li>
+    <li><strong>Clear completed</strong> — refreshes Deco status for selected jobs and removes shipped/cancelled from the board.</li>
+    <li><strong>Print handoff</strong> — PDF for a morning meeting with selected columns and notes.</li>
+    <li>Filter by sales person; overdue jobs sort to the top.</li>
+  </ul>
+
+  <h3>Ops Centre</h3>
+  <p>Operations toolkit: <strong>Alert Manager</strong> (rules for Slack/email-style alerts), <strong>Returns Tracker</strong>, <strong>Artwork Approval Tracker</strong>.</p>
+
+  <h3>Orders by tag</h3>
+  <p>Group orders by Shopify tag bundles — useful for club campaigns, pre-orders, or seasonal runs. Filter and act on a tag set as one batch.</p>
+
+  <h3>Shop Floor</h3>
+  <p>Simplified production-floor view of in-progress work — less detail than Dashboard, focused on what needs doing now.</p>
+
+  <h3>Made to Order (MTO)</h3>
+  <p>Lists bespoke / made-to-order Shopify lines. Link each line to a Deco job, refresh job status, and track completion separately from standard stock items.</p>
+
+  <h3>Shopify Inventory</h3>
+  <p>Reads Shopify location inventory (on hand, committed, incoming). Search products, view by location, and adjust quantities where your API permissions allow.</p>
+
+  <h3>Wholesale Lookup</h3>
+  <ul>
+    <li>Type a <strong>product code</strong> or scan a barcode — searches uploaded wholesaler price feeds.</li>
+    <li>Results group by <strong>style</strong> with a size × colour matrix, stock per supplier, and &quot;best buy&quot; (cheapest in-stock option).</li>
+    <li>Upload CSV price lists (admin); feeds show last-updated time.</li>
+    <li>Optional qty-needed field to see which supplier can fulfil an order.</li>
+  </ul>
+
+  <h3>Issue Log</h3>
+  <p>Log production problems (misprints, delays, quality). Track status, assignee, and link to jobs/orders. Feeds into Daily tasks suggestions.</p>
+
+  <h3>Intel tab</h3>
+  <ul>
+    <li><strong>Auto-Match Panel</strong> — suggests Shopify ↔ Deco links by EAN and fuzzy matching.</li>
+    <li><strong>Duplicate Detector</strong> — finds possible duplicate Deco jobs.</li>
+    <li><strong>Forecast Panel</strong> — capacity / demand forecasting.</li>
+  </ul>
+
+  <h3>Finance tabs</h3>
+  <table class="status-table">
+    <thead><tr><th>Tab</th><th>Use when</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Shipped Not Invoiced</strong></td><td>Deco shows shipped but invoice not raised in accounts.</td></tr>
+      <tr><td><strong>Credit Block List</strong></td><td>Customer on stop — do not ship until credit cleared.</td></tr>
+      <tr><td><strong>Unpaid Orders</strong></td><td>Payment outstanding before production or dispatch.</td></tr>
+      <tr><td><strong>Revenue / Sales</strong></td><td>Management reporting on sales performance.</td></tr>
+      <tr><td><strong>Email Digest</strong></td><td>Build scheduled summary emails for the team.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Cloud Health</h3>
+  <p>Admin diagnostic: Supabase connectivity, table row counts, last sync times. Use if data looks stale or sessions fail to save.</p>
+
+  <h3>User Management</h3>
+  <p>Create users with roles (superuser, admin, manager, viewer) or custom tab lists. Managers get production tabs; viewers are read-only on dashboard/reports.</p>
+
+  <div class="callout callout-info">
+    <div class="callout-title">Database migrations</div>
+    New features may need SQL run once in Supabase: <code>stash_stock_take.sql</code>, <code>stash_supplier_catalog.sql</code>, <code>stash_priority_notes.sql</code>, <code>stash_daily_tasks.sql</code>.
+  </div>
+</div>
+
+
 <!-- ████████████████████████████████████████████████████ -->
-<!-- SECTION 18: QUICK REFERENCE CHEAT SHEET             -->
+<!-- SECTION 20: QUICK REFERENCE CHEAT SHEET             -->
 <!-- ████████████████████████████████████████████████████ -->
 <div class="section page-break">
   <div class="section-header">
-    <div class="section-num">18</div>
+    <div class="section-num">20</div>
     <div>
       <h2>Quick Reference — Status Cheat Sheet</h2>
     </div>
@@ -1281,7 +1479,7 @@
 <!-- FOOTER                                              -->
 <!-- ████████████████████████████████████████████████████ -->
 <div class="doc-footer">
-  <p>STASH SHOP OVERVIEW &bull; INSTRUCTION MANUAL &bull; VERSION 4.0 &bull; APRIL 2026</p>
+  <p>STASH SHOP OVERVIEW &bull; INSTRUCTION MANUAL &bull; VERSION 4.2 &bull; May 2026</p>
   <p style="margin-top: 6px; opacity: 0.7;">stashoverview.co.uk &bull; Stash Sportswear</p>
 </div>
 
