@@ -280,22 +280,35 @@ const StockTakeScanner: React.FC<Props> = ({
   }, [unknownCode]);
 
   const applyScan = useCallback(
-    (raw: string, opts?: { fromCamera?: boolean }) => {
+    (raw: string, opts?: { fromCamera?: boolean }): boolean => {
       const code = normalizeBarcodeInput(raw);
-      if (!code || !sessionRef.current) return;
-      if (isScanDismissed(code)) return;
-      if (opts?.fromCamera && !isPlausibleScanCode(code)) return;
+      if (!code || !sessionRef.current) return false;
+      if (isScanDismissed(code)) return false;
+      if (opts?.fromCamera && !isPlausibleScanCode(code)) return false;
 
       const now = Date.now();
       const last = lastCamScanRef.current;
-      if (opts?.fromCamera && last.code === code && last.counted && now - last.at < 1800) return;
+      const camCooldownMs = 3000;
+
+      if (opts?.fromCamera && now - last.at < 1200) return true;
+
+      if (opts?.fromCamera && last.code === code && now - last.at < camCooldownMs) {
+        return true;
+      }
 
       const product = barcodeLookupRef.current.resolve(code);
       if (!product) {
-        if (opts?.fromCamera && last.code === code && now - last.at < 1200) return;
+        if (opts?.fromCamera && unknownCode === code) return true;
         showUnknown(code);
         lastCamScanRef.current = { code, at: now };
-        return;
+        if (opts?.fromCamera) {
+          setCameraFlash(null);
+        }
+        return true;
+      }
+
+      if (opts?.fromCamera && last.code === code && last.counted && now - last.at < camCooldownMs) {
+        return true;
       }
 
       lastCamScanRef.current = { code, at: now, counted: true };
@@ -310,15 +323,18 @@ const StockTakeScanner: React.FC<Props> = ({
             ? `Scanned ${code} → ${matchedEan}`
             : code,
         );
-        window.setTimeout(() => setCameraFlash(null), 1200);
+        window.setTimeout(() => setCameraFlash(null), 1500);
       }
       addScan(product, Math.max(1, addQty));
+      return true;
     },
-    [addQty, isScanDismissed, showUnknown],
+    [addQty, isScanDismissed, showUnknown, unknownCode],
   );
 
   const processBarcode = useCallback(
-    (raw: string) => applyScan(raw, { fromCamera: false }),
+    (raw: string) => {
+      applyScan(raw, { fromCamera: false });
+    },
     [applyScan],
   );
 

@@ -9,7 +9,8 @@ import {
 } from '../utils/cameraAccess';
 import { releaseAllCameraStreams } from '../utils/cameraRelease';
 
-const SCAN_COOLDOWN_MS = 550;
+const SCAN_COOLDOWN_MS = 900;
+const SCAN_COOLDOWN_HANDLED_MS = 2800;
 
 type Phase = 'idle' | 'starting' | 'live' | 'error';
 
@@ -17,7 +18,8 @@ interface Props {
   active: boolean;
   /** When true, decoding is paused (e.g. unknown-barcode form open). */
   paused?: boolean;
-  onScan: (code: string) => void;
+  /** Return true if the scan was consumed (counted or unknown form shown). */
+  onScan: (code: string) => boolean | void;
   onError?: (message: string) => void;
   /** Fired after the camera stream is fully stopped (Close button or parent sets active=false). */
   onClose?: () => void;
@@ -102,6 +104,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
   const [accessError, setAccessError] = useState<CameraAccessResult | null>(null);
   const runningRef = useRef(false);
   const scanLockedRef = useRef(false);
+  const lastDecodeRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const scannerRef = useRef<{
     stop: () => Promise<void>;
     clear: () => Promise<void>;
@@ -120,6 +123,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
 
   const stopScanner = useCallback(async () => {
     scanLockedRef.current = false;
+    lastDecodeRef.current = { code: '', at: 0 };
     lifecycleRef.current += 1;
     if (scannerRef.current && runningRef.current) {
       try {
@@ -153,20 +157,31 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         const code = normalizeBarcodeInput(decodedText);
         if (!isPlausibleScanCode(code)) return;
 
+        const now = Date.now();
+        const last = lastDecodeRef.current;
+        if (last.code === code && now - last.at < SCAN_COOLDOWN_HANDLED_MS) return;
+        if (now - last.at < SCAN_COOLDOWN_MS) return;
+
         scanLockedRef.current = true;
-        onScanRef.current(code);
+        const handled = onScanRef.current(code) !== false;
+        lastDecodeRef.current = { code, at: now };
 
         try {
           scanner.pause(true);
         } catch { /* */ }
 
+        const pauseMs = handled ? SCAN_COOLDOWN_HANDLED_MS : SCAN_COOLDOWN_MS;
         window.setTimeout(() => {
           if (lifecycleRef.current !== runId) return;
+          if (pausedRef.current) {
+            scanLockedRef.current = false;
+            return;
+          }
           try {
             scanner.resume();
           } catch { /* */ }
           scanLockedRef.current = false;
-        }, SCAN_COOLDOWN_MS);
+        }, pauseMs);
       };
 
       await startScannerWithFallback(scanner, elementId, Html5QrcodeSupportedFormats, onDecoded);
@@ -252,7 +267,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
   const env = isCameraEnvironmentOk();
 
   return (
-    <div className="relative rounded-xl overflow-hidden border-2 border-indigo-400 bg-black shadow-inner min-h-[min(70vw,380px)]">
+    <div className="relative rounded-xl overflow-hidden border-2 border-indigo-400 bg-black shadow-inner min-h-[min(70vw,380px)] [&_#qr-shaded-region]:!hidden">
       <div
         ref={regionRef}
         id={`stash-barcode-camera-${regionId}`}
