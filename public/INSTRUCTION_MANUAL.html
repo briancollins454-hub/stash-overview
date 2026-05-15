@@ -303,7 +303,7 @@
   <h1>Stash Shop Overview</h1>
   <div class="subtitle">Shopify × DecoNetwork Production Bridge</div>
   <div class="tagline">Complete Instruction Manual</div>
-  <div class="cover-badge">Version 4.2 &mdash; May 2026</div>
+  <div class="cover-badge">Version 5.0 &mdash; May 2026</div>
   <div class="cover-meta">stashoverview.co.uk &bull; Stash Sportswear</div>
 </div>
 
@@ -353,7 +353,7 @@
     <div class="toc-item"><span class="num">16</span><span class="title">Stock Take — Barcode Counting</span><span class="dots"></span></div>
     <div class="toc-item"><span class="num">17</span><span class="title">Notes, Chat &amp; Notifications</span><span class="dots"></span></div>
     <div class="toc-item"><span class="num">18</span><span class="title">Syncing &amp; Data Refresh</span><span class="dots"></span></div>
-    <div class="toc-item"><span class="num">19</span><span class="title">Complete Tab Reference</span><span class="dots"></span></div>
+    <div class="toc-item"><span class="num">19</span><span class="title">How to Use Every Feature</span><span class="dots"></span></div>
     <div class="toc-item"><span class="num">20</span><span class="title">Quick Reference — Status Cheat Sheet</span><span class="dots"></span></div>
   </div>
 </div>
@@ -392,7 +392,7 @@
     <tbody>
       <tr><td><strong>Priority Board</strong></td><td>Deco jobs by stage: Awaiting PO, Stock, Processing, Shipping. Follow-up notes sync live. Section 19.</td></tr>
       <tr><td><strong>Kanban</strong></td><td>Visual pipeline: New → Linked → In Production → Ready to Ship. Section 8.</td></tr>
-      <tr><td><strong>Ops Centre</strong></td><td>Alert rules, returns tracker, artwork approvals.</td></tr>
+      <tr><td><strong>Ops Centre</strong></td><td>Returns log, artwork approvals, shipping label log. Alert rules: 🔔 bell (Section 19).</td></tr>
       <tr><td><strong>Orders by tag</strong></td><td>Bundle and filter orders by Shopify tags (e.g. club campaigns).</td></tr>
       <tr><td><strong>Fulfillment</strong></td><td>Batch ShipStation shipping. Sections 12–13.</td></tr>
       <tr><td><strong>Auto Linker</strong></td><td>Bulk link Shopify orders to Deco jobs. Section 10.</td></tr>
@@ -1273,98 +1273,317 @@
 
 
 
-<!-- SECTION 19: COMPLETE TAB REFERENCE -->
+<!-- SECTION 19: HOW TO USE EVERY FEATURE -->
 <div class="section page-break">
   <div class="section-header">
     <div class="section-num">19</div>
     <div>
-      <h2>Complete Tab Reference</h2>
+      <h2>How to Use Every Feature</h2>
     </div>
   </div>
 
-  <p>This section documents every major tab not covered in detail earlier. Cross-references point to section numbers above.</p>
+  <p>Part I (sections 1–18) explains the Dashboard, linking, fulfilment, reports, stock take, notes, and sync in depth. Below are <strong>step-by-step instructions for every tab</strong>, using the same labels as the app.</p>
 
-  <h3>Briefing</h3>
-  <p>Start-of-day overview: order volume, late risk, production pressure, and suggested focus areas. Use after <span class="ui-label">SYNC</span> so numbers are current.</p>
+  <div class="callout callout-info no-break">
+    <div class="callout-title">Detailed elsewhere</div>
+    Sections <strong>4–8</strong> Dashboard &amp; Kanban · <strong>9–11</strong> Linking · <strong>12–13</strong> Fulfill · <strong>14</strong> Reports · <strong>15–16</strong> Stock · <strong>17–18</strong> Notes &amp; SYNC
+  </div>
 
-  <h3>Daily tasks</h3>
-  <ul>
-    <li>Tasks are stored per day in Supabase and shared across devices.</li>
-    <li><strong>Import from Priority</strong> — pulls urgent Deco jobs into today&apos;s list.</li>
-    <li><strong>Finance checks</strong> — shortcuts to Shipped Not Invoiced, Credit Block, Unpaid Orders.</li>
-    <li><strong>AI scan</strong> — optional suggestions from live job data.</li>
-    <li>Mark complete or <strong>reviewed</strong>; filter by Deco responsible person.</li>
-  </ul>
+  <h3>Daily operations</h3>
+  <h3 class="no-break">Briefing (morning overview) <span class="tab-badge">Briefing Tab</span></h3>
+  <p>Your start-of-day picture: Deco pipeline health, overdue jobs, team workload, and Shopify import gaps. Best used right after a full <span class="ui-label">SYNC</span>.</p>
+  <p><em>See also: Sections 4–6; Section 18 for SYNC.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>BRIEFING</strong> from the top navigation bar.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Read the headline badge and hero stats (active orders, in production, blocked, overdue, shipping today).</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Read the <strong>Situation Brief</strong> narrative.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Expand <strong>Do First</strong> — click any job row to jump to the <strong>Dashboard</strong>.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Expand <strong>Issues &amp; Root Causes</strong> and <strong>Overdue</strong>; click jobs to open the Dashboard.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text">Use <strong>Team Workload</strong> — click a staff name for a drill-down list; close with ✕.</div></div>
+    <div class="step"><div class="step-num">7</div><div class="step-text">Review <strong>Shopify Orders</strong> for import gaps (<strong>Not Imported</strong> warnings).</div></div>
+  </div>
+  <div class="callout callout-tip no-break">
+    <div class="callout-title">💡 Tip</div>
+    Briefing opens jobs on the Dashboard, not the Deco tab.
+  </div>
+  <h3 class="no-break">Daily tasks <span class="tab-badge">Daily Tab</span></h3>
+  <p>Shared to-do list per calendar day — from Priority Board, finance, issues, AI, or manual notes. Stored in Supabase.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>📋 DAILY</strong>; confirm the <strong>Day</strong> date.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Optional: set <strong>View</strong> to one Deco staff member (hides finance rows).</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Click <strong>Pull from system (priority order)</strong> for urgent jobs + finance/issue reminders.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Optional: <strong>AI smart scan</strong> for extra suggestions.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Add tasks via <strong>Add your own task…</strong> → <strong>Add</strong>.</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text">Per row: <strong>Hold-up / note</strong>, tick <strong>Checked / reviewed</strong>, then <strong>Complete</strong>.</div></div>
+    <div class="step"><div class="step-num">7</div><div class="step-text">Use <strong>Find order</strong> or <strong>Open linked page</strong> to jump to related tabs.</div></div>
+    <div class="step"><div class="step-num">8</div><div class="step-text">Export: set <strong>From</strong> / <strong>To</strong> → <strong>Weekly PDF (all)</strong> or per-person PDFs.</div></div>
+  </div>
+  <div class="callout callout-warn no-break">
+    <div class="callout-title">⚠️ Important</div>
+    Jobs already marked <strong>Complete</strong> on any day are not re-added by Pull from system.
+  </div>
+  <div class="callout callout-tip no-break">
+    <div class="callout-title">💡 Tip</div>
+    Run <code>migrations/stash_daily_tasks.sql</code> once if tasks fail to save.
+  </div>
+  <h3 class="no-break">Mobile summary <span class="tab-badge">Summary Tab</span></h3>
+  <p>Phone-friendly KPI tiles — tap to open Dashboard filters or other tabs.</p>
+  <p><em>See also: Section 5 for quick filter meanings.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>📱 SUMMARY</strong>; refresh after SYNC.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Search order #, customer, or Deco job → tap result → Dashboard.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Tap Shopify tiles: <strong>Late</strong>, <strong>Not on Deco</strong>, <strong>Ready to Ship</strong>, etc.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Tap Priority tiles → opens Priority Board.</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Expand Sales/Finance/Credit sections → <strong>Open …</strong> for full tabs.</div></div>
+  </div>
+  <h3 class="no-break">Live command centre <span class="tab-badge">Command Tab</span></h3>
+  <p>Full-screen live Shopify pipeline view for wall displays or management check-ins.</p>
+  <p><em>See also: Briefing / Priority Board for Deco workflow detail.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>⚡ LIVE</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Switch views: <strong>Overview</strong>, <strong>Pipeline &amp; Trends</strong>, <strong>Clubs</strong>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Click orders for drawer detail → <strong>Open in Dashboard</strong>.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Press <strong>F</strong> fullscreen; <strong>Esc</strong> to exit.</div></div>
+  </div>
+  <h3 class="no-break">Priority Board <span class="tab-badge">Priority Board</span></h3>
+  <p>Deco jobs by stage: Awaiting PO → Stock → Processing → Shipping.</p>
+  <p><em>See also: Section 3 for status meanings.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Priority Board</strong> under ORDERS.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Check freshness; click <strong>Sync now</strong> if stale.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Filter <strong>Staff</strong> for stand-ups or PDFs.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Work columns left to right; add <strong>Follow-up note</strong> on PO/Stock rows (auto-syncs to all PCs).</div></div>
+    <div class="step"><div class="step-num">5</div><div class="step-text">Click jobs to open Dashboard; use time filters (<strong>90D+</strong>, etc.).</div></div>
+    <div class="step"><div class="step-num">6</div><div class="step-text">Click <strong>Remove Completed</strong> after jobs ship/cancel in Deco.</div></div>
+    <div class="step"><div class="step-num">7</div><div class="step-text"><strong>PDF</strong> → select sections → Print / Save as PDF.</div></div>
+  </div>
+  <div class="callout callout-warn no-break">
+    <div class="callout-title">⚠️ Important</div>
+    Wait for Remove Completed to finish before SYNC, or cleared jobs can reappear.
+  </div>
+  <div class="callout callout-tip no-break">
+    <div class="callout-title">💡 Tip</div>
+    Notes need <code>stash_priority_notes.sql</code> in Supabase once.
+  </div>
+  <h3 class="no-break">Ops Centre <span class="tab-badge">Ops Centre Tab</span></h3>
+  <p>Returns log, artwork approvals, and shipping label logging. (Alert rules are under the 🔔 header bell.)</p>
+  <p><em>See also: Section 12 for batch Fulfill shipping.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Returns</strong> — Order #, item, reason → <strong>Save</strong>; add <strong>Remake Job #</strong> if needed.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Artwork Approvals</strong> — Order #, design, notes → <strong>Save</strong>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Shipping Labels</strong> — log carrier/tracking for shipments outside Fulfill.</div></div>
+  </div>
+  <h3 class="no-break">Orders by tag <span class="tab-badge">Orders by Tag</span></h3>
+  <p>Orders grouped under each Shopify tag — for club campaigns and seasonal runs.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Orders by tag</strong>; search and set date preset.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Toggle <strong>Refunds</strong>, <strong>Has Deco #</strong>, <strong>No Deco #</strong>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Expand all</strong> / <strong>Collapse all</strong>; work orders inside each tag.</div></div>
+  </div>
+  <div class="callout callout-tip no-break">
+    <div class="callout-title">💡 Tip</div>
+    Same order can appear under multiple tags — intentional.
+  </div>
+  <h3 class="no-break">Kanban board <span class="tab-badge">Kanban Tab</span></h3>
+  <p>Visual pipeline of orders by stage — drag cards or use filters for team stand-ups.</p>
+  <p><em>See also: Sections 6–7 for Dashboard filters and status colours.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Kanban</strong> under ORDERS.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Use column filters and search to narrow the board.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Click a card to open order detail on the Dashboard.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Move cards between stages when your process allows (or update in Deco and SYNC).</div></div>
+  </div>
+  <h3 class="no-break">Fulfillment <span class="tab-badge">Fulfill Tab</span></h3>
+  <p>Batch pick, pack, and ship linked Shopify orders.</p>
+  <p><em>See also: Section 12–13 for full fulfilment workflow.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Fulfill</strong> after orders are linked (Sections 9–11).</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Filter by ready-to-ship / location as needed.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Select orders → generate labels or mark shipped per your carrier workflow.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Confirm stock and Deco status before shipping.</div></div>
+  </div>
+  <h3 class="no-break">Reports <span class="tab-badge">Reports Tab</span></h3>
+  <p>Operational and carrier reports — export or print.</p>
+  <p><em>See also: Section 14 for report catalogue.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Reports</strong> under ANALYTICS.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Pick a report type from the list (completion, carrier, stock, etc.).</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Set date range and filters → <strong>Run</strong> or <strong>Export</strong>.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text">Use PDF/CSV for management packs.</div></div>
+  </div>
+  <h3 class="no-break">Stock Take <span class="tab-badge">Stock Take Tab</span></h3>
+  <p>Barcode count sessions for physical stock — commit when done.</p>
+  <p><em>See also: Section 16 for full Stock Take detail.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Stock Take</strong>; wait for scan index / catalog to load.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Start a new session or reopen an open one; use <strong>Committed counts</strong> to review past sessions.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Scan barcodes or type EAN; adjust qty per line.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Commit</strong> when finished; print PDF from committed sessions.</div></div>
+  </div>
+  <div class="callout callout-warn no-break">
+    <div class="callout-title">⚠️ Important</div>
+    On mobile: Close camera, wait a moment, then Enable camera; allow browser camera permission on HTTPS.
+  </div>
+  <h3 class="no-break">Auto Linker <span class="tab-badge">Auto Linker Tab</span></h3>
+  <p>Bulk-suggest Shopify ↔ Deco links by EAN and fuzzy match.</p>
+  <p><em>See also: Sections 10–11 after linking.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Auto Linker</strong>; review suggestion count.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Toggle <strong>High Confidence Only</strong> or <strong>Show All</strong>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Per row: <strong>Apply</strong> or <strong>Dismiss</strong>; or <strong>Apply All High</strong>.</div></div>
+  </div>
+  <h3 class="no-break">Production tab <span class="tab-badge">Production Tab</span></h3>
+  <p>Intelligence analytics, Deco production table (print/filter), priority queue, and calendar.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Scroll the tab: <strong>Production Intelligence</strong> → risks and throughput.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Deco Production Table</strong> → search, columns, <strong>Print / Save as PDF</strong>.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Priority Queue</strong> and <strong>Production Calendar</strong> for planning.</div></div>
+  </div>
+  <h3 class="no-break">Shop Floor <span class="tab-badge">Shop Floor Tab</span></h3>
+  <p>Slack feeds: Print, Embroidery, Delivery updates.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Shop Floor</strong>; read the three channel feeds.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Use with Priority Board for actionable job lists.</div></div>
+  </div>
+  <div class="callout callout-tip no-break">
+    <div class="callout-title">💡 Tip</div>
+    Requires Slack sync configured server-side.
+  </div>
+  <h3 class="no-break">Deco Network <span class="tab-badge">Deco Tab</span></h3>
+  <p>Direct Deco job search and linking.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Deco Network</strong>; search job #.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Link and map items (Sections 9–11).</div></div>
+  </div>
+  <h3 class="no-break">Made to Order (MTO) <span class="tab-badge">MTO Tab</span></h3>
+  <p>Per-line Deco jobs for bespoke items.</p>
+  <p><em>See also: Section 9 MTO badges.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open <strong>Made to Order</strong>; filter by club tags if needed.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Link lines via <strong>Bulk Link MTO Items</strong> or per row.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Refresh job status after linking.</div></div>
+  </div>
+  <h3 class="no-break">Stock Manager <span class="tab-badge">Stock Manager Tab</span></h3>
+  <p>Branch stock, returns, master catalogue — feeds Dashboard STOCK %.</p>
+  <p><em>See also: Section 16 Stock Take for barcode counts.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Allocation Hub</strong> — dispatch / allocate stock.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Add Stock</strong> / <strong>View Stock</strong> — quantities and EANs.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Returns</strong> — scan Shopify order for returns.</div></div>
+    <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Master Data</strong> — CSV import for reference products.</div></div>
+  </div>
+  <h3 class="no-break">Shopify Inventory <span class="tab-badge">Inventory Tab</span></h3>
+  <p>Shopify warehouse stock (not branch physical stock).</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Configure Warehouse Locations</strong> → <strong>Save</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Load inventory</strong>; filter out/low/in stock.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Search product → <strong>Edit</strong> qty → <strong>Save</strong>.</div></div>
+  </div>
+  <h3 class="no-break">Wholesale Lookup <span class="tab-badge">Wholesale Tab</span></h3>
+  <p>Compare supplier price feeds and stock for a product code.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Search product code; review style matrix and <strong>best buy</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Enter <strong>qty needed</strong> for fulfilment check.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Admins: <strong>Upload Wholesaler Feed</strong> CSV.</div></div>
+  </div>
+  <h3 class="no-break">Issue Log <span class="tab-badge">Issue Log Tab</span></h3>
+  <p>Log and track production problems.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>New Request</strong> → name, type, description → save.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Resolve with notes; feeds Daily tasks Pull from system.</div></div>
+  </div>
+  <h3 class="no-break">Intel tab <span class="tab-badge">Intel Tab</span></h3>
+  <p>Auto-match, duplicate detector, forecast.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Auto-Match Panel</strong> — apply Shopify↔Deco suggestions.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Duplicate Detector</strong> — find duplicate Deco jobs.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Forecast Panel</strong> — capacity outlook.</div></div>
+  </div>
+  <h3 class="no-break">Efficiency dashboard <span class="tab-badge">Efficiency Tab</span></h3>
+  <p>Dispatch efficiency metrics.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Open tab; review charts; pair with Reports completion/carrier reports.</div></div>
+  </div>
+  <h3 class="no-break">Process Analyst <span class="tab-badge">Analyst Tab</span></h3>
+  <p>Ask questions about order data in plain English.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Type or use suggestion chips.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Verify answers on Dashboard before acting.</div></div>
+  </div>
+  <h3 class="no-break">Revenue dashboard <span class="tab-badge">Revenue Tab</span></h3>
+  <p>Revenue trends by period.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Select <strong>ALL</strong> / <strong>7D</strong> / <strong>30D</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Review charts and top customers.</div></div>
+  </div>
+  <h3 class="no-break">Sales analytics <span class="tab-badge">Sales Tab</span></h3>
+  <p>Sales exports for management.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Set date filters → <strong>Refresh</strong>.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Export</strong> or <strong>Export Detail</strong> CSV.</div></div>
+  </div>
+  <h3 class="no-break">Finance hub <span class="tab-badge">Finance (£ icon)</span></h3>
+  <p>Deco AR, QuickBooks, exports.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Sync Recent</strong> daily; <strong>Full Reload</strong> weekly.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Connect/sync QuickBooks if used.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Export summary/Excel; click jobs → Dashboard.</div></div>
+  </div>
+  <h3 class="no-break">Shipped not invoiced <span class="tab-badge">Shipped Not Invoiced</span></h3>
+  <p>Shipped in Deco, not invoiced in accounts.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Review outstanding list; raise invoices in accounts.</div></div>
+  </div>
+  <h3 class="no-break">Credit block list <span class="tab-badge">Credit Block</span></h3>
+  <p>Customers on credit stop.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Review blocked customers; clear before shipping.</div></div>
+  </div>
+  <h3 class="no-break">Unpaid orders <span class="tab-badge">Unpaid Orders</span></h3>
+  <p>Payment outstanding before fulfilment.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Re-read finance cache or pull from Deco.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Print chase list; use authorise actions per process.</div></div>
+  </div>
+  <h3 class="no-break">Email digest <span class="tab-badge">Digest Tab</span></h3>
+  <p>Scheduled team summary emails.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Add recipients; pick daily/weekly.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Preview → send (needs server email config).</div></div>
+  </div>
+  <h3 class="no-break">User management <span class="tab-badge">Users Tab</span></h3>
+  <p>Staff logins and tab permissions (admin).</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Add User</strong> with role or custom tab list.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Refresh; edit/disable when staff leave.</div></div>
+  </div>
+  <h3 class="no-break">Cloud health <span class="tab-badge">Cloud Health Tab</span></h3>
+  <p>Local vs cloud data diagnostics.</p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Check per-table counts.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Run Integrity Check</strong> if drift suspected.</div></div>
+  </div>
+  <h3 class="no-break">Alerts — stock &amp; rules <span class="tab-badge">Alerts</span></h3>
+  <p><strong>Alerts tab</strong>: stock reorder + supplier PO. <strong>🔔 bell</strong>: Alert Manager rules.</p>
+  <p><em>See also: Section 17 order notes.</em></p>
+  <div class="steps">
+    <div class="step"><div class="step-num">1</div><div class="step-text">Stock Alerts — set reorder points.</div></div>
+    <div class="step"><div class="step-num">2</div><div class="step-text">Supplier Reorder — Copy/Download PO.</div></div>
+    <div class="step"><div class="step-num">3</div><div class="step-text">Bell → New Alert Rule for automated notifications.</div></div>
+  </div>
 
-  <h3>Mobile summary</h3>
-  <p>Compact layout for phones: priority board counts (Awaiting PO / Stock / Processing), quick tiles, and links into full tabs.</p>
+  <h3 class="page-break">Orders &amp; linking</h3>
+  <p>Dashboard linking detail: Sections <strong>9–11</strong>. Auto Linker steps above complement bulk linking.</p>
 
-  <h3>Live command centre</h3>
-  <p>Real-time dashboard for who is working on what — suited to floor managers monitoring active production.</p>
+  <h3>Production &amp; stock</h3>
+  <p>Stock Take full workflow: <strong>Section 16</strong>. Stock Manager overview: <strong>Section 15</strong>.</p>
 
-  <h3>Priority Board</h3>
-  <p>Deco jobs sorted into columns by production stage. Each row shows urgency (critical / high / normal), days waiting, and value.</p>
-  <ul>
-    <li><strong>Follow-up notes</strong> on Awaiting Stock / PO rows save automatically and sync to all PCs (no manual Sync button).</li>
-    <li><strong>Clear completed</strong> — refreshes Deco status for selected jobs and removes shipped/cancelled from the board.</li>
-    <li><strong>Print handoff</strong> — PDF for a morning meeting with selected columns and notes.</li>
-    <li>Filter by sales person; overdue jobs sort to the top.</li>
-  </ul>
-
-  <h3>Ops Centre</h3>
-  <p>Operations toolkit: <strong>Alert Manager</strong> (rules for Slack/email-style alerts), <strong>Returns Tracker</strong>, <strong>Artwork Approval Tracker</strong>.</p>
-
-  <h3>Orders by tag</h3>
-  <p>Group orders by Shopify tag bundles — useful for club campaigns, pre-orders, or seasonal runs. Filter and act on a tag set as one batch.</p>
-
-  <h3>Shop Floor</h3>
-  <p>Simplified production-floor view of in-progress work — less detail than Dashboard, focused on what needs doing now.</p>
-
-  <h3>Made to Order (MTO)</h3>
-  <p>Lists bespoke / made-to-order Shopify lines. Link each line to a Deco job, refresh job status, and track completion separately from standard stock items.</p>
-
-  <h3>Shopify Inventory</h3>
-  <p>Reads Shopify location inventory (on hand, committed, incoming). Search products, view by location, and adjust quantities where your API permissions allow.</p>
-
-  <h3>Wholesale Lookup</h3>
-  <ul>
-    <li>Type a <strong>product code</strong> or scan a barcode — searches uploaded wholesaler price feeds.</li>
-    <li>Results group by <strong>style</strong> with a size × colour matrix, stock per supplier, and &quot;best buy&quot; (cheapest in-stock option).</li>
-    <li>Upload CSV price lists (admin); feeds show last-updated time.</li>
-    <li>Optional qty-needed field to see which supplier can fulfil an order.</li>
-  </ul>
-
-  <h3>Issue Log</h3>
-  <p>Log production problems (misprints, delays, quality). Track status, assignee, and link to jobs/orders. Feeds into Daily tasks suggestions.</p>
-
-  <h3>Intel tab</h3>
-  <ul>
-    <li><strong>Auto-Match Panel</strong> — suggests Shopify ↔ Deco links by EAN and fuzzy matching.</li>
-    <li><strong>Duplicate Detector</strong> — finds possible duplicate Deco jobs.</li>
-    <li><strong>Forecast Panel</strong> — capacity / demand forecasting.</li>
-  </ul>
-
-  <h3>Finance tabs</h3>
-  <table class="status-table">
-    <thead><tr><th>Tab</th><th>Use when</th></tr></thead>
-    <tbody>
-      <tr><td><strong>Shipped Not Invoiced</strong></td><td>Deco shows shipped but invoice not raised in accounts.</td></tr>
-      <tr><td><strong>Credit Block List</strong></td><td>Customer on stop — do not ship until credit cleared.</td></tr>
-      <tr><td><strong>Unpaid Orders</strong></td><td>Payment outstanding before production or dispatch.</td></tr>
-      <tr><td><strong>Revenue / Sales</strong></td><td>Management reporting on sales performance.</td></tr>
-      <tr><td><strong>Email Digest</strong></td><td>Build scheduled summary emails for the team.</td></tr>
-    </tbody>
-  </table>
-
-  <h3>Cloud Health</h3>
-  <p>Admin diagnostic: Supabase connectivity, table row counts, last sync times. Use if data looks stale or sessions fail to save.</p>
-
-  <h3>User Management</h3>
-  <p>Create users with roles (superuser, admin, manager, viewer) or custom tab lists. Managers get production tabs; viewers are read-only on dashboard/reports.</p>
+  <h3>Analytics &amp; finance</h3>
+  <p>All Reports: <strong>Section 14</strong>. Finance and Intel steps are in the guides above.</p>
 
   <div class="callout callout-info">
-    <div class="callout-title">Database migrations</div>
-    New features may need SQL run once in Supabase: <code>stash_stock_take.sql</code>, <code>stash_supplier_catalog.sql</code>, <code>stash_priority_notes.sql</code>, <code>stash_daily_tasks.sql</code>.
+    <div class="callout-title">One-time database setup</div>
+    Run in Supabase if a feature fails to save: <code>stash_stock_take.sql</code>, <code>stash_supplier_catalog.sql</code>, <code>stash_priority_notes.sql</code>, <code>stash_daily_tasks.sql</code>.
   </div>
 </div>
 
@@ -1479,7 +1698,7 @@
 <!-- FOOTER                                              -->
 <!-- ████████████████████████████████████████████████████ -->
 <div class="doc-footer">
-  <p>STASH SHOP OVERVIEW &bull; INSTRUCTION MANUAL &bull; VERSION 4.2 &bull; May 2026</p>
+  <p>STASH SHOP OVERVIEW &bull; INSTRUCTION MANUAL &bull; VERSION 5.0 &bull; May 2026</p>
   <p style="margin-top: 6px; opacity: 0.7;">stashoverview.co.uk &bull; Stash Sportswear</p>
 </div>
 
