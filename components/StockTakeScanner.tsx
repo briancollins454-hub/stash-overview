@@ -84,12 +84,36 @@ const StockTakeScanner: React.FC<Props> = ({
   const [scanMode, setScanMode] = useState<'camera' | 'keyboard'>(() =>
     prefersCameraScan() ? 'camera' : 'keyboard',
   );
+  const [cameraOpen, setCameraOpen] = useState(true);
   const [cameraFlash, setCameraFlash] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
   const lastCamScanRef = useRef<{ code: string; at: number; counted?: boolean }>({ code: '', at: 0 });
+  const dismissedCodesRef = useRef<Map<string, number>>(new Map());
   const sessionRef = useRef(session);
   sessionRef.current = session;
+
+  const resolverCtxRef = useRef({
+    supplierCatalog,
+    referenceProducts,
+    physicalStock,
+    decoJobs,
+  });
+  resolverCtxRef.current = { supplierCatalog, referenceProducts, physicalStock, decoJobs };
+
+  useEffect(() => () => {
+    setCameraOpen(false);
+  }, []);
+
+  const isScanDismissed = useCallback((code: string) => {
+    const until = dismissedCodesRef.current.get(code);
+    if (!until) return false;
+    if (Date.now() > until) {
+      dismissedCodesRef.current.delete(code);
+      return false;
+    }
+    return true;
+  }, []);
 
   const bookByKey = useMemo(() => {
     const m = new Map<string, number>();
@@ -133,7 +157,9 @@ const StockTakeScanner: React.FC<Props> = ({
   }, [session, lines]);
 
   useEffect(() => {
-    if (scanMode === 'keyboard' && !unknownCode) scanRef.current?.focus();
+    if (scanMode === 'keyboard' && !unknownCode) {
+      scanRef.current?.focus();
+    }
   }, [session, unknownCode, scanMode]);
 
   const totals = useMemo(() => {
@@ -229,60 +255,60 @@ const StockTakeScanner: React.FC<Props> = ({
     setAddQty(1);
   };
 
-  const processBarcode = useCallback(
-    (raw: string) => {
+  const showUnknown = useCallback((code: string) => {
+    setUnknownCode(code);
+    setRegForm({ description: '', vendor: '', productCode: '', colour: '', size: '' });
+  }, []);
+
+  const cancelUnknown = useCallback(() => {
+    if (unknownCode) {
+      dismissedCodesRef.current.set(unknownCode, Date.now() + 10_000);
+    }
+    setUnknownCode(null);
+    setRegForm({ description: '', vendor: '', productCode: '', colour: '', size: '' });
+  }, [unknownCode]);
+
+  const applyScan = useCallback(
+    (raw: string, opts?: { fromCamera?: boolean }) => {
       const code = normalizeBarcodeInput(raw);
       if (!code || !sessionRef.current) return;
-      const product = resolveProductByBarcode(code, {
-        supplierCatalog,
-        referenceProducts,
-        physicalStock,
-        decoJobs,
-      });
-      if (!product) {
-        setUnknownCode(code);
-        setRegForm(f => ({ ...f, description: '' }));
-        return;
-      }
-      addScan(product, Math.max(1, addQty));
-    },
-    [supplierCatalog, referenceProducts, physicalStock, decoJobs, addQty],
-  );
-
-  const handleCameraScan = useCallback(
-    (raw: string) => {
-      const code = normalizeBarcodeInput(raw);
-      if (!code || !isPlausibleScanCode(code) || !sessionRef.current) return;
+      if (isScanDismissed(code)) return;
+      if (opts?.fromCamera && !isPlausibleScanCode(code)) return;
 
       const now = Date.now();
       const last = lastCamScanRef.current;
-      if (last.code === code && last.counted && now - last.at < 2200) return;
+      if (opts?.fromCamera && last.code === code && last.counted && now - last.at < 1800) return;
 
-      const product = resolveProductByBarcode(code, {
-        supplierCatalog,
-        referenceProducts,
-        physicalStock,
-        decoJobs,
-      });
-
+      const product = resolveProductByBarcode(code, resolverCtxRef.current);
       if (!product) {
-        if (last.code !== code || now - last.at > 800) {
-          setUnknownCode(code);
-          setRegForm(f => ({ ...f, description: '' }));
-        }
+        if (opts?.fromCamera && last.code === code && now - last.at < 1200) return;
+        showUnknown(code);
         lastCamScanRef.current = { code, at: now };
         return;
       }
 
       lastCamScanRef.current = { code, at: now, counted: true };
+      setUnknownCode(null);
       try {
         navigator.vibrate?.(35);
       } catch { /* unsupported */ }
-      setCameraFlash(code);
-      window.setTimeout(() => setCameraFlash(null), 700);
+      if (opts?.fromCamera) {
+        setCameraFlash(code);
+        window.setTimeout(() => setCameraFlash(null), 700);
+      }
       addScan(product, Math.max(1, addQty));
     },
-    [supplierCatalog, referenceProducts, physicalStock, decoJobs, addQty],
+    [addQty, isScanDismissed, showUnknown],
+  );
+
+  const processBarcode = useCallback(
+    (raw: string) => applyScan(raw, { fromCamera: false }),
+    [applyScan],
+  );
+
+  const handleCameraScan = useCallback(
+    (raw: string) => applyScan(raw, { fromCamera: true }),
+    [applyScan],
   );
 
   const handleCameraError = useCallback((msg: string) => setCameraError(msg), []);
@@ -505,14 +531,24 @@ const StockTakeScanner: React.FC<Props> = ({
               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[10px] font-black uppercase tracking-widest">
                 <button
                   type="button"
-                  onClick={() => { setScanMode('camera'); setCameraError(null); setCameraFlash(null); }}
+                  onClick={() => {
+                    setScanMode('camera');
+                    setCameraOpen(true);
+                    setCameraError(null);
+                    setCameraFlash(null);
+                  }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${scanMode === 'camera' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                 >
                   <Camera className="w-3.5 h-3.5" /> Camera
                 </button>
                 <button
                   type="button"
-                  onClick={() => setScanMode('keyboard')}
+                  onClick={() => {
+                    setCameraOpen(false);
+                    setScanMode('keyboard');
+                    setCameraError(null);
+                    setCameraFlash(null);
+                  }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-gray-200 transition-colors ${scanMode === 'keyboard' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                 >
                   <Keyboard className="w-3.5 h-3.5" /> Type
@@ -530,20 +566,105 @@ const StockTakeScanner: React.FC<Props> = ({
               />
               <span className="text-[10px] text-gray-400">1 for singles; higher for cartons</span>
             </div>
-            {scanMode === 'camera' && !unknownCode && (
-              <>
-                <BarcodeCameraScanner active onScan={handleCameraScan} onError={handleCameraError} />
+            {scanMode === 'camera' && (
+              <div className="relative space-y-2">
+                {cameraOpen ? (
+                  <BarcodeCameraScanner
+                    active={cameraOpen}
+                    paused={!!unknownCode}
+                    onScan={handleCameraScan}
+                    onError={handleCameraError}
+                    onClose={() => setCameraOpen(false)}
+                  />
+                ) : (
+                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center space-y-3">
+                    <Camera className="w-8 h-8 text-gray-400 mx-auto" />
+                    <p className="text-sm font-bold text-gray-600">Camera is off</p>
+                    <p className="text-[11px] text-gray-400">Turn it on to scan barcodes, or use Type for a USB scanner.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCameraOpen(true);
+                        setCameraError(null);
+                      }}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
+                    >
+                      Open camera
+                    </button>
+                  </div>
+                )}
                 {cameraError && (
                   <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     {cameraError}
                   </p>
                 )}
-                {cameraFlash && (
+                {cameraFlash && !unknownCode && (
                   <p className="text-center text-sm font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2 font-mono">
                     ✓ {cameraFlash}
                   </p>
                 )}
-              </>
+                {unknownCode && (
+                  <div className="absolute inset-0 z-20 flex items-end sm:items-center justify-center p-2 bg-black/50 rounded-xl">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3 w-full max-h-[85%] overflow-y-auto shadow-lg">
+                      <p className="text-sm font-black text-amber-900">
+                        Unknown barcode: <span className="font-mono">{unknownCode}</span>
+                      </p>
+                      <p className="text-[11px] text-amber-800">
+                        Not in your supplier feeds or master list. Add once, or cancel to keep scanning.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          required
+                          value={regForm.description}
+                          onChange={e => setRegForm(f => ({ ...f, description: e.target.value }))}
+                          placeholder="Description *"
+                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm font-bold sm:col-span-2"
+                        />
+                        <input
+                          value={regForm.vendor}
+                          onChange={e => setRegForm(f => ({ ...f, vendor: e.target.value }))}
+                          placeholder="Vendor"
+                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
+                        />
+                        <input
+                          value={regForm.productCode}
+                          onChange={e => setRegForm(f => ({ ...f, productCode: e.target.value }))}
+                          placeholder="Product code"
+                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
+                        />
+                        <input
+                          value={regForm.colour}
+                          onChange={e => setRegForm(f => ({ ...f, colour: e.target.value }))}
+                          placeholder="Colour"
+                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
+                        />
+                        <input
+                          value={regForm.size}
+                          onChange={e => setRegForm(f => ({ ...f, size: e.target.value }))}
+                          placeholder="Size"
+                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={registerUnknown}
+                          className="px-4 py-2 bg-amber-600 text-white rounded-lg text-[10px] font-black uppercase"
+                        >
+                          Add to count
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelUnknown}
+                          className="px-4 py-2 border border-amber-300 rounded-lg text-[10px] font-black uppercase text-amber-800"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             {scanMode === 'keyboard' && (
               <form onSubmit={handleScanSubmit} className="space-y-2">
@@ -570,63 +691,6 @@ const StockTakeScanner: React.FC<Props> = ({
             )}
           </div>
 
-          {unknownCode && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-              <p className="text-sm font-black text-amber-900">
-                Unknown barcode: <span className="font-mono">{unknownCode}</span>
-              </p>
-              <p className="text-[11px] text-amber-800">Register it once — future scans will match automatically.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input
-                  required
-                  value={regForm.description}
-                  onChange={e => setRegForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="Description *"
-                  className="px-3 py-2 border border-amber-200 rounded-lg text-sm font-bold sm:col-span-2"
-                />
-                <input
-                  value={regForm.vendor}
-                  onChange={e => setRegForm(f => ({ ...f, vendor: e.target.value }))}
-                  placeholder="Vendor"
-                  className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                />
-                <input
-                  value={regForm.productCode}
-                  onChange={e => setRegForm(f => ({ ...f, productCode: e.target.value }))}
-                  placeholder="Product code"
-                  className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                />
-                <input
-                  value={regForm.colour}
-                  onChange={e => setRegForm(f => ({ ...f, colour: e.target.value }))}
-                  placeholder="Colour"
-                  className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                />
-                <input
-                  value={regForm.size}
-                  onChange={e => setRegForm(f => ({ ...f, size: e.target.value }))}
-                  placeholder="Size"
-                  className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={registerUnknown}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg text-[10px] font-black uppercase"
-                >
-                  Add to count
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUnknownCode(null)}
-                  className="px-4 py-2 border border-amber-300 rounded-lg text-[10px] font-black uppercase text-amber-800"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
 
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-500">

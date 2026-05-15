@@ -1112,6 +1112,7 @@ const App: React.FC = () => {
   // handlers never call a stale closure (which would merge against old state
   // and wipe orders — the "103 → 3" bug).
   autoRefreshRef.current = () => {
+    if (activeTab === 'stock-take') return;
     if (!loading && !isBulkRefreshing && !isScanning && user && !isConfigMissing) {
       loadData(false);
     }
@@ -1132,13 +1133,14 @@ const App: React.FC = () => {
     if (!apiSettings.autoRefreshInterval) return; // respect OFF setting
     const refreshMs = apiSettings.autoRefreshInterval * 60 * 1000;
     const handleVisibility = () => {
+      if (activeTab === 'stock-take') return;
       if (!document.hidden && lastSyncRef.current && Date.now() - lastSyncRef.current > refreshMs) {
         autoRefreshRef.current();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [apiSettings.autoRefreshInterval]);
+  }, [apiSettings.autoRefreshInterval, activeTab]);
 
   // Update "last synced" label every 30 seconds
   useEffect(() => {

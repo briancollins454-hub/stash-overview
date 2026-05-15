@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { Camera, Loader2, RefreshCw } from 'lucide-react';
+import { Camera, Loader2, RefreshCw, X } from 'lucide-react';
 import { isPlausibleScanCode, normalizeBarcodeInput } from '../services/productResolver';
 import {
   formatCameraError,
@@ -14,8 +14,12 @@ type Phase = 'idle' | 'starting' | 'live' | 'error';
 
 interface Props {
   active: boolean;
+  /** When true, decoding is paused (e.g. unknown-barcode form open). */
+  paused?: boolean;
   onScan: (code: string) => void;
   onError?: (message: string) => void;
+  /** Fired after the camera stream is fully stopped (Close button or parent sets active=false). */
+  onClose?: () => void;
 }
 
 async function startScannerWithFallback(
@@ -90,7 +94,7 @@ async function startScannerWithFallback(
 }
 
 /** Phone / tablet camera barcode reader (EAN, UPC, Code 128). */
-const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
+const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan, onError, onClose }) => {
   const regionId = useId().replace(/:/g, '');
   const regionRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -103,10 +107,14 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
     pause: (shouldPauseVideo?: boolean) => void;
     resume: () => void;
   } | null>(null);
+  const pausedRef = useRef(paused);
   const onScanRef = useRef(onScan);
   const onErrorRef = useRef(onError);
+  const onCloseRef = useRef(onClose);
+  pausedRef.current = paused;
   onScanRef.current = onScan;
   onErrorRef.current = onError;
+  onCloseRef.current = onClose;
 
   const stopScanner = useCallback(async () => {
     scanLockedRef.current = false;
@@ -135,7 +143,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
       const scanner = new Html5Qrcode(elementId);
 
       const onDecoded = (decodedText: string) => {
-        if (cancelled || scanLockedRef.current) return;
+        if (cancelled || scanLockedRef.current || pausedRef.current) return;
         const code = normalizeBarcodeInput(decodedText);
         if (!isPlausibleScanCode(code)) return;
 
@@ -201,15 +209,36 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
     await runScanner();
   }, [runScanner]);
 
+  const closeCamera = useCallback(async () => {
+    await stopScanner();
+    setPhase('idle');
+    setAccessError(null);
+    onErrorRef.current?.('');
+    onCloseRef.current?.();
+  }, [stopScanner]);
+
   useEffect(() => {
     if (!active) {
       void stopScanner();
       setPhase('idle');
       setAccessError(null);
-      return;
+      return () => {
+        void stopScanner();
+      };
     }
     /* Do not auto-start — iOS/Safari need a user tap to show the permission prompt. */
+    return () => {
+      void stopScanner();
+    };
   }, [active, stopScanner]);
+
+  useEffect(() => {
+    if (phase !== 'live' || !scannerRef.current) return;
+    try {
+      if (paused) scannerRef.current.pause(true);
+      else scannerRef.current.resume();
+    } catch { /* */ }
+  }, [paused, phase]);
 
   if (!active) return null;
 
@@ -273,15 +302,29 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, onScan, onError }) => {
       )}
 
       {phase === 'live' && (
-        <div className="absolute bottom-0 inset-x-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
-          <p className="text-[10px] font-bold text-white/90 text-center flex items-center justify-center gap-1.5">
-            <Camera className="w-3.5 h-3.5" />
-            Hold barcode in frame — beeps when counted
-          </p>
-        </div>
+        <>
+          <button
+            type="button"
+            onClick={() => void closeCamera()}
+            className="absolute top-2 right-2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/70 text-white text-[10px] font-black uppercase tracking-widest hover:bg-black/90 border border-white/20"
+            aria-label="Close camera"
+          >
+            <X className="w-3.5 h-3.5" />
+            Close
+          </button>
+          <div className="absolute bottom-0 inset-x-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
+            <p className="text-[10px] font-bold text-white/90 text-center flex items-center justify-center gap-1.5">
+              <Camera className="w-3.5 h-3.5" />
+              Hold barcode in frame — beeps when counted
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
 };
 
-export default React.memo(BarcodeCameraScanner, (prev, next) => prev.active === next.active);
+export default React.memo(
+  BarcodeCameraScanner,
+  (prev, next) => prev.active === next.active && prev.paused === next.paused,
+);

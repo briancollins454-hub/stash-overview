@@ -23,9 +23,19 @@ export function normalizeBarcodeInput(raw: string): string {
 export function isPlausibleScanCode(code: string): boolean {
   if (!code || code.length < 6) return false;
   if (/^\d+$/.test(code)) {
-    return code.length === 8 || code.length >= 12;
+    return code.length >= 8;
   }
-  return code.length >= 6;
+  return code.length >= 4;
+}
+
+function scanKey(value: string | undefined): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function matchesScanInput(stored: string | undefined, input: string): boolean {
+  if (!stored?.trim()) return false;
+  if (matchEanValue(stored, input)) return true;
+  return scanKey(stored) === scanKey(input);
 }
 
 export function physicalStockAggregateKey(
@@ -75,7 +85,9 @@ export function resolveProductByBarcode(
 
   const matchEan = (a: string | undefined) => matchEanValue(a, ean);
 
-  const supplier = ctx.supplierCatalog?.find(s => matchEan(s.ean));
+  const supplier = ctx.supplierCatalog?.find(
+    s => matchesScanInput(s.ean, ean) || matchesScanInput(s.productCode, ean),
+  );
   if (supplier) {
     return {
       ean: supplier.ean.trim(),
@@ -88,7 +100,9 @@ export function resolveProductByBarcode(
     };
   }
 
-  const ref = ctx.referenceProducts.find(r => matchEan(r.ean));
+  const ref = ctx.referenceProducts.find(
+    r => matchesScanInput(r.ean, ean) || matchesScanInput(r.productCode, ean),
+  );
   if (ref) {
     return {
       ean: ref.ean.trim(),
@@ -101,7 +115,9 @@ export function resolveProductByBarcode(
     };
   }
 
-  const ps = ctx.physicalStock.find(s => matchEan(s.ean));
+  const ps = ctx.physicalStock.find(
+    s => matchesScanInput(s.ean, ean) || matchesScanInput(s.productCode, ean),
+  );
   if (ps) {
     return {
       ean: ps.ean.trim(),
