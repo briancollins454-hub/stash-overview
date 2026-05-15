@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeBarcodeInput, resolveProductByBarcode } from './productResolver';
+import { isPlausibleScanCode, normalizeBarcodeInput, resolveProductByBarcode } from './productResolver';
 
 describe('normalizeBarcodeInput', () => {
   it('pads 12-digit UPC to EAN-13', () => {
     expect(normalizeBarcodeInput('506043210001')).toBe('0506043210001');
+  });
+});
+
+describe('isPlausibleScanCode', () => {
+  it('rejects partial numeric reads', () => {
+    expect(isPlausibleScanCode('501488335')).toBe(false);
+  });
+  it('accepts full EAN-13', () => {
+    expect(isPlausibleScanCode('5014883352434')).toBe(true);
+  });
+  it('accepts SKUs with letters', () => {
+    expect(isPlausibleScanCode('001MBLK28R')).toBe(true);
   });
 });
 

@@ -9,6 +9,7 @@ import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem 
 import { fetchSupplierCatalog } from '../services/supplierCatalogService';
 import { isSupabaseReady } from '../services/supabase';
 import {
+  isPlausibleScanCode,
   normalizeBarcodeInput,
   physicalStockAggregateKey,
   resolveProductByBarcode,
@@ -86,7 +87,7 @@ const StockTakeScanner: React.FC<Props> = ({
   const [cameraFlash, setCameraFlash] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
-  const lastCamScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
+  const lastCamScanRef = useRef<{ code: string; at: number; counted?: boolean }>({ code: '', at: 0 });
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -251,18 +252,37 @@ const StockTakeScanner: React.FC<Props> = ({
   const handleCameraScan = useCallback(
     (raw: string) => {
       const code = normalizeBarcodeInput(raw);
-      if (!code) return;
+      if (!code || !isPlausibleScanCode(code) || !sessionRef.current) return;
+
       const now = Date.now();
-      if (lastCamScanRef.current.code === code && now - lastCamScanRef.current.at < 1600) return;
-      lastCamScanRef.current = { code, at: now };
+      const last = lastCamScanRef.current;
+      if (last.code === code && last.counted && now - last.at < 2200) return;
+
+      const product = resolveProductByBarcode(code, {
+        supplierCatalog,
+        referenceProducts,
+        physicalStock,
+        decoJobs,
+      });
+
+      if (!product) {
+        if (last.code !== code || now - last.at > 800) {
+          setUnknownCode(code);
+          setRegForm(f => ({ ...f, description: '' }));
+        }
+        lastCamScanRef.current = { code, at: now };
+        return;
+      }
+
+      lastCamScanRef.current = { code, at: now, counted: true };
       try {
         navigator.vibrate?.(35);
       } catch { /* unsupported */ }
       setCameraFlash(code);
-      window.setTimeout(() => setCameraFlash(null), 900);
-      processBarcode(code);
+      window.setTimeout(() => setCameraFlash(null), 700);
+      addScan(product, Math.max(1, addQty));
     },
-    [processBarcode],
+    [supplierCatalog, referenceProducts, physicalStock, decoJobs, addQty],
   );
 
   const handleCameraError = useCallback((msg: string) => setCameraError(msg), []);

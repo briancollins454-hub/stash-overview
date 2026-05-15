@@ -19,6 +19,15 @@ export function normalizeBarcodeInput(raw: string): string {
   return t;
 }
 
+/** Ignore partial camera reads until the barcode looks complete. */
+export function isPlausibleScanCode(code: string): boolean {
+  if (!code || code.length < 6) return false;
+  if (/^\d+$/.test(code)) {
+    return code.length === 8 || code.length >= 12;
+  }
+  return code.length >= 6;
+}
+
 export function physicalStockAggregateKey(
   item: Pick<PhysicalStockItem, 'ean' | 'isEmbellished' | 'clubName' | 'size' | 'colour'>,
 ): string {
