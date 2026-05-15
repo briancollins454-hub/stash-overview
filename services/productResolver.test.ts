@@ -5,11 +5,15 @@ describe('normalizeBarcodeInput', () => {
   it('pads 12-digit UPC to EAN-13', () => {
     expect(normalizeBarcodeInput('506043210001')).toBe('0506043210001');
   });
+
+  it('normalises Excel scientific notation', () => {
+    expect(normalizeBarcodeInput('5.014883352434e+12')).toBe('5014883352434');
+  });
 });
 
 describe('isPlausibleScanCode', () => {
   it('rejects partial numeric reads', () => {
-    expect(isPlausibleScanCode('501488335')).toBe(false);
+    expect(isPlausibleScanCode('5014883')).toBe(false);
   });
   it('accepts full EAN-13', () => {
     expect(isPlausibleScanCode('5014883352434')).toBe(true);
@@ -47,6 +51,22 @@ describe('resolveProductByBarcode', () => {
     });
     expect(r?.source).toBe('supplier');
     expect(r?.description).toBe('Feed Jersey');
+  });
+
+  it('matches by product code when EAN differs', () => {
+    const r = resolveProductByBarcode('001MBLK28R', {
+      referenceProducts: [{
+        ean: '506043210099',
+        vendor: 'Mizuno',
+        productCode: '001MBLK28R',
+        description: 'Sock',
+        colour: 'Black',
+        size: 'M',
+      }],
+      physicalStock: [],
+      decoJobs: [],
+    });
+    expect(r?.description).toBe('Sock');
   });
 
   it('matches reference catalogue first', () => {

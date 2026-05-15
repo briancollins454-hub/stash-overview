@@ -9,10 +9,10 @@ import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem 
 import { fetchSupplierCatalog } from '../services/supplierCatalogService';
 import { isSupabaseReady } from '../services/supabase';
 import {
+  createBarcodeLookup,
   isPlausibleScanCode,
   normalizeBarcodeInput,
   physicalStockAggregateKey,
-  resolveProductByBarcode,
   type ResolvedProduct,
 } from '../services/productResolver';
 import {
@@ -88,18 +88,18 @@ const StockTakeScanner: React.FC<Props> = ({
   const [cameraFlash, setCameraFlash] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
+  const [catalogLoadError, setCatalogLoadError] = useState<string | null>(null);
   const lastCamScanRef = useRef<{ code: string; at: number; counted?: boolean }>({ code: '', at: 0 });
   const dismissedCodesRef = useRef<Map<string, number>>(new Map());
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  const resolverCtxRef = useRef({
-    supplierCatalog,
-    referenceProducts,
-    physicalStock,
-    decoJobs,
-  });
-  resolverCtxRef.current = { supplierCatalog, referenceProducts, physicalStock, decoJobs };
+  const barcodeLookup = useMemo(
+    () => createBarcodeLookup({ supplierCatalog, referenceProducts, physicalStock, decoJobs }),
+    [supplierCatalog, referenceProducts, physicalStock, decoJobs],
+  );
+  const barcodeLookupRef = useRef(barcodeLookup);
+  barcodeLookupRef.current = barcodeLookup;
 
   useEffect(() => () => {
     setCameraOpen(false);
@@ -125,10 +125,17 @@ const StockTakeScanner: React.FC<Props> = ({
   }, [physicalStock]);
 
   const reloadSupplierCatalog = useCallback(async () => {
+    if (!isSupabaseReady()) {
+      setSupplierCatalog([]);
+      return;
+    }
     try {
-      setSupplierCatalog(await fetchSupplierCatalog());
-    } catch {
-      /* feeds optional until migration run */
+      setCatalogLoadError(null);
+      const items = await fetchSupplierCatalog();
+      setSupplierCatalog(items);
+    } catch (e: unknown) {
+      setSupplierCatalog([]);
+      setCatalogLoadError(e instanceof Error ? e.message : 'Could not load supplier catalog');
     }
   }, []);
 
@@ -149,6 +156,10 @@ const StockTakeScanner: React.FC<Props> = ({
   useEffect(() => {
     void loadOpen();
   }, [loadOpen]);
+
+  useEffect(() => {
+    if (session) void reloadSupplierCatalog();
+  }, [session?.id, reloadSupplierCatalog]);
 
   useEffect(() => {
     if (session) {
@@ -279,7 +290,7 @@ const StockTakeScanner: React.FC<Props> = ({
       const last = lastCamScanRef.current;
       if (opts?.fromCamera && last.code === code && last.counted && now - last.at < 1800) return;
 
-      const product = resolveProductByBarcode(code, resolverCtxRef.current);
+      const product = barcodeLookupRef.current.resolve(code);
       if (!product) {
         if (opts?.fromCamera && last.code === code && now - last.at < 1200) return;
         showUnknown(code);
@@ -431,9 +442,18 @@ const StockTakeScanner: React.FC<Props> = ({
         uploadedBy={currentUser?.email || currentUser?.displayName || undefined}
       />
 
-      {supplierCatalog.length > 0 && (
-        <p className="text-[10px] text-gray-500 font-semibold px-1">
-          {supplierCatalog.length.toLocaleString()} supplier barcodes loaded for scan matching.
+      <p className="text-[10px] text-gray-500 font-semibold px-1">
+        Scan index:{' '}
+        {barcodeLookup.stats.supplierKeys.toLocaleString()} supplier ·{' '}
+        {barcodeLookup.stats.referenceKeys.toLocaleString()} reference ·{' '}
+        {barcodeLookup.stats.physicalKeys.toLocaleString()} branch stock
+        {barcodeLookup.stats.totalKeys === 0 && (
+          <span className="text-amber-700"> — upload a supplier CSV or sync reference products first</span>
+        )}
+      </p>
+      {catalogLoadError && (
+        <p className="text-[10px] text-amber-800 font-semibold px-1" role="alert">
+          Supplier catalog failed to load: {catalogLoadError}. Run migrations/stash_supplier_catalog.sql if needed.
         </p>
       )}
 
@@ -568,19 +588,20 @@ const StockTakeScanner: React.FC<Props> = ({
             </div>
             {scanMode === 'camera' && (
               <div className="relative space-y-2">
-                {cameraOpen ? (
-                  <BarcodeCameraScanner
-                    active={cameraOpen}
-                    paused={!!unknownCode}
-                    onScan={handleCameraScan}
-                    onError={handleCameraError}
-                    onClose={() => setCameraOpen(false)}
-                  />
-                ) : (
-                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 p-6 text-center space-y-3">
-                    <Camera className="w-8 h-8 text-gray-400 mx-auto" />
+                <BarcodeCameraScanner
+                  active={cameraOpen}
+                  paused={!!unknownCode}
+                  onScan={handleCameraScan}
+                  onError={handleCameraError}
+                  onClose={() => setCameraOpen(false)}
+                />
+                {!cameraOpen && (
+                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/95 p-6 text-center">
+                    <Camera className="w-8 h-8 text-gray-400" />
                     <p className="text-sm font-bold text-gray-600">Camera is off</p>
-                    <p className="text-[11px] text-gray-400">Turn it on to scan barcodes, or use Type for a USB scanner.</p>
+                    <p className="text-[11px] text-gray-400 max-w-xs">
+                      Turn it on to scan barcodes, or use Type for a USB scanner.
+                    </p>
                     <button
                       type="button"
                       onClick={() => {

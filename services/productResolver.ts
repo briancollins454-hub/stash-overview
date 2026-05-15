@@ -12,9 +12,27 @@ export interface ResolvedProduct {
   source: ProductResolveSource;
 }
 
+/** Excel / CSV sometimes stores barcodes as floats or scientific notation. */
+function normalizeExcelNumeric(raw: string): string | null {
+  const t = raw.trim();
+  if (/^\d+(\.\d+)?[eE][+-]?\d+$/.test(t)) {
+    const n = Number(t);
+    if (Number.isFinite(n) && n > 0) return String(Math.round(n));
+  }
+  if (/^\d+\.\d+$/.test(t)) {
+    const n = Number(t);
+    if (Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-6) {
+      return String(Math.round(n));
+    }
+  }
+  return null;
+}
+
 /** Normalise scanner input (EAN-13, UPC-A padded, trimmed). */
 export function normalizeBarcodeInput(raw: string): string {
-  const t = raw.replace(/\s/g, '').replace(/[^\dA-Za-z-]/g, '');
+  const excel = normalizeExcelNumeric(raw);
+  const source = excel ?? raw;
+  const t = source.replace(/\s/g, '').replace(/[^\dA-Za-z-]/g, '');
   if (/^\d{12}$/.test(t)) return `0${t}`;
   return t;
 }
@@ -32,10 +50,147 @@ function scanKey(value: string | undefined): string {
   return (value || '').trim().toLowerCase();
 }
 
+/** All lookup keys for a stored or scanned barcode / SKU. */
+export function scanKeysForValue(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  const keys = new Set<string>();
+  const add = (v: string) => {
+    const k = scanKey(v);
+    if (k) keys.add(k);
+  };
+
+  const trimmed = value.trim();
+  add(trimmed);
+  add(normalizeBarcodeInput(trimmed));
+  add(trimmed.replace(/-/g, ''));
+
+  const excel = normalizeExcelNumeric(trimmed);
+  if (excel) add(normalizeBarcodeInput(excel));
+
+  const n = normalizeBarcodeInput(trimmed);
+  if (/^\d+$/.test(n)) {
+    const stripped = n.replace(/^0+/, '') || '0';
+    add(stripped);
+    if (n.length === 12) add(`0${n}`);
+    if (n.length === 13 && n.startsWith('0')) add(n.slice(1));
+    if (n.length >= 12) add(n.slice(-12));
+    if (n.length >= 13) add(n.slice(-13));
+  }
+
+  return [...keys];
+}
+
 function matchesScanInput(stored: string | undefined, input: string): boolean {
   if (!stored?.trim()) return false;
-  if (matchEanValue(stored, input)) return true;
-  return scanKey(stored) === scanKey(input);
+  const inputKeys = new Set(scanKeysForValue(input));
+  return scanKeysForValue(stored).some(k => inputKeys.has(k));
+}
+
+export interface BarcodeLookupStats {
+  supplierKeys: number;
+  referenceKeys: number;
+  physicalKeys: number;
+  totalKeys: number;
+}
+
+export type BarcodeLookup = {
+  resolve: (code: string) => ResolvedProduct | null;
+  stats: BarcodeLookupStats;
+};
+
+export function createBarcodeLookup(ctx: {
+  supplierCatalog?: SupplierCatalogItem[];
+  referenceProducts: ReferenceProduct[];
+  physicalStock: PhysicalStockItem[];
+  decoJobs: DecoJob[];
+}): BarcodeLookup {
+  const map = new Map<string, ResolvedProduct>();
+  let supplierKeys = 0;
+  let referenceKeys = 0;
+  let physicalKeys = 0;
+
+  const indexProduct = (product: ResolvedProduct) => {
+    let added = 0;
+    for (const field of [product.ean, product.productCode]) {
+      for (const key of scanKeysForValue(field)) {
+        if (!key || map.has(key)) continue;
+        map.set(key, product);
+        added += 1;
+      }
+    }
+    return added;
+  };
+
+  for (const s of ctx.supplierCatalog ?? []) {
+    supplierKeys += indexProduct({
+      ean: s.ean.trim(),
+      vendor: s.vendor || s.supplierName,
+      productCode: s.productCode || '',
+      description: s.description || '',
+      colour: s.colour || '',
+      size: s.size || '',
+      source: 'supplier',
+    });
+  }
+
+  for (const r of ctx.referenceProducts) {
+    referenceKeys += indexProduct({
+      ean: r.ean.trim(),
+      vendor: r.vendor || '',
+      productCode: r.productCode || '',
+      description: r.description || '',
+      colour: r.colour || '',
+      size: r.size || '',
+      source: 'reference',
+    });
+  }
+
+  for (const ps of ctx.physicalStock) {
+    physicalKeys += indexProduct({
+      ean: ps.ean.trim(),
+      vendor: ps.vendor || '',
+      productCode: ps.productCode || '',
+      description: ps.description || '',
+      colour: ps.colour || '',
+      size: ps.size || '',
+      source: 'physical_stock',
+    });
+  }
+
+  for (const job of ctx.decoJobs) {
+    for (const item of job.items || []) {
+      if (!item.ean?.trim()) continue;
+      const name = item.name || 'Item';
+      const parts = name.split(' - ');
+      indexProduct({
+        ean: item.ean.trim(),
+        vendor: '',
+        productCode: item.productCode || item.vendorSku || '',
+        description: name,
+        colour: parts.length > 2 ? parts[parts.length - 2] : '',
+        size: parts.length > 1 ? parts[parts.length - 1] : '',
+        source: 'deco',
+      });
+    }
+  }
+
+  return {
+    stats: {
+      supplierKeys,
+      referenceKeys,
+      physicalKeys,
+      totalKeys: map.size,
+    },
+    resolve(code: string) {
+      const normalized = normalizeBarcodeInput(code);
+      if (!normalized || normalized.length < 4) return null;
+      for (const key of scanKeysForValue(normalized)) {
+        const hit = map.get(key);
+        if (hit) return hit;
+      }
+      return null;
+    },
+  };
 }
 
 export function physicalStockAggregateKey(
@@ -80,74 +235,7 @@ export function resolveProductByBarcode(
     decoJobs: DecoJob[];
   },
 ): ResolvedProduct | null {
-  const ean = normalizeBarcodeInput(code);
-  if (!ean || ean.length < 4) return null;
-
-  const matchEan = (a: string | undefined) => matchEanValue(a, ean);
-
-  const supplier = ctx.supplierCatalog?.find(
-    s => matchesScanInput(s.ean, ean) || matchesScanInput(s.productCode, ean),
-  );
-  if (supplier) {
-    return {
-      ean: supplier.ean.trim(),
-      vendor: supplier.vendor || supplier.supplierName,
-      productCode: supplier.productCode || '',
-      description: supplier.description || '',
-      colour: supplier.colour || '',
-      size: supplier.size || '',
-      source: 'supplier',
-    };
-  }
-
-  const ref = ctx.referenceProducts.find(
-    r => matchesScanInput(r.ean, ean) || matchesScanInput(r.productCode, ean),
-  );
-  if (ref) {
-    return {
-      ean: ref.ean.trim(),
-      vendor: ref.vendor || '',
-      productCode: ref.productCode || '',
-      description: ref.description || '',
-      colour: ref.colour || '',
-      size: ref.size || '',
-      source: 'reference',
-    };
-  }
-
-  const ps = ctx.physicalStock.find(
-    s => matchesScanInput(s.ean, ean) || matchesScanInput(s.productCode, ean),
-  );
-  if (ps) {
-    return {
-      ean: ps.ean.trim(),
-      vendor: ps.vendor || '',
-      productCode: ps.productCode || '',
-      description: ps.description || '',
-      colour: ps.colour || '',
-      size: ps.size || '',
-      source: 'physical_stock',
-    };
-  }
-
-  for (const job of ctx.decoJobs) {
-    for (const item of job.items || []) {
-      if (!matchEan(item.ean)) continue;
-      const name = item.name || 'Item';
-      const parts = name.split(' - ');
-      return {
-        ean: (item.ean || ean).trim(),
-        vendor: '',
-        productCode: item.productCode || item.vendorSku || '',
-        description: name,
-        colour: parts.length > 2 ? parts[parts.length - 2] : '',
-        size: parts.length > 1 ? parts[parts.length - 1] : '',
-        source: 'deco',
-      };
-    }
-  }
-
-  return null;
+  return createBarcodeLookup(ctx).resolve(code);
 }
 
 export function manualResolvedProduct(

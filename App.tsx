@@ -17,6 +17,7 @@ import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockIt
 import { mergeCloudDecoFillOnly } from './services/decoJobSources';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
+import { releaseAllCameraStreams } from './utils/cameraRelease';
 import { startRealtime, stopRealtime } from './services/realtimeService';
 import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -1141,6 +1142,13 @@ const App: React.FC = () => {
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [apiSettings.autoRefreshInterval, activeTab]);
+
+  // Stock take camera must not keep running after leaving the tab
+  useEffect(() => {
+    if (activeTab !== 'stock-take') {
+      releaseAllCameraStreams();
+    }
+  }, [activeTab]);
 
   // Update "last synced" label every 30 seconds
   useEffect(() => {
