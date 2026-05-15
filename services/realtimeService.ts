@@ -5,11 +5,18 @@
  * direct client in supabase.ts).
  */
 import { createClient, RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import { emitPriorityNoteFromRealtimeRow } from './priorityNotesBus';
 
 // Lightweight row shapes for the tables we care about
 interface MappingRow { item_id: string; deco_id: string; }
 interface JobLinkRow { order_id: string; job_id: string; }
 interface PatternRow { shopify_pattern: string; deco_pattern: string; }
+interface PriorityNoteRow {
+  job_number: string;
+  note_text: string | null;
+  exclude_from_pdf: boolean | null;
+  updated_at: string | null;
+}
 
 export interface RealtimeCallbacks {
   /** A single mapping row was inserted or updated */
@@ -107,6 +114,20 @@ export function startRealtime(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'stash_deco_jobs' },
       () => debouncedDataChange(callbacks, 'stash_deco_jobs')
+    )
+    // Priority board follow-up notes — instant merge on each row
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'stash_priority_notes' },
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const oldRow = (payload.old || {}) as PriorityNoteRow;
+          emitPriorityNoteFromRealtimeRow(oldRow, true);
+          return;
+        }
+        const row = (payload.new || {}) as PriorityNoteRow;
+        if (row.job_number) emitPriorityNoteFromRealtimeRow(row, false);
+      },
     )
     .subscribe((status) => {
       isSubscribed = status === 'SUBSCRIBED';

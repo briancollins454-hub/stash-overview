@@ -1,7 +1,15 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import type { DecoJob } from '../types';
 import { getItem, setItem } from '../services/localStore';
-import { isSupabaseReady, supabaseFetch } from '../services/supabase';
+import { isSupabaseReady } from '../services/supabase';
+import { onPriorityNoteLiveUpdate } from '../services/priorityNotesBus';
+import {
+  PRIORITY_NOTES_KEY,
+  fetchAllPriorityNotesFromCloud,
+  mergePriorityNotesByUpdatedAt,
+  pushPriorityNotesToCloud,
+  type PriorityLineNote,
+} from '../services/priorityNotesService';
 import {
   calculatePriority, PRIORITY_SECTIONS, URGENCY_STYLE,
   pd, daysBetween,
@@ -40,58 +48,10 @@ interface Props {
   loading?: boolean;
 }
 
-interface PriorityLineNote {
-  text: string;
-  excludeFromPdf: boolean;
-  updatedAt: string;
-}
+const NOTES_POLL_MS = 4000;
+const NOTES_SAVE_DEBOUNCE_MS = 450;
 
-interface CloudPriorityNoteRow {
-  job_number: string;
-  note_text: string | null;
-  exclude_from_pdf: boolean | null;
-  updated_at: string | null;
-}
-
-/** Merge local + cloud so newer `updatedAt` wins (avoids empty cloud wiping unsynced local notes). */
-function mergePriorityNotesByUpdatedAt(
-  local: Record<string, PriorityLineNote>,
-  cloud: Record<string, PriorityLineNote>,
-): Record<string, PriorityLineNote> {
-  const keys = new Set([...Object.keys(local), ...Object.keys(cloud)]);
-  const out: Record<string, PriorityLineNote> = {};
-  for (const k of keys) {
-    const a = local[k];
-    const b = cloud[k];
-    if (!a) {
-      if (b) out[k] = { ...b };
-      continue;
-    }
-    if (!b) {
-      out[k] = { ...a };
-      continue;
-    }
-    const ta = Date.parse(a.updatedAt || '') || 0;
-    const tb = Date.parse(b.updatedAt || '') || 0;
-    out[k] = ta >= tb ? { ...a } : { ...b };
-  }
-  return out;
-}
-
-function cloudRowsToNotesByJob(rows: unknown): Record<string, PriorityLineNote> {
-  const out: Record<string, PriorityLineNote> = {};
-  if (!Array.isArray(rows)) return out;
-  for (const row of rows as CloudPriorityNoteRow[]) {
-    const key = String(row.job_number || '').trim();
-    if (!key) continue;
-    out[key] = {
-      text: row.note_text || '',
-      excludeFromPdf: !!row.exclude_from_pdf,
-      updatedAt: row.updated_at || new Date().toISOString(),
-    };
-  }
-  return out;
-}
+type NotesSyncStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const fmtK = (n: number) => {
   if (n >= 1000) return '\u00a3' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
@@ -380,9 +340,6 @@ const URGENCY_PRINT_CLASS: Record<Urgency, string> = {
   low: 'u-low',
 };
 
-const PRIORITY_NOTES_KEY = 'stash_priority_line_notes';
-const PRIORITY_NOTES_TABLE = 'stash_priority_notes';
-
 function aggregatePriorityPrintTotals(
   sections: Array<PrioritySection & { items: PriorityResult[] }>,
   uncategorised: PriorityResult[],
@@ -650,6 +607,10 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   const [notesByJobNumber, setNotesByJobNumber] = useState<Record<string, PriorityLineNote>>({});
   const [notesDirty, setNotesDirty] = useState(false);
   const [notesCloudError, setNotesCloudError] = useState<string | null>(null);
+  const [notesSyncStatus, setNotesSyncStatus] = useState<NotesSyncStatus>('idle');
+  const notesEditingRef = useRef<string | null>(null);
+  const notesByJobRef = useRef(notesByJobNumber);
+  notesByJobRef.current = notesByJobNumber;
 
   useEffect(() => {
     getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
@@ -657,67 +618,51 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     });
   }, [lastSyncTime]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const pull = async () => {
-      let fromIdb: Record<string, PriorityLineNote> = {};
+  const pullNotesFromCloud = useCallback(async () => {
+    let fromIdb: Record<string, PriorityLineNote> = {};
+    try {
+      const cached = await getItem<Record<string, PriorityLineNote>>(PRIORITY_NOTES_KEY);
+      if (cached && typeof cached === 'object') fromIdb = cached;
+    } catch { /* non-fatal */ }
+
+    let fromCloud: Record<string, PriorityLineNote> = {};
+    let cloudFetchOk = false;
+    if (isSupabaseReady()) {
       try {
-        const cached = await getItem<Record<string, PriorityLineNote>>(PRIORITY_NOTES_KEY);
-        if (cached && typeof cached === 'object') fromIdb = cached;
-      } catch { /* non-fatal */ }
-
-      let fromCloud: Record<string, PriorityLineNote> = {};
-      let cloudFetchOk = false;
-      if (isSupabaseReady()) {
-        try {
-          const res = await supabaseFetch(
-            `${PRIORITY_NOTES_TABLE}?select=job_number,note_text,exclude_from_pdf,updated_at`,
-            'GET',
-          );
-          const rows = await res.json();
-          if (cancelled) return;
-          fromCloud = cloudRowsToNotesByJob(rows);
-          cloudFetchOk = true;
-          if (!cancelled) setNotesCloudError(null);
-        } catch {
-          if (!cancelled) {
-            setNotesCloudError(
-              'Could not load shared notes from the cloud (check network or Supabase). Showing this device’s cached copy only.',
-            );
-          }
-        }
+        fromCloud = await fetchAllPriorityNotesFromCloud();
+        cloudFetchOk = true;
+        setNotesCloudError(null);
+      } catch {
+        setNotesCloudError(
+          'Could not load shared notes from the cloud (check network or Supabase). Showing this device’s cached copy only.',
+        );
       }
+    }
 
-      if (cancelled) return;
-      const merged = mergePriorityNotesByUpdatedAt(fromIdb, fromCloud);
-      setNotesByJobNumber(merged);
-      setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
+    const merged = mergePriorityNotesByUpdatedAt(fromIdb, fromCloud);
+    setNotesByJobNumber(merged);
+    setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
 
-      // While the Supabase table was missing, notes only lived in this browser’s
-      // IndexedDB — nothing to merge from cloud. After the table exists, queue a
-      // one-time upload so teammates get those rows without re-typing.
-      if (cloudFetchOk && !cancelled) {
-        const needsPush = Object.entries(merged).some(([k, v]) => {
-          if ((v.text || '').trim() === '' && !v.excludeFromPdf) return false;
-          const c = fromCloud[k];
-          if (!c) return true;
-          return (Date.parse(v.updatedAt || '') || 0) > (Date.parse(c.updatedAt || '') || 0);
-        });
-        if (needsPush) setNotesDirty(true);
-      }
-    };
+    if (cloudFetchOk) {
+      const needsPush = Object.entries(merged).some(([k, v]) => {
+        if ((v.text || '').trim() === '' && !v.excludeFromPdf) return false;
+        const c = fromCloud[k];
+        if (!c) return true;
+        return (Date.parse(v.updatedAt || '') || 0) > (Date.parse(c.updatedAt || '') || 0);
+      });
+      if (needsPush) setNotesDirty(true);
+    }
+    return merged;
+  }, []);
 
-    void pull();
-
+  useEffect(() => {
+    void pullNotesFromCloud();
     const onVis = () => {
-      if (document.visibilityState === 'visible') void pull();
+      if (document.visibilityState === 'visible') void pullNotesFromCloud();
     };
     document.addEventListener('visibilitychange', onVis);
-    return () => {
-      cancelled = true;
-      document.removeEventListener('visibilitychange', onVis);
-    };
-  }, []);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [pullNotesFromCloud]);
 
   useEffect(() => {
     if (!isSupabaseReady()) return;
@@ -725,23 +670,19 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
     const poll = async () => {
       if (document.visibilityState !== 'visible') return;
       try {
-        const res = await supabaseFetch(
-          `${PRIORITY_NOTES_TABLE}?select=job_number,note_text,exclude_from_pdf,updated_at`,
-          'GET',
-        );
-        const rows = await res.json();
+        const fromCloud = await fetchAllPriorityNotesFromCloud();
         if (cancelled) return;
-        const fromCloud = cloudRowsToNotesByJob(rows);
         setNotesByJobNumber(prev => {
           const merged = mergePriorityNotesByUpdatedAt(prev, fromCloud);
           setItem(PRIORITY_NOTES_KEY, merged).catch(console.error);
           return merged;
         });
+        setNotesCloudError(null);
       } catch {
         /* keep showing merged local */
       }
     };
-    const id = window.setInterval(poll, 45_000);
+    const id = window.setInterval(poll, NOTES_POLL_MS);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -749,52 +690,53 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   }, []);
 
   useEffect(() => {
-    if (!notesDirty || !isSupabaseReady()) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        const entries = Object.entries(notesByJobNumber);
-        const upserts = entries
-          .filter(([, v]) => (v.text || '').trim().length > 0 || v.excludeFromPdf)
-          .map(([jobNumber, v]) => ({
-            job_number: jobNumber,
-            note_text: (v.text || '').trim() || null,
-            exclude_from_pdf: !!v.excludeFromPdf,
-            updated_at: v.updatedAt || new Date().toISOString(),
-          }));
-        if (upserts.length > 0) {
-          await supabaseFetch(
-            PRIORITY_NOTES_TABLE,
-            'POST',
-            upserts,
-            'resolution=merge-duplicates',
-          );
+    return onPriorityNoteLiveUpdate((jobNumber, incoming) => {
+      if (notesEditingRef.current === jobNumber) return;
+      setNotesByJobNumber(prev => {
+        const local = prev[jobNumber];
+        if (local) {
+          const ta = Date.parse(local.updatedAt || '') || 0;
+          const tb = Date.parse(incoming.updatedAt || '') || 0;
+          if (ta > tb) return prev;
         }
+        const next = { ...prev, [jobNumber]: { ...incoming } };
+        setItem(PRIORITY_NOTES_KEY, next).catch(console.error);
+        return next;
+      });
+    });
+  }, []);
 
-        const toDelete = entries
-          .filter(([, v]) => (v.text || '').trim().length === 0 && !v.excludeFromPdf)
-          .map(([jobNumber]) => `"${jobNumber.replace(/"/g, '\\"')}"`);
-        if (toDelete.length > 0) {
-          await supabaseFetch(
-            `${PRIORITY_NOTES_TABLE}?job_number=in.(${encodeURIComponent(toDelete.join(','))})`,
-            'DELETE',
-          );
-        }
+  useEffect(() => {
+    if (!notesDirty || !isSupabaseReady()) return;
+    setNotesSyncStatus('saving');
+    const timer = window.setTimeout(async () => {
+      const result = await pushPriorityNotesToCloud(notesByJobRef.current);
+      if (result.ok) {
         setNotesDirty(false);
         setNotesCloudError(null);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const isMissingTable =
-          /stash_priority_notes|relation|does not exist|42P01|PGRST205/i.test(msg);
+        setNotesSyncStatus('saved');
+        window.setTimeout(() => setNotesSyncStatus(s => (s === 'saved' ? 'idle' : s)), 2000);
+      } else {
+        setNotesSyncStatus('error');
         setNotesCloudError(
-          isMissingTable
-            ? 'Shared notes are not saving to the cloud — the stash_priority_notes table is missing in Supabase. Run migrations/stash_priority_notes.sql in the SQL editor, then reload.'
-            : `Notes did not sync to the cloud (${msg}). Other staff will not see them until this is fixed.`,
+          result.missingTable
+            ? 'Shared notes are not saving to the cloud — run migrations/stash_priority_notes.sql in Supabase, then reload.'
+            : `Notes did not sync (${result.message}). Other staff will not see them until this is fixed.`,
         );
-        // keep dirty flag true; next edit triggers another sync attempt
       }
-    }, 700);
+    }, NOTES_SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [notesByJobNumber, notesDirty]);
+
+  const handleNoteFocus = (jobNumber: string) => {
+    notesEditingRef.current = jobNumber;
+  };
+
+  const handleNoteBlur = (jobNumber: string) => {
+    window.setTimeout(() => {
+      if (notesEditingRef.current === jobNumber) notesEditingRef.current = null;
+    }, 600);
+  };
 
   const updateLineNote = (jobNumber: string, patch: Partial<PriorityLineNote>) => {
     setNotesByJobNumber(prev => {
@@ -1076,6 +1018,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           {notesCloudError}
         </div>
       )}
+      {!notesCloudError && isSupabaseReady() && (
+        <p className="text-[10px] font-semibold text-indigo-200/80 px-1">
+          {notesSyncStatus === 'saving' && 'Saving follow-up notes…'}
+          {notesSyncStatus === 'saved' && 'Notes saved — everyone on the board will see them within a few seconds'}
+          {notesSyncStatus === 'idle' && 'Follow-up notes sync automatically — no Sync button needed'}
+          {notesSyncStatus === 'error' && 'Note sync failed — see message above'}
+        </p>
+      )}
       {/* Header */}
       <div className="bg-[#1e1e3a] rounded-2xl border border-indigo-500/20 px-6 py-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1224,6 +1174,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
           readyAtMap={readyAtMap}
           notesByJobNumber={notesByJobNumber}
           onUpdateLineNote={updateLineNote}
+          onNoteFocus={handleNoteFocus}
+          onNoteBlur={handleNoteBlur}
         />
       ))}
 
@@ -1269,6 +1221,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                         type="text"
                         value={noteText}
                         onChange={(e) => updateLineNote(item.job.jobNumber, { text: e.target.value })}
+                        onFocus={() => handleNoteFocus(item.job.jobNumber)}
+                        onBlur={() => handleNoteBlur(item.job.jobNumber)}
                         placeholder={excluded ? 'Completed / delegated note' : 'Follow-up note'}
                         className={`w-full px-2 py-1 rounded border text-[10px] ${
                           excluded
@@ -1324,6 +1278,8 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
                         type="text"
                         value={noteText}
                         onChange={(e) => updateLineNote(item.job.jobNumber, { text: e.target.value })}
+                        onFocus={() => handleNoteFocus(item.job.jobNumber)}
+                        onBlur={() => handleNoteBlur(item.job.jobNumber)}
                         placeholder="Completed note"
                         className="w-full px-2 py-1 rounded border text-[10px] border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
                       />
@@ -1481,6 +1437,8 @@ interface SectionCardProps {
   readyAtMap: ReadyAtMap;
   notesByJobNumber: Record<string, PriorityLineNote>;
   onUpdateLineNote: (jobNumber: string, patch: Partial<PriorityLineNote>) => void;
+  onNoteFocus: (jobNumber: string) => void;
+  onNoteBlur: (jobNumber: string) => void;
 }
 
 const COLOR_MAP: Record<string, { header: string; border: string; badge: string }> = {
@@ -1493,7 +1451,9 @@ const COLOR_MAP: Record<string, { header: string; border: string; badge: string 
 
 const URGENCY_LABEL: Record<Urgency, string> = { critical: 'CRIT', high: 'HIGH', medium: 'MED', low: 'LOW' };
 
-function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, readyAtMap, notesByJobNumber, onUpdateLineNote }: SectionCardProps) {
+function SectionCard({
+  section, allItems, expanded, onToggle, onNavigate, now, readyAtMap, notesByJobNumber, onUpdateLineNote, onNoteFocus, onNoteBlur,
+}: SectionCardProps) {
   const [localFilter, setLocalFilter] = useState<TimeFrameId>('all');
   const cm = COLOR_MAP[section.color] || COLOR_MAP.indigo;
 
@@ -1627,6 +1587,8 @@ function SectionCard({ section, allItems, expanded, onToggle, onNavigate, now, r
                           type="text"
                           value={noteText}
                           onChange={(e) => onUpdateLineNote(item.job.jobNumber, { text: e.target.value })}
+                          onFocus={() => onNoteFocus(item.job.jobNumber)}
+                          onBlur={() => onNoteBlur(item.job.jobNumber)}
                           placeholder={excluded ? 'Completed / delegated note' : 'Why still here / who is chasing'}
                           className={`w-full min-w-0 px-2 py-1 rounded border text-[10px] ${
                             excluded

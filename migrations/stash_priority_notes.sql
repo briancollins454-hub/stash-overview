@@ -39,3 +39,12 @@ create policy "stash_priority_notes anon write"
     to anon
     using (true)
     with check (true);
+
+-- Live updates on all devices (Supabase Realtime). Safe to re-run.
+do $$
+begin
+    alter publication supabase_realtime add table public.stash_priority_notes;
+exception
+    when duplicate_object then null;
+    when undefined_object then null;
+end $$;
