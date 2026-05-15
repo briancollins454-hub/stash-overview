@@ -77,6 +77,51 @@ export function formatCameraError(err: unknown): CameraAccessResult {
   };
 }
 
+/** Prefer rear camera at high resolution so 1D barcodes decode from farther away. */
+export function buildBarcodeCameraConstraints(deviceId?: string): MediaTrackConstraints {
+  const highRes: MediaTrackConstraints = {
+    facingMode: { ideal: 'environment' },
+    width: { ideal: 1920, min: 1280 },
+    height: { ideal: 1080, min: 720 },
+    aspectRatio: { ideal: 1.7777777778 },
+  };
+  if (deviceId) {
+    return { ...highRes, deviceId: { exact: deviceId } };
+  }
+  return highRes;
+}
+
+/** Lighter constraints when the phone rejects 1080p / continuous focus. */
+export function buildBarcodeCameraConstraintsFallback(deviceId?: string): MediaTrackConstraints {
+  const basic: MediaTrackConstraints = { facingMode: { ideal: 'environment' } };
+  if (deviceId) {
+    return { ...basic, deviceId: { exact: deviceId } };
+  }
+  return basic;
+}
+
+/** Enable continuous autofocus when the device supports it (helps scan range). */
+export async function applyBarcodeCameraEnhancements(containerId: string): Promise<void> {
+  const root = document.getElementById(containerId);
+  const video = root?.querySelector('video');
+  const stream = video?.srcObject;
+  if (!(stream instanceof MediaStream)) return;
+
+  const track = stream.getVideoTracks()[0];
+  if (!track?.applyConstraints) return;
+
+  try {
+    const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+      focusMode?: string[];
+    };
+    if (caps?.focusMode?.includes('continuous')) {
+      await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+    }
+  } catch {
+    /* optional — some browsers omit focusMode */
+  }
+}
+
 /** Request camera permission — must be called from a user tap/click. */
 export async function requestCameraPermission(): Promise<CameraAccessResult> {
   const env = isCameraEnvironmentOk();

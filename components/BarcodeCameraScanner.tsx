@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Camera, Loader2, RefreshCw, X } from 'lucide-react';
 import { isPlausibleScanCode, normalizeBarcodeInput } from '../services/productResolver';
 import {
+  applyBarcodeCameraEnhancements,
+  buildBarcodeCameraConstraints,
+  buildBarcodeCameraConstraintsFallback,
   formatCameraError,
   isCameraEnvironmentOk,
   requestCameraPermission,
@@ -41,12 +44,13 @@ async function startScannerWithFallback(
   onDecoded: (text: string) => void,
 ): Promise<void> {
   const scanConfig = {
-    fps: 20,
+    fps: 15,
     disableFlip: false,
     useBarCodeDetectorIfSupported: true,
+    /** Scan almost the full frame — small qrbox forces you to hold the phone very close. */
     qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
-      width: Math.floor(viewfinderWidth * 0.96),
-      height: Math.floor(viewfinderHeight * 0.75),
+      width: Math.floor(viewfinderWidth * 0.98),
+      height: Math.floor(viewfinderHeight * 0.88),
     }),
     formatsToSupport: [
       Html5QrcodeSupportedFormats.EAN_13,
@@ -59,19 +63,22 @@ async function startScannerWithFallback(
   };
 
   const { Html5Qrcode } = await import('html5-qrcode');
-  const cameraAttempts: Array<string | MediaTrackConstraints> = [
-    { facingMode: 'environment' },
-    { facingMode: { ideal: 'environment' } },
-  ];
+  const cameraAttempts: MediaTrackConstraints[] = [];
 
   try {
     const cameras = await Html5Qrcode.getCameras();
-    const back = cameras.find(c => /back|rear|environment|wide/i.test(c.label));
+    const back = cameras.find(c => /back|rear|environment|wide|ultra/i.test(c.label));
     const pick = back || cameras[cameras.length - 1];
-    if (pick?.id) cameraAttempts.unshift(pick.id);
+    if (pick?.id) {
+      cameraAttempts.push(buildBarcodeCameraConstraints(pick.id));
+      cameraAttempts.push(buildBarcodeCameraConstraintsFallback(pick.id));
+    }
   } catch {
     /* getCameras may fail before permission on some browsers */
   }
+
+  cameraAttempts.push(buildBarcodeCameraConstraints());
+  cameraAttempts.push(buildBarcodeCameraConstraintsFallback());
 
   let lastErr: unknown;
   for (const cameraIdOrConfig of cameraAttempts) {
@@ -191,6 +198,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
         releaseAllCameraStreams(regionRef.current);
         return;
       }
+      await applyBarcodeCameraEnhancements(elementId);
       scannerRef.current = scanner;
       runningRef.current = true;
       setPhase('live');
@@ -271,7 +279,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
       <div
         ref={regionRef}
         id={`stash-barcode-camera-${regionId}`}
-        className={`w-full min-h-[min(70vw,380px)] [&_video]:object-cover [&_video]:min-h-[min(70vw,380px)] ${phase === 'live' ? '' : 'invisible h-0 min-h-0 overflow-hidden'}`}
+        className={`w-full min-h-[min(85vw,440px)] [&_video]:object-cover [&_video]:min-h-[min(85vw,440px)] [&_video]:w-full ${phase === 'live' ? '' : 'invisible h-0 min-h-0 overflow-hidden'}`}
       />
 
       {phase === 'idle' && (
@@ -337,7 +345,7 @@ const BarcodeCameraScanner: React.FC<Props> = ({ active, paused = false, onScan,
           <div className="absolute bottom-0 inset-x-0 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent pointer-events-none">
             <p className="text-[10px] font-bold text-white/90 text-center flex items-center justify-center gap-1.5">
               <Camera className="w-3.5 h-3.5" />
-              Hold barcode in frame — beeps when counted
+              Hold 25–50cm away — centre the barcode in frame
             </p>
           </div>
         </>
