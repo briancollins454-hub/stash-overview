@@ -61,6 +61,29 @@ export interface ProductionPackOrderGroup {
   orderDate: string;
   lines: ProductionPackLine[];
   totalUnits: number;
+  /** Shopify order note when this order is part of a club batch job. */
+  batchNote?: string;
+  shopifyFulfillment?: string;
+  decoJobNumber?: string;
+}
+
+/** Parsed Shopify Notes field — club batch on Deco (Order #224857 … 47834 and 47858). */
+export interface ParsedClubBatchNote {
+  raw: string;
+  decoJobNumber: string;
+  shopLabel: string;
+  orderNumbers: string[];
+  suffix: string;
+}
+
+/** Orders sharing the same batch note — on Deco, ordered, batch not fully done. */
+export interface ClubBatchBasket {
+  basketKey: string;
+  noteText: string;
+  parsed: ParsedClubBatchNote;
+  isOpen: boolean;
+  linkedToDeco: boolean;
+  report: ProductionPackReport;
 }
 
 export interface ProductionPackReport {
@@ -68,12 +91,113 @@ export interface ProductionPackReport {
   lines: ProductionPackLine[];
   pivotBundles: ProductionPackPivotBundle[];
   orders: ProductionPackOrderGroup[];
+  batchBaskets: ClubBatchBasket[];
   stats: {
     orderCount: number;
     lineCount: number;
     totalUnits: number;
     productCount: number;
   };
+}
+
+export type ProductionPackBasketSelection = 'standard' | string;
+
+const BATCH_BASKET_STORAGE = 'stash-pp-basket';
+
+export function loadProductionPackBasketSelection(): ProductionPackBasketSelection {
+  try {
+    const v = localStorage.getItem(BATCH_BASKET_STORAGE);
+    if (v === 'standard' || (v && v.length > 0)) return v;
+  } catch {
+    /* private mode */
+  }
+  return 'standard';
+}
+
+export function saveProductionPackBasketSelection(sel: ProductionPackBasketSelection): void {
+  try {
+    localStorage.setItem(BATCH_BASKET_STORAGE, sel);
+  } catch {
+    /* quota */
+  }
+}
+
+/** Shopify merchant note (stored in timelineComments from GraphQL `note`). */
+export function shopifyOrderNote(order: UnifiedOrder): string {
+  return (order.shopify.timelineComments || []).filter(Boolean).join(' ').trim();
+}
+
+export function parseClubBatchNote(note: string): ParsedClubBatchNote | null {
+  const trimmed = note.trim();
+  if (!/^Order\s*#/i.test(trimmed)) return null;
+
+  const decoMatch = trimmed.match(/(?:Order\s*#?\s*)(2\d{5})(?!\d)/i);
+  if (!decoMatch) return null;
+
+  const decoJobNumber = decoMatch[1];
+  const shopifyOrderNums = [...trimmed.matchAll(/(?:^|[^0-9])(\d{5})(?!\d)/g)]
+    .map(m => m[1])
+    .filter(n => n !== decoJobNumber);
+
+  let shopLabel = trimmed;
+  const afterDeco = trimmed.replace(/^Order\s*#?\s*\d+\s*/i, '');
+  const firstOrderIdx = afterDeco.search(/\d{5}/);
+  if (firstOrderIdx > 0) {
+    shopLabel = afterDeco.slice(0, firstOrderIdx).trim();
+  }
+
+  const suffixMatch = trimmed.match(/\s([A-Z]{1,4})\s*$/);
+  const suffix = suffixMatch?.[1] || '';
+
+  return {
+    raw: trimmed,
+    decoJobNumber,
+    shopLabel,
+    orderNumbers: [...new Set(shopifyOrderNums)],
+    suffix,
+  };
+}
+
+export function isClubBatchOrder(order: UnifiedOrder): boolean {
+  return parseClubBatchNote(shopifyOrderNote(order)) != null;
+}
+
+/** Batch still has pick work: unfulfilled on Shopify and/or Deco not complete. */
+export function isClubBatchBasketOpen(orders: UnifiedOrder[]): boolean {
+  return orders.some(o => orderHasOpenPackWork(o));
+}
+
+export function orderHasOpenPackWork(order: UnifiedOrder): boolean {
+  if (isOrderUnfulfilledForPack(order)) {
+    const hasPickLines = order.shopify.items.some(item => {
+      if (!isShopifyLineItemActiveForOps(item)) return false;
+      if (!isEligibleForMapping(item.name, item.productType)) return false;
+      return shopifyLineRemainingQuantity(item) > 0;
+    });
+    if (hasPickLines) return true;
+  }
+  if (order.decoJobId || order.deco) {
+    if (order.completionPercentage < 100) return true;
+  }
+  return false;
+}
+
+export function orderLinkedToDeco(order: UnifiedOrder, parsed?: ParsedClubBatchNote | null): boolean {
+  if (order.decoJobId || order.deco) return true;
+  const note = parsed ?? parseClubBatchNote(shopifyOrderNote(order));
+  if (!note) return false;
+  if (order.decoJobId === note.decoJobNumber) return true;
+  const fromNote = shopifyOrderNote(order).includes(note.decoJobNumber);
+  return fromNote;
+}
+
+export function resolveActivePackReport(
+  report: ProductionPackReport,
+  basketSelection: ProductionPackBasketSelection
+): ProductionPackReport {
+  if (basketSelection === 'standard') return report;
+  const basket = report.batchBaskets.find(b => b.basketKey === basketSelection);
+  return basket?.report ?? report;
 }
 
 export interface ParsedVariant {
@@ -329,10 +453,13 @@ export function productionPackDoneStorageKey(filters: ProductionPackFilters): st
 
 export function productionPackDoneStorageKeyForMode(
   filters: ProductionPackFilters,
-  mode: ProductionPackMode
+  mode: ProductionPackMode,
+  basketSelection: ProductionPackBasketSelection = 'standard'
 ): string {
   const prefix = mode === 'fulfilment' ? 'stash-pp-done:fulfill' : 'stash-pp-done';
-  return `${prefix}:${filters.tag}|${filters.dateFrom}|${filters.dateTo}`;
+  const basket =
+    basketSelection === 'standard' ? 'standard' : `batch:${basketSelection}`;
+  return `${prefix}:${basket}:${filters.tag}|${filters.dateFrom}|${filters.dateTo}`;
 }
 
 export function loadProductionPackDoneIds(storageKey: string): Set<string> {
@@ -495,50 +622,19 @@ export function collectAvailableTags(
   return Array.from(tags).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
-function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
-  const out: ProductionPackLine[] = [];
-  for (const item of order.shopify.items) {
-    if (!isShopifyLineItemActiveForOps(item)) continue;
-    if (!isEligibleForMapping(item.name, item.productType)) continue;
-    const qty = shopifyLineRemainingQuantity(item);
-    if (qty <= 0) continue;
-
-    const props = item.properties || [];
-    const variant = parseVariantFromLineName(item.name);
-    const persValues = personalizationValuesFromProperties(props);
-
-    out.push({
-      orderId: order.shopify.id,
-      orderNumber: order.shopify.orderNumber,
-      customerName: order.shopify.customerName,
-      email: order.shopify.email || '',
-      orderDate: order.shopify.date,
-      lineName: item.name,
-      itemName: variant.productTitle,
-      quantity: qty,
-      sku: item.sku || '',
-      vendor: item.vendor || '',
-      colorLabel: variant.color,
-      sizeLabel: variant.size,
-      personalizationLabel: persValues.join(' '),
-      personalizationValues: persValues,
-      displayProperties: displayPersonalizationProperties(props),
-    });
-  }
-  return out;
-}
-
-export function buildProductionPackReport(
+function filterOrdersForPackFilters(
   orders: UnifiedOrder[],
-  filters: ProductionPackFilters
-): ProductionPackReport {
+  filters: ProductionPackFilters,
+  options?: { unfulfilledOnly?: boolean }
+): UnifiedOrder[] {
   const fromMs = parseYmd(filters.dateFrom);
   const toMs = parseYmd(filters.dateTo);
   const toEndMs = toMs != null ? toMs + 24 * 60 * 60 * 1000 - 1 : null;
+  const unfulfilledOnly = options?.unfulfilledOnly ?? filters.unfulfilledOnly;
 
   let filtered = orders.filter(o => orderMatchesTag(o, filters.tag));
   filtered = filtered.filter(isOrderEligibleForProductionPack);
-  if (filters.unfulfilledOnly) {
+  if (unfulfilledOnly) {
     filtered = filtered.filter(isOrderUnfulfilledForPack);
   }
   if (fromMs != null || toEndMs != null) {
@@ -549,12 +645,14 @@ export function buildProductionPackReport(
       return true;
     });
   }
+  return filtered;
+}
 
-  const lines: ProductionPackLine[] = [];
-  for (const o of filtered) {
-    lines.push(...expandOrderLines(o));
-  }
-
+function assembleReportFromLines(
+  filters: ProductionPackFilters,
+  lines: ProductionPackLine[],
+  seedOrders: UnifiedOrder[] = []
+): ProductionPackReport {
   const bundleMap = new Map<
     string,
     {
@@ -616,6 +714,22 @@ export function buildProductionPackReport(
     .sort(comparePivotBundles);
 
   const byOrder = new Map<string, ProductionPackOrderGroup>();
+
+  for (const o of seedOrders) {
+    const parsed = parseClubBatchNote(shopifyOrderNote(o));
+    byOrder.set(o.shopify.orderNumber, {
+      orderNumber: o.shopify.orderNumber,
+      customerName: o.shopify.customerName,
+      email: o.shopify.email || '',
+      orderDate: o.shopify.date,
+      lines: [],
+      totalUnits: 0,
+      batchNote: parsed?.raw,
+      shopifyFulfillment: o.shopify.fulfillmentStatus,
+      decoJobNumber: parsed?.decoJobNumber || o.decoJobId,
+    });
+  }
+
   for (const line of lines) {
     if (!byOrder.has(line.orderNumber)) {
       byOrder.set(line.orderNumber, {
@@ -639,28 +753,30 @@ export function buildProductionPackReport(
   });
 
   for (const g of ordersGrouped) {
-    g.lines.sort((a, b) => comparePivotBundles(
-      {
-        lineName: a.lineName,
-        itemName: a.itemName,
-        sku: a.sku,
-        vendor: a.vendor,
-        colorLabel: a.colorLabel,
-        sizeLabel: a.sizeLabel,
-        totalQuantity: 0,
-        personalizationChips: [],
-      },
-      {
-        lineName: b.lineName,
-        itemName: b.itemName,
-        sku: b.sku,
-        vendor: b.vendor,
-        colorLabel: b.colorLabel,
-        sizeLabel: b.sizeLabel,
-        totalQuantity: 0,
-        personalizationChips: [],
-      }
-    ));
+    g.lines.sort((a, b) =>
+      comparePivotBundles(
+        {
+          lineName: a.lineName,
+          itemName: a.itemName,
+          sku: a.sku,
+          vendor: a.vendor,
+          colorLabel: a.colorLabel,
+          sizeLabel: a.sizeLabel,
+          totalQuantity: 0,
+          personalizationChips: [],
+        },
+        {
+          lineName: b.lineName,
+          itemName: b.itemName,
+          sku: b.sku,
+          vendor: b.vendor,
+          colorLabel: b.colorLabel,
+          sizeLabel: b.sizeLabel,
+          totalQuantity: 0,
+          personalizationChips: [],
+        }
+      )
+    );
   }
 
   const totalUnits = lines.reduce((s, l) => s + l.quantity, 0);
@@ -670,12 +786,122 @@ export function buildProductionPackReport(
     lines,
     pivotBundles,
     orders: ordersGrouped,
+    batchBaskets: [],
     stats: {
       orderCount: ordersGrouped.length,
       lineCount: lines.length,
       totalUnits,
       productCount: pivotBundles.length,
     },
+  };
+}
+
+function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
+  const out: ProductionPackLine[] = [];
+  for (const item of order.shopify.items) {
+    if (!isShopifyLineItemActiveForOps(item)) continue;
+    if (!isEligibleForMapping(item.name, item.productType)) continue;
+    const qty = shopifyLineRemainingQuantity(item);
+    if (qty <= 0) continue;
+
+    const props = item.properties || [];
+    const variant = parseVariantFromLineName(item.name);
+    const persValues = personalizationValuesFromProperties(props);
+
+    out.push({
+      orderId: order.shopify.id,
+      orderNumber: order.shopify.orderNumber,
+      customerName: order.shopify.customerName,
+      email: order.shopify.email || '',
+      orderDate: order.shopify.date,
+      lineName: item.name,
+      itemName: variant.productTitle,
+      quantity: qty,
+      sku: item.sku || '',
+      vendor: item.vendor || '',
+      colorLabel: variant.color,
+      sizeLabel: variant.size,
+      personalizationLabel: persValues.join(' '),
+      personalizationValues: persValues,
+      displayProperties: displayPersonalizationProperties(props),
+    });
+  }
+  return out;
+}
+
+export function buildProductionPackReport(
+  orders: UnifiedOrder[],
+  filters: ProductionPackFilters
+): ProductionPackReport {
+  const inRange = filterOrdersForPackFilters(orders, filters, { unfulfilledOnly: false });
+
+  const batchOrders: UnifiedOrder[] = [];
+  const standardCandidates: UnifiedOrder[] = [];
+
+  for (const o of inRange) {
+    if (isClubBatchOrder(o)) batchOrders.push(o);
+    else standardCandidates.push(o);
+  }
+
+  const standardFiltered = filters.unfulfilledOnly
+    ? standardCandidates.filter(isOrderUnfulfilledForPack)
+    : standardCandidates;
+
+  const standardLines: ProductionPackLine[] = [];
+  for (const o of standardFiltered) {
+    standardLines.push(...expandOrderLines(o));
+  }
+
+  const base = assembleReportFromLines(filters, standardLines);
+
+  const batchByNote = new Map<string, UnifiedOrder[]>();
+  for (const o of batchOrders) {
+    const note = shopifyOrderNote(o);
+    const key = note.trim().toLowerCase();
+    if (!batchByNote.has(key)) batchByNote.set(key, []);
+    batchByNote.get(key)!.push(o);
+  }
+
+  const batchBaskets: ClubBatchBasket[] = [];
+
+  for (const [basketKey, basketOrders] of batchByNote) {
+    const noteText = shopifyOrderNote(basketOrders[0]);
+    const parsed = parseClubBatchNote(noteText);
+    if (!parsed) continue;
+
+    const isOpen = isClubBatchBasketOpen(basketOrders);
+    if (!isOpen) continue;
+
+    const linkedToDeco = basketOrders.some(o => orderLinkedToDeco(o, parsed));
+
+    const basketLines: ProductionPackLine[] = [];
+    for (const o of basketOrders) {
+      if (orderHasOpenPackWork(o)) {
+        basketLines.push(...expandOrderLines(o));
+      }
+    }
+
+    const basketReport = assembleReportFromLines(filters, basketLines, basketOrders);
+
+    batchBaskets.push({
+      basketKey,
+      noteText,
+      parsed,
+      isOpen,
+      linkedToDeco,
+      report: basketReport,
+    });
+  }
+
+  batchBaskets.sort((a, b) => {
+    const da = parseInt(a.parsed.decoJobNumber, 10) || 0;
+    const db = parseInt(b.parsed.decoJobNumber, 10) || 0;
+    return db - da;
+  });
+
+  return {
+    ...base,
+    batchBaskets,
   };
 }
 

@@ -12,12 +12,17 @@ import {
   isFulfillmentBundleDone,
   isPackRowFullyDone,
   loadProductionPackDoneIds,
+  loadProductionPackBasketSelection,
   loadProductionPackMode,
   productionPackDoneStorageKeyForMode,
+  resolveActivePackReport,
+  saveProductionPackBasketSelection,
   saveProductionPackDoneIds,
   saveProductionPackMode,
+  type ClubBatchBasket,
   type FulfillmentPickAllocation,
   type FulfillmentPickBundle,
+  type ProductionPackBasketSelection,
   type ProductionPackMode,
   type ProductionPackReport,
   type ProductionPackWorkRow,
@@ -37,6 +42,7 @@ import {
   Truck,
   Sparkles,
   FileSpreadsheet,
+  Inbox,
 } from 'lucide-react';
 
 export interface ClubProductionPackProps {
@@ -77,6 +83,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   const [dateFrom, setDateFrom] = useState(ymdDaysAgo(30));
   const [dateTo, setDateTo] = useState(todayYmd());
   const [packMode, setPackMode] = useState<ProductionPackMode>(() => loadProductionPackMode());
+  const [basketSelection, setBasketSelection] = useState<ProductionPackBasketSelection>(() =>
+    loadProductionPackBasketSelection()
+  );
   const [view, setView] = useState<'pivot' | 'orders'>('pivot');
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
   const [copyHint, setCopyHint] = useState<string | null>(null);
@@ -86,13 +95,18 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     saveProductionPackMode(mode);
   }, []);
 
+  const setBasketSelectionPersisted = useCallback((sel: ProductionPackBasketSelection) => {
+    setBasketSelection(sel);
+    saveProductionPackBasketSelection(sel);
+  }, []);
+
   const filteredTagOptions = useMemo(() => {
     const q = tagQuery.trim().toLowerCase();
     if (!q) return availableTags;
     return availableTags.filter(t => t.toLowerCase().includes(q));
   }, [availableTags, tagQuery]);
 
-  const report: ProductionPackReport | null = useMemo(() => {
+  const fullReport: ProductionPackReport | null = useMemo(() => {
     if (!tag.trim()) return null;
     return buildProductionPackReport(orders, {
       tag: tag.trim(),
@@ -102,10 +116,32 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     });
   }, [orders, tag, dateFrom, dateTo]);
 
+  useEffect(() => {
+    if (!fullReport) return;
+    if (
+      basketSelection !== 'standard' &&
+      !fullReport.batchBaskets.some(b => b.basketKey === basketSelection)
+    ) {
+      setBasketSelectionPersisted('standard');
+    }
+  }, [fullReport, basketSelection, setBasketSelectionPersisted]);
+
+  const activeBasket: ClubBatchBasket | null = useMemo(() => {
+    if (!fullReport || basketSelection === 'standard') return null;
+    return fullReport.batchBaskets.find(b => b.basketKey === basketSelection) ?? null;
+  }, [fullReport, basketSelection]);
+
+  const report: ProductionPackReport | null = useMemo(
+    () => (fullReport ? resolveActivePackReport(fullReport, basketSelection) : null),
+    [fullReport, basketSelection]
+  );
+
   const storageKey = useMemo(
     () =>
-      report ? productionPackDoneStorageKeyForMode(report.filters, packMode) : '',
-    [report, packMode]
+      report
+        ? productionPackDoneStorageKeyForMode(report.filters, packMode, basketSelection)
+        : '',
+    [report, packMode, basketSelection]
   );
 
   const fulfilmentPick = useMemo(
@@ -428,6 +464,38 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           </label>
         </div>
 
+        {fullReport && fullReport.batchBaskets.length > 0 && (
+          <div className="px-4 py-3 border-b border-amber-100 bg-amber-50/80">
+            <p className="text-[9px] font-black uppercase tracking-widest text-amber-900 flex items-center gap-1.5">
+              <Inbox className="w-3.5 h-3.5" />
+              Batch jobs (Shopify note · on Deco · not fully done)
+            </p>
+            <p className="text-[10px] text-amber-800/90 mt-1 max-w-3xl">
+              Orders with a club batch note are in a separate basket from the standard pick.
+              Fulfilled Shopify orders stay listed until the Deco job is complete.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <BasketChip
+                active={basketSelection === 'standard'}
+                onClick={() => setBasketSelectionPersisted('standard')}
+                label="Standard pick"
+                detail="No batch note"
+              />
+              {fullReport.batchBaskets.map(b => (
+                <BasketChip
+                  key={b.basketKey}
+                  active={basketSelection === b.basketKey}
+                  onClick={() => setBasketSelectionPersisted(b.basketKey)}
+                  label={`Deco #${b.parsed.decoJobNumber}`}
+                  detail={b.parsed.raw}
+                  linked={b.linkedToDeco}
+                  units={b.report.stats.totalUnits}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {report && (
           <>
             <div className="px-4 py-3 bg-slate-50 border-b border-gray-100 flex flex-wrap gap-3">
@@ -436,6 +504,20 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               <Stat label="Units" value={report.stats.totalUnits} highlight />
               <Stat label="Products" value={report.stats.productCount} />
             </div>
+            {activeBasket && (
+              <p className="px-4 py-2 text-[11px] font-bold text-amber-900 bg-amber-50 border-b border-amber-100">
+                {activeBasket.parsed.raw}
+                {activeBasket.linkedToDeco ? (
+                  <span className="ml-2 text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                    · On Deco
+                  </span>
+                ) : (
+                  <span className="ml-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    · Note only
+                  </span>
+                )}
+              </p>
+            )}
             {packMode === 'fulfilment' && fulfilmentPick && fulfilmentPick.batch.maxOrderNumeric > 0 && (
               <p className="px-4 py-2 text-[11px] font-bold text-teal-900 bg-teal-50 border-b border-teal-100">
                 {fulfilmentPick.batch.pivotTitle}
@@ -450,9 +532,11 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           </p>
         )}
 
-        {tag && report && report.stats.lineCount === 0 && (
-          <p className="p-8 text-center text-[11px] font-bold text-amber-700 uppercase tracking-widest">
-            No unfulfilled lines for this tag and date range
+        {tag && fullReport && report && report.stats.lineCount === 0 && (
+          <p className="p-8 text-center text-[11px] font-bold text-amber-700 uppercase tracking-widest max-w-lg mx-auto">
+            {basketSelection === 'standard' && fullReport.batchBaskets.length > 0
+              ? 'No standard unfulfilled lines — select a batch job above'
+              : 'No remaining pick lines in this basket'}
           </p>
         )}
 
@@ -462,7 +546,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           </p>
         )}
 
-        {report && report.stats.lineCount > 0 && (
+        {report && (report.stats.lineCount > 0 || report.orders.length > 0) && (
           <>
             <div className="px-4 py-2 text-[10px] text-gray-600 border-b border-gray-100 bg-white">
               <span className="font-bold text-violet-800">
@@ -584,9 +668,25 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                       <div>
                         <span className="font-black text-gray-900">#{o.orderNumber}</span>
                         <span className="text-gray-500 font-medium ml-2">{o.customerName}</span>
+                        {o.shopifyFulfillment && (
+                          <span
+                            className={`ml-2 text-[9px] font-black uppercase tracking-wider ${
+                              o.shopifyFulfillment === 'fulfilled'
+                                ? 'text-gray-400'
+                                : 'text-amber-700'
+                            }`}
+                          >
+                            {o.shopifyFulfillment}
+                          </span>
+                        )}
                         {o.email && (
                           <span className="block text-[10px] text-gray-400 truncate max-w-md">
                             {o.email}
+                          </span>
+                        )}
+                        {o.batchNote && o.totalUnits === 0 && (
+                          <span className="block text-[10px] text-amber-700 font-bold mt-1">
+                            No pick lines left — batch job still open
                           </span>
                         )}
                       </div>
@@ -595,6 +695,11 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                         <span className="block text-violet-700 font-black">
                           {o.totalUnits} unit{o.totalUnits === 1 ? '' : 's'}
                         </span>
+                        {o.decoJobNumber && (
+                          <span className="block text-[9px] text-emerald-700 font-black mt-0.5">
+                            Deco #{o.decoJobNumber}
+                          </span>
+                        )}
                       </div>
                     </header>
                     <table className="min-w-full text-[11px]">
@@ -766,6 +871,50 @@ function PackWorkRow({
         )}
       </td>
     </tr>
+  );
+}
+
+function BasketChip({
+  active,
+  onClick,
+  label,
+  detail,
+  linked,
+  units,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  detail: string;
+  linked?: boolean;
+  units?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={detail}
+      className={`max-w-xs text-left px-3 py-2 rounded-lg border transition-colors ${
+        active
+          ? 'bg-amber-100 border-amber-400 ring-1 ring-amber-400/60'
+          : 'bg-white border-amber-200 hover:border-amber-300'
+      }`}
+    >
+      <span className="flex items-center gap-2">
+        <span className="text-[10px] font-black uppercase tracking-widest text-amber-950">
+          {label}
+        </span>
+        {linked && (
+          <span className="text-[8px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+            Deco
+          </span>
+        )}
+        {units != null && (
+          <span className="text-[9px] font-black tabular-nums text-amber-800">{units}u</span>
+        )}
+      </span>
+      <span className="block text-[9px] text-amber-900/80 mt-1 line-clamp-2">{detail}</span>
+    </button>
   );
 }
 
