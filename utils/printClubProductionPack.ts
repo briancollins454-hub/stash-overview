@@ -1,5 +1,9 @@
 import type { ProductionPackReport } from './clubProductionPack';
-import { formatBundleQty } from './clubProductionPack';
+import {
+  buildWorkRowsFromReport,
+  productionPackDoneStorageKey,
+  type ProductionPackWorkRow,
+} from './clubProductionPack';
 
 function esc(raw: string): string {
   return raw
@@ -7,6 +11,10 @@ function esc(raw: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function escAttr(raw: string): string {
+  return esc(raw).replace(/'/g, '&#39;');
 }
 
 function fmtDate(ymd: string): string {
@@ -32,9 +40,137 @@ function fmtOrderDate(iso: string): string {
   }
 }
 
-/** Full standalone HTML document for print / Save as PDF. */
+function renderPersCell(personalization: string): string {
+  if (!personalization.trim()) {
+    return '<span class="muted">Plain stock</span>';
+  }
+  return `<button type="button" class="pers-chip copyable" data-copy="${escAttr(personalization)}">${esc(personalization)}</button>`;
+}
+
+function renderWorkRow(row: ProductionPackWorkRow, index: number): string {
+  return `<tr class="work-row" data-row-id="${escAttr(row.id)}" title="Click row to mark done">
+    <td class="num">${index + 1}</td>
+    <td class="product">
+      <strong>${esc(row.itemName)}</strong>
+      <div class="sub muted">${esc(row.lineName)}</div>
+    </td>
+    <td class="mono">${row.sku ? esc(row.sku) : '—'}</td>
+    <td class="vendor">${row.vendor ? esc(row.vendor) : '—'}</td>
+    <td class="color">${row.colorLabel ? esc(row.colorLabel) : '—'}</td>
+    <td class="size-col">${row.sizeLabel ? `<strong>${esc(row.sizeLabel)}</strong>` : '—'}</td>
+    <td class="num qty">${row.quantity}</td>
+    <td class="pers-cell">${renderPersCell(row.personalization)}</td>
+  </tr>`;
+}
+
+function buildInteractiveScript(storageKey: string): string {
+  return `
+(function () {
+  var STORAGE_KEY = ${JSON.stringify(storageKey)};
+  var toastEl = document.getElementById('toast');
+
+  function loadDone() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return new Set();
+      var arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveDone(set) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(set)));
+    } catch (e) {}
+  }
+
+  var done = loadDone();
+
+  function showToast(msg) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () { toastEl.classList.remove('show'); }, 1600);
+  }
+
+  function updateProgress() {
+    var rows = document.querySelectorAll('.work-row');
+    var total = rows.length;
+    var n = 0;
+    rows.forEach(function (r) { if (r.classList.contains('row-done')) n++; });
+    var el = document.getElementById('progress');
+    if (el) el.textContent = n + ' / ' + total + ' done';
+  }
+
+  function applyDoneState() {
+    document.querySelectorAll('.work-row').forEach(function (row) {
+      var id = row.getAttribute('data-row-id');
+      if (id && done.has(id)) row.classList.add('row-done');
+      else row.classList.remove('row-done');
+    });
+    updateProgress();
+  }
+
+  document.querySelectorAll('.work-row').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('.copyable')) return;
+      var id = row.getAttribute('data-row-id');
+      if (!id) return;
+      if (done.has(id)) done.delete(id);
+      else done.add(id);
+      saveDone(done);
+      applyDoneState();
+    });
+  });
+
+  document.querySelectorAll('.copyable').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      var text = btn.getAttribute('data-copy') || btn.textContent || '';
+      function ok() {
+        btn.classList.add('copied');
+        showToast('Copied: ' + text);
+        setTimeout(function () { btn.classList.remove('copied'); }, 1200);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(ok).catch(function () {
+          window.prompt('Copy:', text);
+        });
+      } else {
+        window.prompt('Copy:', text);
+        ok();
+      }
+    });
+  });
+
+  var resetBtn = document.getElementById('reset-done');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function () {
+      if (!confirm('Clear all done marks for this pack?')) return;
+      done = new Set();
+      saveDone(done);
+      applyDoneState();
+    });
+  }
+
+  var printBtn = document.getElementById('print-btn');
+  if (printBtn) printBtn.addEventListener('click', function () { window.print(); });
+
+  applyDoneState();
+})();
+`;
+}
+
+/** Full interactive HTML (open in browser — click rows to mark done, click text to copy). */
 export function buildClubProductionPackPrintHtml(report: ProductionPackReport): string {
-  const { filters, pivotBundles, orders, stats } = report;
+  const { filters, orders, stats } = report;
+  const storageKey = productionPackDoneStorageKey(filters);
+  const { pivotRows, orderRows } = buildWorkRowsFromReport(report);
+
   const now = new Date();
   const printed = now.toLocaleString('en-GB', {
     day: 'numeric',
@@ -44,58 +180,12 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     minute: '2-digit',
   });
 
-  const pivotRows = pivotBundles
-    .map((bundle, i) => {
-      const units = bundle.personalizationUnits;
-      const persHtml =
-        units.length > 0
-          ? units
-              .map(label => `<span class="pers-chip">${esc(label)}</span>`)
-              .join('')
-          : '<span class="muted">Plain stock</span>';
-      const meta = [
-        bundle.colorLabel ? `Colour: ${esc(bundle.colorLabel)}` : '',
-        bundle.sizeLabel ? `Size: ${esc(bundle.sizeLabel)}` : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      return `<tr class="bundle-row">
-        <td class="num">${i + 1}</td>
-        <td class="product">
-          <strong>${esc(bundle.itemName)}</strong>
-          ${meta ? `<div class="sub">${meta}</div>` : ''}
-          <div class="sub muted">${esc(bundle.lineName)}</div>
-        </td>
-        <td class="mono">${bundle.sku ? esc(bundle.sku) : '—'}</td>
-        <td>${bundle.vendor ? esc(bundle.vendor) : '—'}</td>
-        <td class="total"><strong>${esc(formatBundleQty(bundle.sizeLabel, bundle.totalQuantity))}</strong></td>
-        <td class="pers-cell">${persHtml}</td>
-      </tr>`;
-    })
-    .join('');
+  const pivotTableRows = pivotRows.map((r, i) => renderWorkRow(r, i)).join('');
 
   const orderBlocks = orders
     .map(o => {
-      const lineRows = o.lines
-        .map(line => {
-          const props =
-            line.displayProperties.length > 0
-              ? line.displayProperties
-                  .map(
-                    p =>
-                      `<span class="prop"><span class="prop-k">${esc(p.name)}</span> ${esc(p.value)}</span>`
-                  )
-                  .join('')
-              : '<span class="muted">No personalisation</span>';
-          return `<tr>
-            <td><strong>${esc(line.itemName)}</strong><div class="sub muted">${esc(line.lineName)}</div></td>
-            <td class="mono">${line.sku ? esc(line.sku) : '—'}</td>
-            <td>${line.vendor ? esc(line.vendor) : '—'}</td>
-            <td class="num">${line.quantity}</td>
-            <td class="props">${props}</td>
-          </tr>`;
-        })
-        .join('');
+      const oLines = orderRows.filter(r => r.orderNumber === o.orderNumber);
+      const rows = oLines.map((r, i) => renderWorkRow(r, i)).join('');
       return `<section class="order-card">
         <header>
           <div>
@@ -107,15 +197,19 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
             <span class="units">${o.totalUnits} unit${o.totalUnits === 1 ? '' : 's'}</span>
           </div>
         </header>
-        <table class="order-lines">
-          <thead><tr><th>Item</th><th>SKU</th><th>Vendor</th><th>Qty</th><th>Personalisation</th></tr></thead>
-          <tbody>${lineRows}</tbody>
+        <table class="work-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Colour</th><th>Size</th><th>Qty</th><th>Personalisation</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="8" class="muted">No lines</td></tr>'}</tbody>
         </table>
       </section>`;
     })
     .join('');
 
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -124,218 +218,133 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
   <style>
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; color: #0f172a; }
-    body {
-      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-      padding: 24px;
-      font-size: 11px;
-      line-height: 1.45;
-    }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 24px; font-size: 11px; line-height: 1.45; }
     .toolbar {
-      background: #1e1b4b;
-      color: #fff;
-      padding: 12px 16px;
-      margin: 0 0 20px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      border-radius: 8px;
+      position: sticky; top: 0; z-index: 20;
+      background: #1e1b4b; color: #fff; padding: 12px 16px; margin: 0 0 20px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-radius: 8px;
     }
+    .toolbar .hint { flex: 1; min-width: 200px; font-size: 11px; opacity: 0.9; }
     .toolbar button {
-      padding: 10px 18px;
-      border: none;
-      border-radius: 8px;
-      background: #6366f1;
-      color: #fff;
-      font-weight: 800;
-      font-size: 12px;
-      cursor: pointer;
+      padding: 8px 14px; border: none; border-radius: 8px; font-weight: 800; font-size: 11px; cursor: pointer;
     }
-    .cover { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 3px solid #1e1b4b; }
-    .cover h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; color: #0f172a; }
-    .cover .tag {
-      display: inline-block;
-      background: #eef2ff;
-      color: #3730a3;
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-weight: 800;
-      font-size: 12px;
-      margin-bottom: 10px;
+    #print-btn { background: #6366f1; color: #fff; }
+    #reset-done { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); }
+    #progress { font-weight: 800; font-size: 12px; padding: 6px 10px; background: rgba(255,255,255,0.12); border-radius: 6px; }
+    .callout-box {
+      background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 11px; color: #1e40af;
     }
-    .cover .sub { color: #475569; margin: 0 0 14px; }
-    .kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
-    .kpi {
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 10px 14px;
-      min-width: 90px;
-      background: #f8fafc;
-    }
-    .kpi span {
-      display: block;
-      font-size: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: #64748b;
-      font-weight: 800;
-    }
-    .kpi strong { font-size: 18px; color: #0f172a; }
-    h2 {
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #1e1b4b;
-      margin: 24px 0 10px;
-      padding-bottom: 6px;
-      border-bottom: 2px solid #c7d2fe;
-    }
-    table { width: 100%; border-collapse: collapse; }
-    th, td {
-      border: 1px solid #cbd5e1;
-      padding: 8px 10px;
-      text-align: left;
-      vertical-align: top;
-      color: #0f172a;
-    }
-    th {
-      background: #f1f5f9;
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-weight: 800;
-      color: #334155;
-    }
-    td.num { text-align: right; font-variant-numeric: tabular-nums; width: 40px; }
-    td.total { text-align: right; font-weight: 800; font-size: 13px; white-space: nowrap; width: 72px; }
-    td.product { max-width: 240px; }
-    td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
+    .cover { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px solid #1e1b4b; }
+    .cover h1 { margin: 0 0 6px; font-size: 22px; }
+    .cover .tag { display: inline-block; background: #eef2ff; color: #3730a3; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; margin-bottom: 8px; }
+    .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .kpi { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; background: #f8fafc; }
+    .kpi span { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 800; }
+    .kpi strong { font-size: 16px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #1e1b4b; margin: 20px 0 8px; border-bottom: 2px solid #c7d2fe; padding-bottom: 4px; }
+    .work-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    .work-table th, .work-table td { border: 1px solid #cbd5e1; padding: 8px 10px; vertical-align: middle; }
+    .work-table th { background: #f1f5f9; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; }
+    .work-row { cursor: pointer; transition: background 0.15s; }
+    .work-row:hover { background: #f5f3ff !important; }
+    .work-row.row-done { background: #dcfce7 !important; }
+    .work-row.row-done td { color: #14532d; }
+    .work-row.row-done .pers-chip { background: #bbf7d0; border-color: #86efac; color: #166534; }
+    td.size-col { text-align: center; font-size: 15px; font-weight: 900; color: #1e1b4b; min-width: 48px; }
+    td.size-col strong { font-size: 16px; }
     td.mono { font-family: ui-monospace, monospace; font-size: 9px; }
-    td.pers-cell { font-size: 10px; }
+    td.vendor, td.color { font-size: 10px; }
+    td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
+    td.qty { text-align: center; font-weight: 800; }
     .pers-chip {
-      display: inline-block;
-      margin: 0 6px 6px 0;
-      padding: 3px 8px;
-      background: #f5f3ff;
-      border: 1px solid #ddd6fe;
-      border-radius: 6px;
-      font-weight: 700;
-      font-size: 10px;
-      color: #5b21b6;
-      max-width: 100%;
-      white-space: normal;
-      line-height: 1.35;
+      display: inline-block; margin: 0; padding: 4px 10px;
+      background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 6px;
+      font-weight: 700; font-size: 11px; color: #5b21b6; cursor: copy;
+      text-align: left; max-width: 280px; white-space: normal; line-height: 1.35;
     }
-    .pers-qty { font-size: 9px; color: #7c3aed; margin-left: 2px; }
-    .muted { color: #64748b; font-weight: 500; }
-    .order-card {
-      break-inside: avoid;
-      margin-bottom: 16px;
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      overflow: hidden;
+    .pers-chip:hover { background: #ede9fe; }
+    .pers-chip.copied { background: #bbf7d0; border-color: #22c55e; color: #166534; }
+    .muted { color: #94a3b8; }
+    .order-card { margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+    .order-card header { display: flex; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    .order-card h3 { margin: 0; font-size: 13px; }
+    #toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(120%);
+      background: #1e1b4b; color: #fff; padding: 10px 18px; border-radius: 8px; font-weight: 700; font-size: 12px;
+      z-index: 100; transition: transform 0.2s; box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     }
-    .order-card header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      padding: 10px 12px;
-      background: #f8fafc;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .order-card h3 { margin: 0; font-size: 14px; color: #0f172a; }
-    .order-card .cust { margin: 2px 0 0; font-size: 10px; color: #64748b; }
-    .order-meta { text-align: right; font-size: 10px; color: #64748b; }
-    .order-meta .units {
-      display: block;
-      font-weight: 800;
-      color: #1e1b4b;
-      font-size: 12px;
-      margin-top: 2px;
-    }
-    .order-lines th, .order-lines td { font-size: 10px; }
-    td.props { font-size: 10px; }
-    .prop {
-      display: inline-block;
-      margin: 0 8px 4px 0;
-      padding: 2px 8px;
-      background: #faf5ff;
-      border: 1px solid #e9d5ff;
-      border-radius: 6px;
-    }
-    .prop-k { font-weight: 700; color: #6b21a8; }
-    .page-break { page-break-before: always; break-before: page; }
-    .main { display: block; }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    .page-break { page-break-before: always; break-before: page; margin-top: 24px; }
     @media print {
-      .toolbar { display: none !important; }
-      body { padding: 10mm; }
-      html, body {
-        width: auto;
-        height: auto;
-        overflow: visible;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-      .main, .cover, table, .order-card, h2, p {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-      }
-      .order-card { break-inside: avoid; page-break-inside: avoid; }
+      .toolbar, #toast { display: none !important; }
+      body { padding: 8mm; }
+      .work-row { cursor: default; }
+      .pers-chip { border: 1px solid #999; }
+      .work-row.row-done { background: #dcfce7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
+  <div id="toast"></div>
   <div class="toolbar no-print">
-    <span>Production pack — use Print, then &quot;Save as PDF&quot;</span>
-    <button type="button" id="print-btn">Print / Save as PDF</button>
+    <span class="hint">Interactive pack — click a <strong>row</strong> to mark done (saved on this device). Click <strong>personalisation</strong> to copy. Use Print for PDF (colours kept).</span>
+    <span id="progress">0 / 0 done</span>
+    <button type="button" id="reset-done">Reset done</button>
+    <button type="button" id="print-btn">Print / Save PDF</button>
   </div>
-  <div class="main">
-    <div class="cover">
-      <div class="tag">${esc(filters.tag)}</div>
-      <h1>Production pack</h1>
-      <p class="sub">
-        ${esc(fmtDate(filters.dateFrom))} – ${esc(fmtDate(filters.dateTo))}
-        · Unfulfilled only
-        · Printed ${esc(printed)}
-      </p>
-      <div class="kpis">
-        <div class="kpi"><span>Orders</span><strong>${stats.orderCount}</strong></div>
-        <div class="kpi"><span>Line items</span><strong>${stats.lineCount}</strong></div>
-        <div class="kpi"><span>Total units</span><strong>${stats.totalUnits}</strong></div>
-        <div class="kpi"><span>Products</span><strong>${stats.productCount}</strong></div>
-      </div>
+  <div class="callout-box no-print">
+    This is an interactive worksheet in your browser (not a static PDF). Done marks are saved in local storage for this tag + date range. Saving as PDF will keep green rows but won&apos;t be clickable.
+  </div>
+  <div class="cover">
+    <div class="tag">${esc(filters.tag)}</div>
+    <h1>Production pack</h1>
+    <p class="sub">${esc(fmtDate(filters.dateFrom))} – ${esc(fmtDate(filters.dateTo))} · Unfulfilled · ${esc(printed)}</p>
+    <div class="kpis">
+      <div class="kpi"><span>Garments to make</span><strong>${pivotRows.length}</strong></div>
+      <div class="kpi"><span>Orders</span><strong>${stats.orderCount}</strong></div>
+      <div class="kpi"><span>Total units</span><strong>${stats.totalUnits}</strong></div>
     </div>
-
-    <h2>Quantity by product</h2>
-    <p style="color:#64748b;margin:0 0 10px;">One row per product with total qty and all initials listed.</p>
-    <table>
-      <thead>
-        <tr><th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Total</th><th>Personalisation</th></tr>
-      </thead>
-      <tbody>${pivotRows || '<tr><td colspan="4" class="muted">No lines</td></tr>'}</tbody>
-      <tfoot>
-        <tr>
-          <td colspan="4" style="text-align:right;font-weight:800;">Total units</td>
-          <td class="num"><strong>${stats.totalUnits}</strong></td>
-        </tr>
-      </tfoot>
-    </table>
-
-    <div class="page-break"></div>
-    <h2>Orders &amp; personalisation</h2>
-    <p style="color:#64748b;margin:0 0 14px;">Per-order detail for production / Deco entry.</p>
-    ${orderBlocks || '<p class="muted">No orders</p>'}
   </div>
-  <script>
-    document.getElementById('print-btn').addEventListener('click', function () {
-      window.print();
-    });
-  </script>
+
+  <h2>Pick list — by product</h2>
+  <p class="muted" style="margin:0 0 8px;">Sorted by product, colour, size. One row per garment when personalised.</p>
+  <table class="work-table">
+    <thead>
+      <tr>
+        <th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Colour</th><th>Size</th><th>Qty</th><th>Personalisation</th>
+      </tr>
+    </thead>
+    <tbody>${pivotTableRows || '<tr><td colspan="8" class="muted">No lines</td></tr>'}</tbody>
+  </table>
+
+  <div class="page-break"></div>
+  <h2>Orders — detail</h2>
+  ${orderBlocks || '<p class="muted">No orders</p>'}
+
+  <script>${buildInteractiveScript(storageKey)}</script>
 </body>
 </html>`;
+
+  return html;
+}
+
+function openHtmlViaDocumentWrite(html: string): boolean {
+  const w = window.open('', 'stash-production-pack-print', 'width=1100,height=900');
+  if (!w) return false;
+  try {
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    return true;
+  } catch {
+    try {
+      w.close();
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
 }
 
 function openHtmlInNewTab(html: string): boolean {
@@ -354,41 +363,17 @@ function openHtmlInNewTab(html: string): boolean {
   return false;
 }
 
-function openHtmlViaDocumentWrite(html: string): boolean {
-  // Named window, no noopener — we must access document to inject HTML.
-  const w = window.open('', 'stash-production-pack-print', 'width=1000,height=900');
-  if (!w) return false;
-  try {
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    return true;
-  } catch {
-    try {
-      w.close();
-    } catch {
-      /* ignore */
-    }
-    return false;
-  }
-}
-
 export function openClubProductionPackPrint(report: ProductionPackReport): void {
   const html = buildClubProductionPackPrintHtml(report);
-  if (!html || statsMissing(report)) {
+  if (!html || report.stats.lineCount <= 0) {
     window.alert('Nothing to print for this selection.');
     return;
   }
 
-  if (openHtmlInNewTab(html)) return;
   if (openHtmlViaDocumentWrite(html)) return;
+  if (openHtmlInNewTab(html)) return;
 
   window.alert(
-    'Could not open the print view. Allow pop-ups for this site and try again.'
+    'Could not open the production pack. Allow pop-ups for this site and try again.'
   );
-}
-
-function statsMissing(report: ProductionPackReport): boolean {
-  return report.stats.lineCount <= 0;
 }

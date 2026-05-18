@@ -1,10 +1,14 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import type { UnifiedOrder } from '../types';
 import {
   buildProductionPackReport,
+  buildWorkRowsFromReport,
   collectAvailableTags,
-  formatBundleQty,
+  loadProductionPackDoneIds,
+  productionPackDoneStorageKey,
+  saveProductionPackDoneIds,
   type ProductionPackReport,
+  type ProductionPackWorkRow,
 } from '../utils/clubProductionPack';
 import { openClubProductionPackPrint } from '../utils/printClubProductionPack';
 import {
@@ -55,6 +59,8 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   const [dateFrom, setDateFrom] = useState(ymdDaysAgo(30));
   const [dateTo, setDateTo] = useState(todayYmd());
   const [view, setView] = useState<'pivot' | 'orders'>('pivot');
+  const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
+  const [copyHint, setCopyHint] = useState<string | null>(null);
 
   const filteredTagOptions = useMemo(() => {
     const q = tagQuery.trim().toLowerCase();
@@ -71,6 +77,48 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
       unfulfilledOnly: true,
     });
   }, [orders, tag, dateFrom, dateTo]);
+
+  const storageKey = useMemo(
+    () => (report ? productionPackDoneStorageKey(report.filters) : ''),
+    [report]
+  );
+
+  const { pivotRows, orderRows } = useMemo(
+    () => (report ? buildWorkRowsFromReport(report) : { pivotRows: [], orderRows: [] }),
+    [report]
+  );
+
+  useEffect(() => {
+    if (!storageKey) return;
+    setDoneIds(loadProductionPackDoneIds(storageKey));
+  }, [storageKey]);
+
+  const toggleDone = useCallback(
+    (id: string) => {
+      if (!storageKey) return;
+      setDoneIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        saveProductionPackDoneIds(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey]
+  );
+
+  const copyText = useCallback((text: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const run = () => {
+      setCopyHint(text);
+      window.setTimeout(() => setCopyHint(null), 1400);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(run).catch(run);
+    } else {
+      run();
+    }
+  }, []);
 
   const handlePrint = useCallback(() => {
     if (!report || report.stats.lineCount === 0) return;
@@ -141,8 +189,8 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               </h2>
               <p className="text-[10px] text-gray-500 font-medium mt-0.5 max-w-xl">
                 Pick a Shopify tag and date range. Excludes refunded orders and refunded lines.
-                Sorted by product, colour (A–Z), then size (XS → XL, etc.). All personalisation
-                fields shown (names, initials, shirt text, etc.).
+                Sorted by product, colour (A–Z), then size. Click rows to mark done; click
+                personalisation to copy. Same marks sync with the interactive pack window.
               </p>
             </div>
           </div>
@@ -153,7 +201,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               onClick={handlePrint}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-violet-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <Printer className="w-3.5 h-3.5" /> Print / PDF
+              <Printer className="w-3.5 h-3.5" /> Interactive pack
             </button>
             <button
               type="button"
@@ -269,8 +317,20 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           </p>
         )}
 
+        {copyHint && (
+          <p className="px-4 py-2 text-[10px] font-bold text-emerald-800 bg-emerald-50 border-b border-emerald-100">
+            Copied: {copyHint}
+          </p>
+        )}
+
         {report && report.stats.lineCount > 0 && (
           <>
+            <div className="px-4 py-2 text-[10px] text-gray-600 border-b border-gray-100 bg-white">
+              <span className="font-bold text-violet-800">
+                {pivotRows.filter(r => doneIds.has(r.id)).length} / {pivotRows.length}
+              </span>{' '}
+              garments marked done · click a row to toggle
+            </div>
             <div className="px-4 pt-3 flex gap-2 border-b border-gray-100">
               <TabButton
                 active={view === 'pivot'}
@@ -292,80 +352,36 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                   <thead className="sticky top-0 z-[1] bg-gray-50 border-b border-gray-200">
                     <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
                       <th className="px-3 py-2 w-10">#</th>
-                      <th className="px-3 py-2">Item / variant</th>
+                      <th className="px-3 py-2">Item</th>
                       <th className="px-3 py-2 w-24">SKU</th>
                       <th className="px-3 py-2 w-20">Vendor</th>
-                      <th className="px-3 py-2 text-right w-20">Total</th>
+                      <th className="px-3 py-2 w-24">Colour</th>
+                      <th className="px-3 py-2 w-16 text-center">Size</th>
+                      <th className="px-3 py-2 w-12 text-center">Qty</th>
                       <th className="px-3 py-2 min-w-[200px]">Personalisation</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {report.pivotBundles.map((bundle, i) => {
-                      const units = bundle.personalizationUnits;
-                      return (
-                        <tr key={bundle.lineName} className="hover:bg-violet-50/30 align-top">
-                          <td className="px-3 py-3 text-gray-400 font-mono">{i + 1}</td>
-                          <td className="px-3 py-3 max-w-xs">
-                            <div className="font-semibold text-gray-900">{bundle.itemName}</div>
-                            {(bundle.colorLabel || bundle.sizeLabel) && (
-                              <div className="text-[10px] text-gray-500 mt-0.5">
-                                {bundle.colorLabel && (
-                                  <span>
-                                    Colour: <strong>{bundle.colorLabel}</strong>
-                                  </span>
-                                )}
-                                {bundle.colorLabel && bundle.sizeLabel ? ' · ' : ''}
-                                {bundle.sizeLabel && (
-                                  <span>
-                                    Size: <strong>{bundle.sizeLabel}</strong>
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            <div className="text-[9px] text-gray-400 mt-0.5 leading-snug">
-                              {bundle.lineName}
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 font-mono text-[10px] text-gray-600">
-                            {bundle.sku || '—'}
-                          </td>
-                          <td className="px-3 py-3 text-[10px] text-gray-600">
-                            {bundle.vendor || '—'}
-                          </td>
-                          <td className="px-3 py-3 text-right whitespace-nowrap">
-                            <span className="inline-block px-2.5 py-1 rounded-lg bg-violet-600 text-white font-black text-[13px] tabular-nums">
-                              {formatBundleQty(bundle.sizeLabel, bundle.totalQuantity)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3">
-                            {units.length > 0 ? (
-                              <div className="flex flex-wrap gap-1.5">
-                                {units.map((label, idx) => (
-                                  <span
-                                    key={`${bundle.lineName}-${idx}-${label}`}
-                                    title={label}
-                                    className="inline-block max-w-[220px] truncate px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px]"
-                                  >
-                                    {label}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
-                                Plain stock
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {pivotRows.map((row, i) => (
+                      <PackWorkRow
+                        key={row.id}
+                        row={row}
+                        index={i}
+                        done={doneIds.has(row.id)}
+                        onToggle={toggleDone}
+                        onCopy={copyText}
+                      />
+                    ))}
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
-                      <td colSpan={4} className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500">
+                      <td
+                        colSpan={6}
+                        className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500"
+                      >
                         Total units
                       </td>
-                      <td className="px-3 py-2 text-right font-black text-lg tabular-nums">
+                      <td className="px-3 py-2 text-center font-black text-lg tabular-nums">
                         {report.stats.totalUnits}
                       </td>
                       <td />
@@ -403,49 +419,26 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                           <th className="px-3 py-1.5 text-left">Item</th>
                           <th className="px-3 py-1.5 text-left">SKU</th>
                           <th className="px-3 py-1.5 text-left">Vendor</th>
+                          <th className="px-3 py-1.5 text-left">Colour</th>
+                          <th className="px-3 py-1.5 text-center">Size</th>
                           <th className="px-3 py-1.5 text-center">Qty</th>
                           <th className="px-3 py-1.5 text-left">Personalisation</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {o.lines.map((line, idx) => (
-                          <tr key={`${line.orderId}-${idx}`}>
-                            <td className="px-3 py-2 font-medium text-gray-800">
-                              <div>{line.itemName}</div>
-                              <div className="text-[9px] text-gray-400">{line.lineName}</div>
-                            </td>
-                            <td className="px-3 py-2 font-mono text-[10px] text-gray-600">
-                              {line.sku || '—'}
-                            </td>
-                            <td className="px-3 py-2 text-[10px] text-gray-600">
-                              {line.vendor || '—'}
-                            </td>
-                            <td className="px-3 py-2 text-center font-black tabular-nums">
-                              {line.quantity}
-                            </td>
-                            <td className="px-3 py-2">
-                              {line.displayProperties.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {line.displayProperties.map(p => (
-                                    <span
-                                      key={p.name}
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 border border-violet-100 text-[10px]"
-                                    >
-                                      <span className="font-black text-violet-800">{p.name}:</span>
-                                      <span className="font-bold text-gray-800">{p.value}</span>
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : line.personalizationLabel ? (
-                                <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-800 font-black">
-                                  {line.personalizationLabel}
-                                </span>
-                              ) : (
-                                <span className="text-gray-300 text-[10px]">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {orderRows
+                          .filter(r => r.orderNumber === o.orderNumber)
+                          .map((row, idx) => (
+                            <PackWorkRow
+                              key={row.id}
+                              row={row}
+                              index={idx}
+                              done={doneIds.has(row.id)}
+                              onToggle={toggleDone}
+                              onCopy={copyText}
+                              compact
+                            />
+                          ))}
                       </tbody>
                     </table>
                   </article>
@@ -481,6 +474,66 @@ function Stat({
         {value}
       </strong>
     </div>
+  );
+}
+
+function PackWorkRow({
+  row,
+  index,
+  done,
+  onToggle,
+  onCopy,
+  compact,
+}: {
+  row: ProductionPackWorkRow;
+  index: number;
+  done: boolean;
+  onToggle: (id: string) => void;
+  onCopy: (text: string, e?: React.MouseEvent) => void;
+  compact?: boolean;
+}) {
+  const py = compact ? 'py-2' : 'py-3';
+  return (
+    <tr
+      onClick={() => onToggle(row.id)}
+      title="Click row to mark done"
+      className={`cursor-pointer align-top transition-colors ${
+        done ? 'bg-emerald-100 hover:bg-emerald-100' : 'hover:bg-violet-50/40'
+      }`}
+    >
+      {!compact && <td className={`px-3 ${py} text-gray-400 font-mono`}>{index + 1}</td>}
+      <td className={`px-3 ${py} max-w-xs`}>
+        <div className="font-semibold text-gray-900">{row.itemName}</div>
+        <div className="text-[9px] text-gray-400 mt-0.5 leading-snug">{row.lineName}</div>
+      </td>
+      <td className={`px-3 ${py} font-mono text-[10px] text-gray-600`}>{row.sku || '—'}</td>
+      <td className={`px-3 ${py} text-[10px] text-gray-600`}>{row.vendor || '—'}</td>
+      <td className={`px-3 ${py} text-[10px] text-gray-700`}>{row.colorLabel || '—'}</td>
+      <td className={`px-3 ${py} text-center`}>
+        {row.sizeLabel ? (
+          <span className="text-[15px] font-black text-violet-900 tabular-nums">{row.sizeLabel}</span>
+        ) : (
+          <span className="text-gray-300">—</span>
+        )}
+      </td>
+      <td className={`px-3 ${py} text-center font-black tabular-nums`}>{row.quantity}</td>
+      <td className={`px-3 ${py}`}>
+        {row.personalization ? (
+          <button
+            type="button"
+            onClick={e => onCopy(row.personalization, e)}
+            title="Click to copy"
+            className="inline-block max-w-[260px] text-left px-2 py-1 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px] hover:bg-violet-200 border border-violet-200"
+          >
+            {row.personalization}
+          </button>
+        ) : (
+          <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
+            Plain stock
+          </span>
+        )}
+      </td>
+    </tr>
   );
 }
 

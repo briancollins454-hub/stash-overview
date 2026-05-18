@@ -175,6 +175,115 @@ export function formatPersonalizationUnits(units: string[]): string {
   return units.filter(Boolean).join(' · ');
 }
 
+/** One row staff tick off (per garment or per order line). */
+export interface ProductionPackWorkRow {
+  id: string;
+  itemName: string;
+  lineName: string;
+  sku: string;
+  vendor: string;
+  colorLabel: string;
+  sizeLabel: string;
+  personalization: string;
+  quantity: number;
+  orderNumber?: string;
+}
+
+export function productionPackDoneStorageKey(filters: ProductionPackFilters): string {
+  return `stash-pp-done:${filters.tag}|${filters.dateFrom}|${filters.dateTo}`;
+}
+
+export function loadProductionPackDoneIds(storageKey: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as string[];
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveProductionPackDoneIds(storageKey: string, ids: Set<string>): void {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...ids]));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function buildWorkRowsFromReport(report: ProductionPackReport): {
+  pivotRows: ProductionPackWorkRow[];
+  orderRows: ProductionPackWorkRow[];
+} {
+  const pivotRows: ProductionPackWorkRow[] = [];
+
+  for (const b of report.pivotBundles) {
+    if (b.personalizationUnits.length === 0) {
+      pivotRows.push({
+        id: `p:${b.lineName}`,
+        itemName: b.itemName,
+        lineName: b.lineName,
+        sku: b.sku,
+        vendor: b.vendor,
+        colorLabel: b.colorLabel,
+        sizeLabel: b.sizeLabel,
+        personalization: '',
+        quantity: b.totalQuantity,
+      });
+    } else {
+      b.personalizationUnits.forEach((pers, idx) => {
+        pivotRows.push({
+          id: `p:${b.lineName}#${idx}`,
+          itemName: b.itemName,
+          lineName: b.lineName,
+          sku: b.sku,
+          vendor: b.vendor,
+          colorLabel: b.colorLabel,
+          sizeLabel: b.sizeLabel,
+          personalization: pers,
+          quantity: 1,
+        });
+      });
+    }
+  }
+
+  const orderRows: ProductionPackWorkRow[] = [];
+  for (const o of report.orders) {
+    for (const line of o.lines) {
+      const base = {
+        itemName: line.itemName,
+        lineName: line.lineName,
+        sku: line.sku,
+        vendor: line.vendor,
+        colorLabel: line.colorLabel,
+        sizeLabel: line.sizeLabel,
+        orderNumber: o.orderNumber,
+      };
+      const pers = line.personalizationLabel.trim();
+      if (pers) {
+        for (let i = 0; i < line.quantity; i++) {
+          orderRows.push({
+            ...base,
+            id: `o:${o.orderNumber}:${line.orderId}:${i}`,
+            personalization: pers,
+            quantity: 1,
+          });
+        }
+      } else {
+        orderRows.push({
+          ...base,
+          id: `o:${o.orderNumber}:${line.orderId}`,
+          personalization: '',
+          quantity: line.quantity,
+        });
+      }
+    }
+  }
+
+  return { pivotRows, orderRows };
+}
+
 function isMeaningfulPersonalizationProp(name: string, value: string): boolean {
   const n = normPropName(name);
   if (n.startsWith('_') || n.includes('dispatch')) return false;
