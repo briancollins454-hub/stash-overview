@@ -182,8 +182,13 @@ export function openClubProductionPackPrint(report: ProductionPackReport): void 
 </body>
 </html>`;
 
-  const w = window.open('', '_blank', 'width=960,height=1100');
-  if (!w) return;
-  w.document.write(fixed);
+  const w = window.open('', '_blank', 'noopener,noreferrer');
+  if (!w) {
+    window.alert('Please allow pop-ups to open the production pack print view.');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
   w.document.close();
+  w.focus();
 }
