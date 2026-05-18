@@ -282,7 +282,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {report.pivotBundles.map((bundle, i) => {
-                      const withLabel = bundle.personalizations.filter(p => p.label);
+                      const units = bundle.personalizationUnits;
                       return (
                         <tr key={bundle.lineName} className="hover:bg-violet-50/30 align-top">
                           <td className="px-3 py-3 text-gray-400 font-mono">{i + 1}</td>
@@ -295,20 +295,14 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                             </span>
                           </td>
                           <td className="px-3 py-3">
-                            {withLabel.length > 0 ? (
+                            {units.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5">
-                                {withLabel.map(p => (
+                                {units.map((label, idx) => (
                                   <span
-                                    key={p.label}
-                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-black text-[12px]"
-                                    title={p.quantity > 1 ? `${p.quantity} units` : undefined}
+                                    key={`${bundle.lineName}-${idx}-${label}`}
+                                    className="inline-block px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-black text-[12px]"
                                   >
-                                    {p.label}
-                                    {p.quantity > 1 ? (
-                                      <span className="text-[9px] font-bold text-violet-600">
-                                        ×{p.quantity}
-                                      </span>
-                                    ) : null}
+                                    {label}
                                   </span>
                                 ))}
                               </div>

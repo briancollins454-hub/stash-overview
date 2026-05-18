@@ -49,17 +49,13 @@ export interface ProductionPackPivotRow {
   quantity: number;
 }
 
-export interface ProductionPackPivotPersonalization {
-  label: string;
-  quantity: number;
-}
-
-/** One product line with total qty and all personalisations bundled. */
+/** One product line with total qty and one personalisation label per garment. */
 export interface ProductionPackPivotBundle {
   lineName: string;
   sizeLabel: string;
   totalQuantity: number;
-  personalizations: ProductionPackPivotPersonalization[];
+  /** One label per unit to make — e.g. ["AA", "AA"] when qty 2 with initials AA */
+  personalizationUnits: string[];
 }
 
 export interface ProductionPackOrderGroup {
@@ -101,6 +97,11 @@ export function extractSizeLabel(lineName: string): string {
 export function formatBundleQty(sizeLabel: string, totalQuantity: number): string {
   if (sizeLabel) return `${totalQuantity}× ${sizeLabel}`;
   return `${totalQuantity}×`;
+}
+
+/** Space-separated list for copy/paste (e.g. "AA AA FT"). */
+export function formatPersonalizationUnits(units: string[]): string {
+  return units.filter(Boolean).join(' ');
 }
 
 function normPropName(name: string): string {
@@ -235,18 +236,22 @@ export function buildProductionPackReport(
 
   const bundleMap = new Map<
     string,
-    { lineName: string; totalQuantity: number; persMap: Map<string, number> }
+    { lineName: string; totalQuantity: number; units: string[] }
   >();
   for (const line of lines) {
     const key = line.lineName;
     let bundle = bundleMap.get(key);
     if (!bundle) {
-      bundle = { lineName: line.lineName, totalQuantity: 0, persMap: new Map() };
+      bundle = { lineName: line.lineName, totalQuantity: 0, units: [] };
       bundleMap.set(key, bundle);
     }
     bundle.totalQuantity += line.quantity;
-    const persKey = line.pivotPersonalization.trim() || '';
-    bundle.persMap.set(persKey, (bundle.persMap.get(persKey) || 0) + line.quantity);
+    const label = line.pivotPersonalization.trim();
+    if (label) {
+      for (let u = 0; u < line.quantity; u++) {
+        bundle.units.push(label);
+      }
+    }
   }
 
   const pivotBundles: ProductionPackPivotBundle[] = Array.from(bundleMap.values())
@@ -254,14 +259,7 @@ export function buildProductionPackReport(
       lineName: b.lineName,
       sizeLabel: extractSizeLabel(b.lineName),
       totalQuantity: b.totalQuantity,
-      personalizations: Array.from(b.persMap.entries())
-        .map(([label, quantity]) => ({ label, quantity }))
-        .sort((a, c) => {
-          const aPlain = !a.label;
-          const cPlain = !c.label;
-          if (aPlain !== cPlain) return aPlain ? 1 : -1;
-          return a.label.localeCompare(c.label);
-        }),
+      personalizationUnits: b.units,
     }))
     .sort((a, b) => {
       if (b.totalQuantity !== a.totalQuantity) return b.totalQuantity - a.totalQuantity;

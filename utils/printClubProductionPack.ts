@@ -46,14 +46,11 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
 
   const pivotRows = pivotBundles
     .map((bundle, i) => {
-      const withLabel = bundle.personalizations.filter(p => p.label);
+      const units = bundle.personalizationUnits;
       const persHtml =
-        withLabel.length > 0
-          ? withLabel
-              .map(p => {
-                const qtySuffix = p.quantity > 1 ? `<span class="pers-qty">×${p.quantity}</span>` : '';
-                return `<span class="pers-chip">${esc(p.label)}${qtySuffix}</span>`;
-              })
+        units.length > 0
+          ? units
+              .map(label => `<span class="pers-chip">${esc(label)}</span>`)
               .join('')
           : '<span class="muted">Plain stock</span>';
       return `<tr class="bundle-row">
