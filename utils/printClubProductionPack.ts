@@ -1,6 +1,7 @@
 import type { ProductionPackReport } from './clubProductionPack';
 import {
   buildWorkRowsFromReport,
+  formatProductionPackItemMeta,
   productionPackDoneStorageKey,
   type ProductionPackWorkRow,
 } from './clubProductionPack';
@@ -40,11 +41,22 @@ function fmtOrderDate(iso: string): string {
   }
 }
 
-function renderPersCell(personalization: string): string {
-  if (!personalization.trim()) {
+function renderPersCell(row: ProductionPackWorkRow): string {
+  const units =
+    row.personalizationUnits.length > 0
+      ? row.personalizationUnits
+      : row.personalization.trim()
+        ? [row.personalization]
+        : [];
+  if (units.length === 0) {
     return '<span class="muted">Plain stock</span>';
   }
-  return `<button type="button" class="pers-chip copyable" data-copy="${escAttr(personalization)}">${esc(personalization)}</button>`;
+  return `<div class="pers-chips">${units
+    .map(
+      label =>
+        `<button type="button" class="pers-chip copyable" data-copy="${escAttr(label)}">${esc(label)}</button>`
+    )
+    .join('')}</div>`;
 }
 
 function renderWorkRow(row: ProductionPackWorkRow, index: number): string {
@@ -52,14 +64,11 @@ function renderWorkRow(row: ProductionPackWorkRow, index: number): string {
     <td class="num">${index + 1}</td>
     <td class="product">
       <strong>${esc(row.itemName)}</strong>
-      <div class="sub muted">${esc(row.lineName)}</div>
+      <div class="sub muted">${esc(formatProductionPackItemMeta(row))}</div>
     </td>
-    <td class="mono">${row.sku ? esc(row.sku) : '—'}</td>
-    <td class="vendor">${row.vendor ? esc(row.vendor) : '—'}</td>
-    <td class="color">${row.colorLabel ? esc(row.colorLabel) : '—'}</td>
     <td class="size-col">${row.sizeLabel ? `<strong>${esc(row.sizeLabel)}</strong>` : '—'}</td>
     <td class="num qty">${row.quantity}</td>
-    <td class="pers-cell">${renderPersCell(row.personalization)}</td>
+    <td class="pers-cell">${renderPersCell(row)}</td>
   </tr>`;
 }
 
@@ -200,10 +209,10 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
         <table class="work-table">
           <thead>
             <tr>
-              <th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Colour</th><th>Size</th><th>Qty</th><th>Personalisation</th>
+              <th>#</th><th>Item</th><th>Size</th><th>Qty</th><th>Personalisation</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="8" class="muted">No lines</td></tr>'}</tbody>
+          <tbody>${rows || '<tr><td colspan="5" class="muted">No lines</td></tr>'}</tbody>
         </table>
       </section>`;
     })
@@ -256,6 +265,7 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     td.vendor, td.color { font-size: 10px; }
     td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
     td.qty { text-align: center; font-weight: 800; }
+    .pers-chips { display: flex; flex-wrap: wrap; gap: 4px; }
     .pers-chip {
       display: inline-block; margin: 0; padding: 4px 10px;
       background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 6px;
@@ -311,10 +321,10 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
   <table class="work-table">
     <thead>
       <tr>
-        <th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Colour</th><th>Size</th><th>Qty</th><th>Personalisation</th>
+        <th>#</th><th>Item</th><th>Size</th><th>Qty</th><th>Personalisation</th>
       </tr>
     </thead>
-    <tbody>${pivotTableRows || '<tr><td colspan="8" class="muted">No lines</td></tr>'}</tbody>
+    <tbody>${pivotTableRows || '<tr><td colspan="5" class="muted">No lines</td></tr>'}</tbody>
   </table>
 
   <div class="page-break"></div>

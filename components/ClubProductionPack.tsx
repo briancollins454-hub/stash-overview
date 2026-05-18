@@ -4,6 +4,7 @@ import {
   buildProductionPackReport,
   buildWorkRowsFromReport,
   collectAvailableTags,
+  formatProductionPackItemMeta,
   loadProductionPackDoneIds,
   productionPackDoneStorageKey,
   saveProductionPackDoneIds,
@@ -329,7 +330,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               <span className="font-bold text-violet-800">
                 {pivotRows.filter(r => doneIds.has(r.id)).length} / {pivotRows.length}
               </span>{' '}
-              garments marked done · click a row to toggle
+              lines marked done · click a row to toggle
             </div>
             <div className="px-4 pt-3 flex gap-2 border-b border-gray-100">
               <TabButton
@@ -353,9 +354,6 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                     <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
                       <th className="px-3 py-2 w-10">#</th>
                       <th className="px-3 py-2">Item</th>
-                      <th className="px-3 py-2 w-24">SKU</th>
-                      <th className="px-3 py-2 w-20">Vendor</th>
-                      <th className="px-3 py-2 w-24">Colour</th>
                       <th className="px-3 py-2 w-16 text-center">Size</th>
                       <th className="px-3 py-2 w-12 text-center">Qty</th>
                       <th className="px-3 py-2 min-w-[200px]">Personalisation</th>
@@ -376,7 +374,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={3}
                         className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500"
                       >
                         Total units
@@ -417,9 +415,6 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                       <thead>
                         <tr className="text-[9px] font-black uppercase tracking-widest text-gray-400 bg-gray-50/80">
                           <th className="px-3 py-1.5 text-left">Item</th>
-                          <th className="px-3 py-1.5 text-left">SKU</th>
-                          <th className="px-3 py-1.5 text-left">Vendor</th>
-                          <th className="px-3 py-1.5 text-left">Colour</th>
                           <th className="px-3 py-1.5 text-center">Size</th>
                           <th className="px-3 py-1.5 text-center">Qty</th>
                           <th className="px-3 py-1.5 text-left">Personalisation</th>
@@ -493,6 +488,13 @@ function PackWorkRow({
   compact?: boolean;
 }) {
   const py = compact ? 'py-2' : 'py-3';
+  const persUnits =
+    row.personalizationUnits.length > 0
+      ? row.personalizationUnits
+      : row.personalization.trim()
+        ? [row.personalization]
+        : [];
+
   return (
     <tr
       onClick={() => onToggle(row.id)}
@@ -502,13 +504,12 @@ function PackWorkRow({
       }`}
     >
       {!compact && <td className={`px-3 ${py} text-gray-400 font-mono`}>{index + 1}</td>}
-      <td className={`px-3 ${py} max-w-xs`}>
+      <td className={`px-3 ${py} max-w-sm`}>
         <div className="font-semibold text-gray-900">{row.itemName}</div>
-        <div className="text-[9px] text-gray-400 mt-0.5 leading-snug">{row.lineName}</div>
+        <div className="text-[9px] text-gray-500 mt-0.5 leading-snug">
+          {formatProductionPackItemMeta(row)}
+        </div>
       </td>
-      <td className={`px-3 ${py} font-mono text-[10px] text-gray-600`}>{row.sku || '—'}</td>
-      <td className={`px-3 ${py} text-[10px] text-gray-600`}>{row.vendor || '—'}</td>
-      <td className={`px-3 ${py} text-[10px] text-gray-700`}>{row.colorLabel || '—'}</td>
       <td className={`px-3 ${py} text-center`}>
         {row.sizeLabel ? (
           <span className="text-[15px] font-black text-violet-900 tabular-nums">{row.sizeLabel}</span>
@@ -516,17 +517,26 @@ function PackWorkRow({
           <span className="text-gray-300">—</span>
         )}
       </td>
-      <td className={`px-3 ${py} text-center font-black tabular-nums`}>{row.quantity}</td>
+      <td className={`px-3 ${py} text-center`}>
+        <span className="inline-block min-w-[2rem] px-2.5 py-1 rounded-lg bg-violet-600 text-white font-black text-[13px] tabular-nums">
+          {row.quantity}
+        </span>
+      </td>
       <td className={`px-3 ${py}`}>
-        {row.personalization ? (
-          <button
-            type="button"
-            onClick={e => onCopy(row.personalization, e)}
-            title="Click to copy"
-            className="inline-block max-w-[260px] text-left px-2 py-1 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px] hover:bg-violet-200 border border-violet-200"
-          >
-            {row.personalization}
-          </button>
+        {persUnits.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {persUnits.map((label, idx) => (
+              <button
+                key={`${row.id}-p-${idx}`}
+                type="button"
+                onClick={e => onCopy(label, e)}
+                title="Click to copy"
+                className="inline-block max-w-[220px] px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px] hover:bg-violet-200 border border-violet-200"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         ) : (
           <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
             Plain stock
