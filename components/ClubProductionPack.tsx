@@ -3,6 +3,7 @@ import type { UnifiedOrder } from '../types';
 import {
   buildProductionPackReport,
   collectAvailableTags,
+  formatBundleQty,
   type ProductionPackReport,
 } from '../utils/clubProductionPack';
 import { openClubProductionPackPrint } from '../utils/printClubProductionPack';
@@ -235,7 +236,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
             <Stat label="Orders" value={report.stats.orderCount} />
             <Stat label="Lines" value={report.stats.lineCount} />
             <Stat label="Units" value={report.stats.totalUnits} highlight />
-            <Stat label="Pivot rows" value={report.stats.pivotRowCount} />
+            <Stat label="Products" value={report.stats.productCount} />
           </div>
         )}
 
@@ -258,7 +259,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                 active={view === 'pivot'}
                 onClick={() => setView('pivot')}
                 icon={<Table2 className="w-3.5 h-3.5" />}
-                label="Quantity pivot"
+                label="Quantity by product"
               />
               <TabButton
                 active={view === 'orders'}
@@ -275,38 +276,61 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                     <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
                       <th className="px-3 py-2 w-10">#</th>
                       <th className="px-3 py-2">Product</th>
-                      <th className="px-3 py-2 w-28">Personalisation</th>
-                      <th className="px-3 py-2 text-right w-16">Qty</th>
+                      <th className="px-3 py-2 text-right w-24">Total</th>
+                      <th className="px-3 py-2">Personalisation</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {report.pivot.map((row, i) => (
-                      <tr key={`${row.lineName}-${row.personalization}`} className="hover:bg-violet-50/30">
-                        <td className="px-3 py-2 text-gray-400 font-mono">{i + 1}</td>
-                        <td className="px-3 py-2 font-semibold text-gray-900">{row.lineName}</td>
-                        <td className="px-3 py-2">
-                          {row.personalization ? (
-                            <span className="inline-block px-2 py-0.5 rounded-md bg-violet-100 text-violet-800 font-black text-[12px]">
-                              {row.personalization}
+                  <tbody className="divide-y divide-gray-100">
+                    {report.pivotBundles.map((bundle, i) => {
+                      const withLabel = bundle.personalizations.filter(p => p.label);
+                      return (
+                        <tr key={bundle.lineName} className="hover:bg-violet-50/30 align-top">
+                          <td className="px-3 py-3 text-gray-400 font-mono">{i + 1}</td>
+                          <td className="px-3 py-3 font-semibold text-gray-900 max-w-md">
+                            {bundle.lineName}
+                          </td>
+                          <td className="px-3 py-3 text-right whitespace-nowrap">
+                            <span className="inline-block px-2.5 py-1 rounded-lg bg-violet-600 text-white font-black text-[13px] tabular-nums">
+                              {formatBundleQty(bundle.sizeLabel, bundle.totalQuantity)}
                             </span>
-                          ) : (
-                            <span className="text-gray-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-right font-black text-gray-900 tabular-nums">
-                          {row.quantity}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-3 py-3">
+                            {withLabel.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {withLabel.map(p => (
+                                  <span
+                                    key={p.label}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-black text-[12px]"
+                                    title={p.quantity > 1 ? `${p.quantity} units` : undefined}
+                                  >
+                                    {p.label}
+                                    {p.quantity > 1 ? (
+                                      <span className="text-[9px] font-bold text-violet-600">
+                                        ×{p.quantity}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
+                                Plain stock
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
-                      <td colSpan={3} className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500">
+                      <td colSpan={2} className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500">
                         Total units
                       </td>
                       <td className="px-3 py-2 text-right font-black text-lg tabular-nums">
                         {report.stats.totalUnits}
                       </td>
+                      <td />
                     </tr>
                   </tfoot>
                 </table>

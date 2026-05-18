@@ -42,10 +42,24 @@ export interface ProductionPackLine {
   displayProperties: { name: string; value: string }[];
 }
 
+/** @deprecated Flat pivot row — use ProductionPackPivotBundle */
 export interface ProductionPackPivotRow {
   lineName: string;
   personalization: string;
   quantity: number;
+}
+
+export interface ProductionPackPivotPersonalization {
+  label: string;
+  quantity: number;
+}
+
+/** One product line with total qty and all personalisations bundled. */
+export interface ProductionPackPivotBundle {
+  lineName: string;
+  sizeLabel: string;
+  totalQuantity: number;
+  personalizations: ProductionPackPivotPersonalization[];
 }
 
 export interface ProductionPackOrderGroup {
@@ -60,14 +74,33 @@ export interface ProductionPackOrderGroup {
 export interface ProductionPackReport {
   filters: ProductionPackFilters;
   lines: ProductionPackLine[];
-  pivot: ProductionPackPivotRow[];
+  /** Product types bundled with total qty + personalisation list */
+  pivotBundles: ProductionPackPivotBundle[];
   orders: ProductionPackOrderGroup[];
   stats: {
     orderCount: number;
     lineCount: number;
     totalUnits: number;
-    pivotRowCount: number;
+    productCount: number;
   };
+}
+
+/** Last segment after " - " when it looks like a size (e.g. M, 7-8, 2XL). */
+export function extractSizeLabel(lineName: string): string {
+  const trimmed = lineName.trim();
+  const dashParts = trimmed.split(' - ').map(p => p.trim()).filter(Boolean);
+  if (dashParts.length >= 2) {
+    const last = dashParts[dashParts.length - 1];
+    if (last.length > 0 && last.length <= 14) return last;
+  }
+  const tail = trimmed.match(/\s[-–]\s([^-–]+)$/);
+  if (tail?.[1] && tail[1].length <= 14) return tail[1].trim();
+  return '';
+}
+
+export function formatBundleQty(sizeLabel: string, totalQuantity: number): string {
+  if (sizeLabel) return `${totalQuantity}× ${sizeLabel}`;
+  return `${totalQuantity}×`;
 }
 
 function normPropName(name: string): string {
@@ -200,27 +233,40 @@ export function buildProductionPackReport(
     lines.push(...expandOrderLines(o));
   }
 
-  const pivotMap = new Map<string, ProductionPackPivotRow>();
+  const bundleMap = new Map<
+    string,
+    { lineName: string; totalQuantity: number; persMap: Map<string, number> }
+  >();
   for (const line of lines) {
-    const key = `${line.lineName}\0${line.pivotPersonalization}`;
-    const existing = pivotMap.get(key);
-    if (existing) {
-      existing.quantity += line.quantity;
-    } else {
-      pivotMap.set(key, {
-        lineName: line.lineName,
-        personalization: line.pivotPersonalization,
-        quantity: line.quantity,
-      });
+    const key = line.lineName;
+    let bundle = bundleMap.get(key);
+    if (!bundle) {
+      bundle = { lineName: line.lineName, totalQuantity: 0, persMap: new Map() };
+      bundleMap.set(key, bundle);
     }
+    bundle.totalQuantity += line.quantity;
+    const persKey = line.pivotPersonalization.trim() || '';
+    bundle.persMap.set(persKey, (bundle.persMap.get(persKey) || 0) + line.quantity);
   }
 
-  const pivot = Array.from(pivotMap.values()).sort((a, b) => {
-    if (b.quantity !== a.quantity) return b.quantity - a.quantity;
-    const n = a.lineName.localeCompare(b.lineName);
-    if (n !== 0) return n;
-    return a.personalization.localeCompare(b.personalization);
-  });
+  const pivotBundles: ProductionPackPivotBundle[] = Array.from(bundleMap.values())
+    .map(b => ({
+      lineName: b.lineName,
+      sizeLabel: extractSizeLabel(b.lineName),
+      totalQuantity: b.totalQuantity,
+      personalizations: Array.from(b.persMap.entries())
+        .map(([label, quantity]) => ({ label, quantity }))
+        .sort((a, c) => {
+          const aPlain = !a.label;
+          const cPlain = !c.label;
+          if (aPlain !== cPlain) return aPlain ? 1 : -1;
+          return a.label.localeCompare(c.label);
+        }),
+    }))
+    .sort((a, b) => {
+      if (b.totalQuantity !== a.totalQuantity) return b.totalQuantity - a.totalQuantity;
+      return a.lineName.localeCompare(b.lineName);
+    });
 
   const byOrder = new Map<string, ProductionPackOrderGroup>();
   for (const line of lines) {
@@ -254,13 +300,13 @@ export function buildProductionPackReport(
   return {
     filters,
     lines,
-    pivot,
+    pivotBundles,
     orders: ordersGrouped,
     stats: {
       orderCount: ordersGrouped.length,
       lineCount: lines.length,
       totalUnits,
-      pivotRowCount: pivot.length,
+      productCount: pivotBundles.length,
     },
   };
 }

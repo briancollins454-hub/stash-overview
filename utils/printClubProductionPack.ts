@@ -1,4 +1,5 @@
 import type { ProductionPackReport } from './clubProductionPack';
+import { formatBundleQty } from './clubProductionPack';
 
 function esc(raw: string): string {
   return raw
@@ -33,7 +34,7 @@ function fmtOrderDate(iso: string): string {
 
 /** Full standalone HTML document for print / Save as PDF. */
 export function buildClubProductionPackPrintHtml(report: ProductionPackReport): string {
-  const { filters, pivot, orders, stats } = report;
+  const { filters, pivotBundles, orders, stats } = report;
   const now = new Date();
   const printed = now.toLocaleString('en-GB', {
     day: 'numeric',
@@ -43,17 +44,23 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     minute: '2-digit',
   });
 
-  const pivotRows = pivot
-    .map((row, i) => {
-      const pers =
-        row.personalization.trim() !== ''
-          ? esc(row.personalization)
-          : '<span class="muted">—</span>';
-      return `<tr>
+  const pivotRows = pivotBundles
+    .map((bundle, i) => {
+      const withLabel = bundle.personalizations.filter(p => p.label);
+      const persHtml =
+        withLabel.length > 0
+          ? withLabel
+              .map(p => {
+                const qtySuffix = p.quantity > 1 ? `<span class="pers-qty">×${p.quantity}</span>` : '';
+                return `<span class="pers-chip">${esc(p.label)}${qtySuffix}</span>`;
+              })
+              .join('')
+          : '<span class="muted">Plain stock</span>';
+      return `<tr class="bundle-row">
         <td class="num">${i + 1}</td>
-        <td>${esc(row.lineName)}</td>
-        <td class="pers">${pers}</td>
-        <td class="num"><strong>${row.quantity}</strong></td>
+        <td class="product">${esc(bundle.lineName)}</td>
+        <td class="total"><strong>${esc(formatBundleQty(bundle.sizeLabel, bundle.totalQuantity))}</strong></td>
+        <td class="pers-cell">${persHtml}</td>
       </tr>`;
     })
     .join('');
@@ -189,8 +196,22 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
       font-weight: 800;
       color: #334155;
     }
-    td.num { text-align: right; font-variant-numeric: tabular-nums; width: 56px; }
-    td.pers { font-weight: 800; font-size: 13px; color: #6d28d9; min-width: 72px; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; width: 40px; }
+    td.total { text-align: right; font-weight: 800; font-size: 13px; white-space: nowrap; width: 72px; }
+    td.product { max-width: 280px; }
+    td.pers-cell { font-size: 10px; }
+    .pers-chip {
+      display: inline-block;
+      margin: 0 6px 6px 0;
+      padding: 3px 8px;
+      background: #f5f3ff;
+      border: 1px solid #ddd6fe;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 12px;
+      color: #5b21b6;
+    }
+    .pers-qty { font-size: 9px; color: #7c3aed; margin-left: 2px; }
     .muted { color: #64748b; font-weight: 500; }
     .order-card {
       break-inside: avoid;
@@ -268,15 +289,15 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
         <div class="kpi"><span>Orders</span><strong>${stats.orderCount}</strong></div>
         <div class="kpi"><span>Line items</span><strong>${stats.lineCount}</strong></div>
         <div class="kpi"><span>Total units</span><strong>${stats.totalUnits}</strong></div>
-        <div class="kpi"><span>Pivot rows</span><strong>${stats.pivotRowCount}</strong></div>
+        <div class="kpi"><span>Products</span><strong>${stats.productCount}</strong></div>
       </div>
     </div>
 
-    <h2>Quantity summary (pivot)</h2>
-    <p style="color:#64748b;margin:0 0 10px;">Grouped by product and personalisation.</p>
+    <h2>Quantity by product</h2>
+    <p style="color:#64748b;margin:0 0 10px;">One row per product with total qty and all initials listed.</p>
     <table>
       <thead>
-        <tr><th>#</th><th>Product</th><th>Personalisation</th><th>Qty</th></tr>
+        <tr><th>#</th><th>Product</th><th>Total</th><th>Personalisation</th></tr>
       </thead>
       <tbody>${pivotRows || '<tr><td colspan="4" class="muted">No lines</td></tr>'}</tbody>
       <tfoot>
