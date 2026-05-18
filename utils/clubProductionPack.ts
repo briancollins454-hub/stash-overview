@@ -261,8 +261,78 @@ export function formatProductionPackItemMeta(row: {
   return row.lineName;
 }
 
+export type ProductionPackMode = 'personalised' | 'fulfilment';
+
+export const PACK_MODE_STORAGE_KEY = 'stash-pp-mode';
+
+export interface FulfillmentPickAllocation {
+  id: string;
+  orderNumber: string;
+  orderDate: string;
+  customerName: string;
+  quantity: number;
+  personalizationChips: PersonalizationChip[];
+}
+
+export interface FulfillmentPickBundle {
+  lineName: string;
+  itemName: string;
+  sku: string;
+  vendor: string;
+  colorLabel: string;
+  sizeLabel: string;
+  totalQuantity: number;
+  allocations: FulfillmentPickAllocation[];
+}
+
+export interface FulfillmentPickBatch {
+  orderCount: number;
+  totalUnits: number;
+  minOrderNumber: string;
+  maxOrderNumber: string;
+  minOrderNumeric: number;
+  maxOrderNumeric: number;
+  /** Excel pivot title row, e.g. Order #48539 Tag 48539 to 48543 */
+  pivotTitle: string;
+}
+
+export function loadProductionPackMode(): ProductionPackMode {
+  try {
+    const v = localStorage.getItem(PACK_MODE_STORAGE_KEY);
+    if (v === 'fulfilment' || v === 'personalised') return v;
+  } catch {
+    /* private mode */
+  }
+  return 'personalised';
+}
+
+export function saveProductionPackMode(mode: ProductionPackMode): void {
+  try {
+    localStorage.setItem(PACK_MODE_STORAGE_KEY, mode);
+  } catch {
+    /* quota */
+  }
+}
+
+export function parseOrderNumberNumeric(orderNumber: string): number {
+  return parseInt(String(orderNumber).replace(/\D/g, ''), 10) || 0;
+}
+
+export function formatOrderHash(orderNumber: string): string {
+  const n = String(orderNumber).replace(/^#/, '').trim();
+  return n ? `#${n}` : '—';
+}
+
 export function productionPackDoneStorageKey(filters: ProductionPackFilters): string {
-  return `stash-pp-done:${filters.tag}|${filters.dateFrom}|${filters.dateTo}`;
+  return productionPackDoneStorageKeyForMode(filters, 'personalised');
+}
+
+export function productionPackDoneStorageKeyForMode(
+  filters: ProductionPackFilters,
+  mode: ProductionPackMode
+): string {
+  const prefix = mode === 'fulfilment' ? 'stash-pp-done:fulfill' : 'stash-pp-done';
+  return `${prefix}:${filters.tag}|${filters.dateFrom}|${filters.dateTo}`;
 }
 
 export function loadProductionPackDoneIds(storageKey: string): Set<string> {
@@ -607,4 +677,178 @@ export function buildProductionPackReport(
       productCount: pivotBundles.length,
     },
   };
+}
+
+export function compareOrdersOldestFirst(
+  a: ProductionPackOrderGroup,
+  b: ProductionPackOrderGroup
+): number {
+  const da = new Date(a.orderDate).getTime();
+  const db = new Date(b.orderDate).getTime();
+  if (da !== db) return da - db;
+  return parseOrderNumberNumeric(a.orderNumber) - parseOrderNumberNumeric(b.orderNumber);
+}
+
+export function compareFulfillmentAllocations(
+  a: FulfillmentPickAllocation,
+  b: FulfillmentPickAllocation
+): number {
+  const da = new Date(a.orderDate).getTime();
+  const db = new Date(b.orderDate).getTime();
+  if (da !== db) return da - db;
+  return parseOrderNumberNumeric(a.orderNumber) - parseOrderNumberNumeric(b.orderNumber);
+}
+
+export function buildFulfillmentPickFromReport(report: ProductionPackReport): {
+  bundles: FulfillmentPickBundle[];
+  ordersOldestFirst: ProductionPackOrderGroup[];
+  batch: FulfillmentPickBatch;
+} {
+  const bundleMap = new Map<
+    string,
+    FulfillmentPickBundle & { nextGarment: number }
+  >();
+
+  for (const line of report.lines) {
+    let bundle = bundleMap.get(line.lineName);
+    if (!bundle) {
+      bundle = {
+        lineName: line.lineName,
+        itemName: line.itemName,
+        sku: line.sku,
+        vendor: line.vendor,
+        colorLabel: line.colorLabel,
+        sizeLabel: line.sizeLabel,
+        totalQuantity: 0,
+        allocations: [],
+        nextGarment: 0,
+      };
+      bundleMap.set(line.lineName, bundle);
+    }
+    bundle.totalQuantity += line.quantity;
+    const prefix = `f:${line.lineName}:${line.orderNumber}:${line.orderId}`;
+    for (let u = 0; u < line.quantity; u++) {
+      const g = bundle.nextGarment++;
+      bundle.allocations.push({
+        id: `${prefix}:u${u}`,
+        orderNumber: line.orderNumber,
+        orderDate: line.orderDate,
+        customerName: line.customerName,
+        quantity: 1,
+        personalizationChips: personalizationChipsFromProperties(
+          line.displayProperties,
+          prefix,
+          g
+        ),
+      });
+    }
+  }
+
+  const bundles: FulfillmentPickBundle[] = Array.from(bundleMap.values())
+    .map(({ nextGarment: _, ...b }) => ({
+      ...b,
+      allocations: [...b.allocations].sort(compareFulfillmentAllocations),
+    }))
+    .sort((a, b) =>
+      comparePivotBundles(
+        {
+          lineName: a.lineName,
+          itemName: a.itemName,
+          sku: a.sku,
+          vendor: a.vendor,
+          colorLabel: a.colorLabel,
+          sizeLabel: a.sizeLabel,
+          totalQuantity: 0,
+          personalizationChips: [],
+        },
+        {
+          lineName: b.lineName,
+          itemName: b.itemName,
+          sku: b.sku,
+          vendor: b.vendor,
+          colorLabel: b.colorLabel,
+          sizeLabel: b.sizeLabel,
+          totalQuantity: 0,
+          personalizationChips: [],
+        }
+      )
+    );
+
+  const ordersOldestFirst = [...report.orders].sort(compareOrdersOldestFirst);
+
+  const orderNums = ordersOldestFirst.map(o => parseOrderNumberNumeric(o.orderNumber)).filter(n => n > 0);
+  const minOrderNumeric = orderNums.length ? Math.min(...orderNums) : 0;
+  const maxOrderNumeric = orderNums.length ? Math.max(...orderNums) : 0;
+  const minOrderNumber =
+    ordersOldestFirst.find(o => parseOrderNumberNumeric(o.orderNumber) === minOrderNumeric)
+      ?.orderNumber || '';
+  const maxOrderNumber =
+    ordersOldestFirst.find(o => parseOrderNumberNumeric(o.orderNumber) === maxOrderNumeric)
+      ?.orderNumber || '';
+
+  const pivotTitle =
+    minOrderNumber && maxOrderNumeric
+      ? `Order #${minOrderNumber.replace(/^#/, '')} ${report.filters.tag} ${minOrderNumeric} to ${maxOrderNumeric}`
+      : report.filters.tag;
+
+  return {
+    bundles,
+    ordersOldestFirst,
+    batch: {
+      orderCount: report.stats.orderCount,
+      totalUnits: report.stats.totalUnits,
+      minOrderNumber,
+      maxOrderNumber,
+      minOrderNumeric,
+      maxOrderNumeric,
+      pivotTitle,
+    },
+  };
+}
+
+export function isFulfillmentAllocationDone(
+  allocation: FulfillmentPickAllocation,
+  doneIds: Set<string>
+): boolean {
+  if (allocation.personalizationChips.length > 0) {
+    return allocation.personalizationChips.every(c => doneIds.has(c.id));
+  }
+  return doneIds.has(allocation.id);
+}
+
+export function isFulfillmentBundleDone(
+  bundle: FulfillmentPickBundle,
+  doneIds: Set<string>
+): boolean {
+  return (
+    bundle.allocations.length > 0 &&
+    bundle.allocations.every(a => isFulfillmentAllocationDone(a, doneIds))
+  );
+}
+
+/** Excel Sheet1-style pivot CSV (Row Labels + Sum of Lineitem quantity). */
+export function buildFulfillmentPivotCsv(report: ProductionPackReport): string {
+  const { bundles, batch } = buildFulfillmentPickFromReport(report);
+  const esc = (v: string) => {
+    if (/[",\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+    return v;
+  };
+
+  const rows: string[][] = [
+    [batch.pivotTitle, ''],
+    ['', ''],
+    ['Row Labels', 'Sum of Lineitem quantity'],
+  ];
+
+  for (const b of bundles) {
+    rows.push([b.lineName, String(b.totalQuantity)]);
+    for (const a of b.allocations) {
+      rows.push([formatOrderHash(a.orderNumber), String(a.quantity)]);
+    }
+  }
+
+  rows.push(['', '']);
+  rows.push(['Grand Total', String(batch.totalUnits)]);
+
+  return rows.map(r => r.map(c => esc(c)).join(',')).join('\n');
 }

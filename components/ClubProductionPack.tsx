@@ -1,18 +1,31 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import type { UnifiedOrder } from '../types';
 import {
+  buildFulfillmentPickFromReport,
+  buildFulfillmentPivotCsv,
   buildProductionPackReport,
   buildWorkRowsFromReport,
   collectAvailableTags,
+  formatOrderHash,
   formatProductionPackItemMeta,
+  isFulfillmentAllocationDone,
+  isFulfillmentBundleDone,
   isPackRowFullyDone,
   loadProductionPackDoneIds,
-  productionPackDoneStorageKey,
+  loadProductionPackMode,
+  productionPackDoneStorageKeyForMode,
   saveProductionPackDoneIds,
+  saveProductionPackMode,
+  type FulfillmentPickAllocation,
+  type FulfillmentPickBundle,
+  type ProductionPackMode,
   type ProductionPackReport,
   type ProductionPackWorkRow,
 } from '../utils/clubProductionPack';
-import { openClubProductionPackPrint } from '../utils/printClubProductionPack';
+import {
+  openClubProductionPackPrint,
+  openFulfillmentPickPrint,
+} from '../utils/printClubProductionPack';
 import {
   Package,
   Calendar,
@@ -21,6 +34,9 @@ import {
   ListOrdered,
   ChevronDown,
   Search,
+  Truck,
+  Sparkles,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export interface ClubProductionPackProps {
@@ -60,9 +76,15 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   const [tagQuery, setTagQuery] = useState('');
   const [dateFrom, setDateFrom] = useState(ymdDaysAgo(30));
   const [dateTo, setDateTo] = useState(todayYmd());
+  const [packMode, setPackMode] = useState<ProductionPackMode>(() => loadProductionPackMode());
   const [view, setView] = useState<'pivot' | 'orders'>('pivot');
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
   const [copyHint, setCopyHint] = useState<string | null>(null);
+
+  const setPackModePersisted = useCallback((mode: ProductionPackMode) => {
+    setPackMode(mode);
+    saveProductionPackMode(mode);
+  }, []);
 
   const filteredTagOptions = useMemo(() => {
     const q = tagQuery.trim().toLowerCase();
@@ -81,7 +103,13 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   }, [orders, tag, dateFrom, dateTo]);
 
   const storageKey = useMemo(
-    () => (report ? productionPackDoneStorageKey(report.filters) : ''),
+    () =>
+      report ? productionPackDoneStorageKeyForMode(report.filters, packMode) : '',
+    [report, packMode]
+  );
+
+  const fulfilmentPick = useMemo(
+    () => (report ? buildFulfillmentPickFromReport(report) : null),
     [report]
   );
 
@@ -89,6 +117,14 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     () => (report ? buildWorkRowsFromReport(report) : { pivotRows: [], orderRows: [] }),
     [report]
   );
+
+  const ordersForView = useMemo(() => {
+    if (!report) return [];
+    if (packMode === 'fulfilment' && fulfilmentPick) {
+      return fulfilmentPick.ordersOldestFirst;
+    }
+    return report.orders;
+  }, [report, packMode, fulfilmentPick]);
 
   useEffect(() => {
     if (!storageKey) return;
@@ -143,6 +179,22 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   const chipProgress = useMemo(() => {
     let total = 0;
     let done = 0;
+    if (packMode === 'fulfilment' && fulfilmentPick) {
+      for (const b of fulfilmentPick.bundles) {
+        for (const a of b.allocations) {
+          if (a.personalizationChips.length === 0) {
+            total += 1;
+            if (doneIds.has(a.id)) done += 1;
+          } else {
+            for (const c of a.personalizationChips) {
+              total += 1;
+              if (doneIds.has(c.id)) done += 1;
+            }
+          }
+        }
+      }
+      return { total, done };
+    }
     for (const row of pivotRows) {
       if (row.personalizationChips.length === 0) {
         total += 1;
@@ -155,12 +207,25 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
       }
     }
     return { total, done };
-  }, [pivotRows, doneIds]);
+  }, [pivotRows, doneIds, packMode, fulfilmentPick]);
 
   const handlePrint = useCallback(() => {
     if (!report || report.stats.lineCount === 0) return;
-    openClubProductionPackPrint(report);
-  }, [report]);
+    if (packMode === 'fulfilment') openFulfillmentPickPrint(report);
+    else openClubProductionPackPrint(report);
+  }, [report, packMode]);
+
+  const handleExportPivotCsv = useCallback(() => {
+    if (!report?.lines.length) return;
+    const csv = buildFulfillmentPivotCsv(report);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fulfilment-pivot-${tag.replace(/[^a-z0-9]+/gi, '-')}-${dateFrom}-${dateTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [report, tag, dateFrom, dateTo]);
 
   const handleExportCsv = useCallback(() => {
     if (!report?.lines.length) return;
@@ -226,8 +291,10 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               </h2>
               <p className="text-[10px] text-gray-500 font-medium mt-0.5 max-w-xl">
                 Pick a Shopify tag and date range. Excludes refunded orders and refunded lines.
-                Sorted by product, colour (A–Z), then size. Click rows to mark done; click
-                personalisation to copy. Same marks sync with the interactive pack window.
+                {packMode === 'personalised'
+                  ? ' Personalised mode: qty by product with initials/names. '
+                  : ' Fulfilment mode: product pick list with order # under each line (like Excel pivot). '}
+                Click to mark done; personalisation click copies. Syncs with interactive pack.
               </p>
             </div>
           </div>
@@ -240,15 +307,43 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
             >
               <Printer className="w-3.5 h-3.5" /> Interactive pack
             </button>
+            {packMode === 'fulfilment' && (
+              <button
+                type="button"
+                disabled={!report?.stats.lineCount}
+                onClick={handleExportPivotCsv}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-teal-200 bg-teal-50 text-[10px] font-black uppercase tracking-widest text-teal-800 hover:border-teal-300 disabled:opacity-40"
+                title="Excel pivot: Row Labels + Sum of Lineitem quantity"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Pivot CSV
+              </button>
+            )}
             <button
               type="button"
               disabled={!report?.stats.lineCount}
               onClick={handleExportCsv}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-[10px] font-black uppercase tracking-widest text-gray-600 hover:border-gray-300 disabled:opacity-40"
             >
-              Export CSV
+              Export lines CSV
             </button>
           </div>
+        </div>
+
+        <div className="px-4 py-3 border-b border-gray-100 flex flex-wrap gap-2 bg-white">
+          <ModeButton
+            active={packMode === 'personalised'}
+            onClick={() => setPackModePersisted('personalised')}
+            icon={<Sparkles className="w-3.5 h-3.5" />}
+            label="Personalised pick"
+            hint="Wendy — qty & initials"
+          />
+          <ModeButton
+            active={packMode === 'fulfilment'}
+            onClick={() => setPackModePersisted('fulfilment')}
+            icon={<Truck className="w-3.5 h-3.5" />}
+            label="Fulfilment pick"
+            hint="Lucian — order # per unit"
+          />
         </div>
 
         <div className="p-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 border-b border-gray-100">
@@ -334,12 +429,19 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
         </div>
 
         {report && (
-          <div className="px-4 py-3 bg-slate-50 border-b border-gray-100 flex flex-wrap gap-3">
-            <Stat label="Orders" value={report.stats.orderCount} />
-            <Stat label="Lines" value={report.stats.lineCount} />
-            <Stat label="Units" value={report.stats.totalUnits} highlight />
-            <Stat label="Products" value={report.stats.productCount} />
-          </div>
+          <>
+            <div className="px-4 py-3 bg-slate-50 border-b border-gray-100 flex flex-wrap gap-3">
+              <Stat label="Orders" value={report.stats.orderCount} />
+              <Stat label="Lines" value={report.stats.lineCount} />
+              <Stat label="Units" value={report.stats.totalUnits} highlight />
+              <Stat label="Products" value={report.stats.productCount} />
+            </div>
+            {packMode === 'fulfilment' && fulfilmentPick && fulfilmentPick.batch.maxOrderNumeric > 0 && (
+              <p className="px-4 py-2 text-[11px] font-bold text-teal-900 bg-teal-50 border-b border-teal-100">
+                {fulfilmentPick.batch.pivotTitle}
+              </p>
+            )}
+          </>
         )}
 
         {!tag && (
@@ -366,66 +468,114 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               <span className="font-bold text-violet-800">
                 {chipProgress.done} / {chipProgress.total}
               </span>{' '}
-              fields done · click to copy & mark, click again to unmark (row green when all done)
+              {packMode === 'fulfilment' ? 'units' : 'fields'} done · click to copy & mark (row green when all done)
             </div>
             <div className="px-4 pt-3 flex gap-2 border-b border-gray-100">
               <TabButton
                 active={view === 'pivot'}
                 onClick={() => setView('pivot')}
                 icon={<Table2 className="w-3.5 h-3.5" />}
-                label="Quantity by product"
+                label={
+                  packMode === 'fulfilment' ? 'Pick by product' : 'Quantity by product'
+                }
               />
               <TabButton
                 active={view === 'orders'}
                 onClick={() => setView('orders')}
                 icon={<ListOrdered className="w-3.5 h-3.5" />}
-                label="Orders & personalisation"
+                label={
+                  packMode === 'fulfilment'
+                    ? 'Orders (oldest first)'
+                    : 'Orders & personalisation'
+                }
               />
             </div>
 
             {view === 'pivot' ? (
-              <div className="overflow-x-auto max-h-[70vh]">
-                <table className="min-w-full text-left text-[11px]">
-                  <thead className="sticky top-0 z-[1] bg-gray-50 border-b border-gray-200">
-                    <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
-                      <th className="px-3 py-2 w-10">#</th>
-                      <th className="px-3 py-2">Item</th>
-                      <th className="px-3 py-2 w-16 text-center">Size</th>
-                      <th className="px-3 py-2 w-12 text-center">Qty</th>
-                      <th className="px-3 py-2 min-w-[200px]">Personalisation</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {pivotRows.map((row, i) => (
-                      <PackWorkRow
-                        key={row.id}
-                        row={row}
-                        index={i}
-                        doneIds={doneIds}
-                        onToggleRow={toggleRowDone}
-                        onChipToggle={toggleChipDone}
-                      />
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-50 border-t-2 border-gray-200">
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500"
-                      >
-                        Total units
-                      </td>
-                      <td className="px-3 py-2 text-center font-black text-lg tabular-nums">
-                        {report.stats.totalUnits}
-                      </td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+              packMode === 'fulfilment' && fulfilmentPick ? (
+                <div className="overflow-x-auto max-h-[70vh]">
+                  <table className="min-w-full text-left text-[11px]">
+                    <thead className="sticky top-0 z-[1] bg-teal-50 border-b border-teal-200">
+                      <tr className="text-[9px] font-black uppercase tracking-widest text-teal-800">
+                        <th className="px-3 py-2 w-10">#</th>
+                        <th className="px-3 py-2">Row labels</th>
+                        <th className="px-3 py-2 w-16 text-center">Size</th>
+                        <th className="px-3 py-2 w-14 text-center">Qty</th>
+                        <th className="px-3 py-2 min-w-[180px]">Order / detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fulfilmentPick.bundles.map((bundle, i) => (
+                        <FulfilmentBundleRows
+                          key={bundle.lineName}
+                          bundle={bundle}
+                          index={i}
+                          doneIds={doneIds}
+                          onToggleAllocation={toggleRowDone}
+                          onChipToggle={toggleChipDone}
+                        />
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500"
+                        >
+                          Grand total
+                        </td>
+                        <td className="px-3 py-2 text-center font-black text-lg tabular-nums">
+                          {report.stats.totalUnits}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <div className="overflow-x-auto max-h-[70vh]">
+                  <table className="min-w-full text-left text-[11px]">
+                    <thead className="sticky top-0 z-[1] bg-gray-50 border-b border-gray-200">
+                      <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
+                        <th className="px-3 py-2 w-10">#</th>
+                        <th className="px-3 py-2">Item</th>
+                        <th className="px-3 py-2 w-16 text-center">Size</th>
+                        <th className="px-3 py-2 w-12 text-center">Qty</th>
+                        <th className="px-3 py-2 min-w-[200px]">Personalisation</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {pivotRows.map((row, i) => (
+                        <PackWorkRow
+                          key={row.id}
+                          row={row}
+                          index={i}
+                          doneIds={doneIds}
+                          onToggleRow={toggleRowDone}
+                          onChipToggle={toggleChipDone}
+                        />
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500"
+                        >
+                          Total units
+                        </td>
+                        <td className="px-3 py-2 text-center font-black text-lg tabular-nums">
+                          {report.stats.totalUnits}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )
             ) : (
               <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
-                {report.orders.map(o => (
+                {ordersForView.map(o => (
                   <article
                     key={o.orderNumber}
                     className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm"
@@ -613,6 +763,176 @@ function PackWorkRow({
           <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
             Plain stock
           </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  icon,
+  label,
+  hint,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-colors ${
+        active
+          ? 'bg-teal-50 border-teal-300 ring-1 ring-teal-400/50'
+          : 'bg-white border-gray-200 hover:border-gray-300'
+      }`}
+    >
+      <span
+        className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest ${
+          active ? 'text-teal-900' : 'text-gray-600'
+        }`}
+      >
+        {icon}
+        {label}
+      </span>
+      <span className="text-[9px] font-medium text-gray-500 mt-0.5">{hint}</span>
+    </button>
+  );
+}
+
+function FulfilmentBundleRows({
+  bundle,
+  index,
+  doneIds,
+  onToggleAllocation,
+  onChipToggle,
+}: {
+  bundle: FulfillmentPickBundle;
+  index: number;
+  doneIds: Set<string>;
+  onToggleAllocation: (id: string) => void;
+  onChipToggle: (chipId: string, copyValue: string, e?: React.MouseEvent) => void;
+}) {
+  const bundleDone = isFulfillmentBundleDone(bundle, doneIds);
+  const meta = formatProductionPackItemMeta(bundle);
+
+  return (
+    <>
+      <tr
+        className={`border-t border-gray-200 ${
+          bundleDone ? 'bg-emerald-50' : 'bg-teal-50/60'
+        }`}
+      >
+        <td className="px-3 py-3 text-gray-400 font-mono align-top">{index + 1}</td>
+        <td className="px-3 py-3 max-w-lg min-w-[240px] align-top">
+          {bundle.itemName !== meta && (
+            <div className="text-[15px] font-bold text-gray-900 leading-snug mb-1">
+              {bundle.itemName}
+            </div>
+          )}
+          <div className="text-[15px] font-black text-gray-900 leading-snug">{meta}</div>
+        </td>
+        <td className="px-3 py-3 text-center align-top">
+          {bundle.sizeLabel ? (
+            <span className="text-[15px] font-black text-teal-900 tabular-nums">
+              {bundle.sizeLabel}
+            </span>
+          ) : (
+            <span className="text-gray-300">—</span>
+          )}
+        </td>
+        <td className="px-3 py-3 text-center align-top">
+          <span className="inline-block min-w-[2rem] px-2.5 py-1 rounded-lg bg-teal-700 text-white font-black text-[13px] tabular-nums">
+            {bundle.totalQuantity}
+          </span>
+        </td>
+        <td className="px-3 py-3 text-[10px] font-bold text-teal-800 uppercase tracking-wider align-top">
+          Pick by order ↓
+        </td>
+      </tr>
+      {bundle.allocations.map(allocation => (
+        <FulfilmentAllocationRow
+          key={allocation.id}
+          allocation={allocation}
+          doneIds={doneIds}
+          onToggleAllocation={onToggleAllocation}
+          onChipToggle={onChipToggle}
+        />
+      ))}
+    </>
+  );
+}
+
+function FulfilmentAllocationRow({
+  allocation,
+  doneIds,
+  onToggleAllocation,
+  onChipToggle,
+}: {
+  allocation: FulfillmentPickAllocation;
+  doneIds: Set<string>;
+  onToggleAllocation: (id: string) => void;
+  onChipToggle: (chipId: string, copyValue: string, e?: React.MouseEvent) => void;
+}) {
+  const rowDone = isFulfillmentAllocationDone(allocation, doneIds);
+  const chips = allocation.personalizationChips;
+  const plainStock = chips.length === 0;
+
+  return (
+    <tr
+      onClick={plainStock ? () => onToggleAllocation(allocation.id) : undefined}
+      className={`border-b border-gray-50 align-top transition-colors ${
+        rowDone
+          ? 'bg-emerald-100'
+          : plainStock
+            ? 'cursor-pointer hover:bg-teal-50/50 bg-white'
+            : 'bg-white hover:bg-teal-50/30'
+      }`}
+    >
+      <td className="px-3 py-2" />
+      <td className="px-3 py-2 pl-8" colSpan={2}>
+        <span className="text-[14px] font-black text-teal-900">
+          {formatOrderHash(allocation.orderNumber)}
+        </span>
+        <span className="text-gray-500 font-medium ml-2 text-[11px]">
+          {allocation.customerName}
+        </span>
+        <span className="block text-[10px] text-gray-400">{fmtDate(allocation.orderDate)}</span>
+      </td>
+      <td className="px-3 py-2 text-center">
+        <span className="text-[12px] font-black tabular-nums text-gray-700">1</span>
+      </td>
+      <td className="px-3 py-2">
+        {chips.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map(chip => {
+              const chipDone = doneIds.has(chip.id);
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={e => onChipToggle(chip.id, chip.value, e)}
+                  className={`inline-flex flex-col items-start max-w-[200px] px-2 py-1 rounded-md border text-left ${
+                    chipDone
+                      ? 'bg-emerald-200 border-emerald-400 text-emerald-950'
+                      : 'bg-teal-100 border-teal-200 text-teal-900 hover:bg-teal-200'
+                  }`}
+                >
+                  <span className="text-[8px] font-black uppercase tracking-widest opacity-80">
+                    {chip.label}
+                  </span>
+                  <span className="font-black text-[12px] leading-tight">{chip.value}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="text-gray-300 text-[10px]">—</span>
         )}
       </td>
     </tr>

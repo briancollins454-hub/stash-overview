@@ -1,8 +1,13 @@
 import type { ProductionPackReport } from './clubProductionPack';
 import {
+  buildFulfillmentPickFromReport,
   buildWorkRowsFromReport,
+  formatOrderHash,
   formatProductionPackItemMeta,
   productionPackDoneStorageKey,
+  productionPackDoneStorageKeyForMode,
+  type FulfillmentPickAllocation,
+  type FulfillmentPickBundle,
   type ProductionPackWorkRow,
 } from './clubProductionPack';
 
@@ -426,17 +431,208 @@ function openHtmlInNewTab(html: string): boolean {
   return false;
 }
 
-export function openClubProductionPackPrint(report: ProductionPackReport): void {
-  const html = buildClubProductionPackPrintHtml(report);
-  if (!html || report.stats.lineCount <= 0) {
+function openProductionPackHtml(html: string, lineCount: number): void {
+  if (!html || lineCount <= 0) {
     window.alert('Nothing to print for this selection.');
     return;
   }
-
   if (openHtmlViaDocumentWrite(html)) return;
   if (openHtmlInNewTab(html)) return;
-
   window.alert(
     'Could not open the production pack. Allow pop-ups for this site and try again.'
   );
+}
+
+export function openClubProductionPackPrint(report: ProductionPackReport): void {
+  openProductionPackHtml(buildClubProductionPackPrintHtml(report), report.stats.lineCount);
+}
+
+export function openFulfillmentPickPrint(report: ProductionPackReport): void {
+  openProductionPackHtml(buildFulfillmentPickPrintHtml(report), report.stats.lineCount);
+}
+
+
+function renderFulfillmentAllocationRow(allocation: FulfillmentPickAllocation): string {
+  const chips = allocation.personalizationChips;
+  const pers =
+    chips.length > 0
+      ? `<div class="pers-chips">${chips
+          .map(
+            chip =>
+              `<button type="button" class="pers-chip copyable" data-chip-id="${escAttr(chip.id)}" data-copy="${escAttr(chip.value)}"><span class="pers-label">${esc(chip.label)}</span><span class="pers-value">${esc(chip.value)}</span></button>`
+          )
+          .join('')}</div>`
+      : '';
+  const chipCount = chips.length;
+  const title = chipCount === 0 ? 'Click row to mark done' : 'Click each field to copy — row green when all done';
+  return `<tr class="work-row alloc-row" data-row-id="${escAttr(allocation.id)}" data-chip-count="${chipCount}" title="${escAttr(title)}">
+    <td class="num"></td>
+    <td class="product alloc-product" colspan="2">
+      <strong>${esc(formatOrderHash(allocation.orderNumber))}</strong>
+      <span class="cust-inline">${esc(allocation.customerName)}</span>
+      <span class="date-inline">${esc(fmtOrderDate(allocation.orderDate))}</span>
+      ${pers}
+    </td>
+    <td class="num qty">1</td>
+    <td class="pers-cell">${chipCount === 0 ? '<span class="muted">—</span>' : ''}</td>
+  </tr>`;
+}
+
+function renderFulfillmentBundleRows(bundle: FulfillmentPickBundle, index: number): string {
+  const meta = formatProductionPackItemMeta(bundle);
+  const parent = `<tr class="bundle-row" data-bundle-id="${escAttr(bundle.lineName)}">
+    <td class="num">${index + 1}</td>
+    <td class="product" colspan="2">
+      ${bundle.itemName !== meta ? `<div class="item-club">${esc(bundle.itemName)}</div>` : ''}
+      <div class="item-meta">${esc(meta)}</div>
+    </td>
+    <td class="size-col">${bundle.sizeLabel ? `<strong>${esc(bundle.sizeLabel)}</strong>` : '—'}</td>
+    <td class="num qty"><strong>${bundle.totalQuantity}</strong></td>
+    <td class="pers-cell muted">Pick by order ↓</td>
+  </tr>`;
+  return parent + bundle.allocations.map(a => renderFulfillmentAllocationRow(a)).join('');
+}
+
+function buildFulfillmentInteractiveScript(storageKey: string): string {
+  return buildInteractiveScript(storageKey).replace(
+    'fields done',
+    'units done'
+  ).replace(
+    `var plainRows = document.querySelectorAll('.work-row[data-chip-count="0"]');`,
+    `var plainRows = document.querySelectorAll('.alloc-row[data-chip-count="0"]');`
+  ).replace(
+    `document.querySelectorAll('.work-row').forEach(function (row) {`,
+    `document.querySelectorAll('.alloc-row').forEach(function (row) {`
+  );
+}
+
+export function buildFulfillmentPickPrintHtml(report: ProductionPackReport): string {
+  const { filters, stats } = report;
+  const storageKey = productionPackDoneStorageKeyForMode(filters, 'fulfilment');
+  const { bundles, ordersOldestFirst, batch } = buildFulfillmentPickFromReport(report);
+  const { orderRows } = buildWorkRowsFromReport(report);
+
+  const now = new Date();
+  const printed = now.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const pivotTableRows = bundles.map((b, i) => renderFulfillmentBundleRows(b, i)).join('');
+
+  const orderBlocks = ordersOldestFirst
+    .map(o => {
+      const oLines = orderRows.filter(r => r.orderNumber === o.orderNumber);
+      const rows = oLines.map((r, i) => renderWorkRow(r, i)).join('');
+      return `<section class="order-card">
+        <header>
+          <div>
+            <h3>${esc(o.orderNumber)}</h3>
+            <p class="cust">${esc(o.customerName)}${o.email ? ` · ${esc(o.email)}` : ''}</p>
+          </div>
+          <div class="order-meta">
+            <span>${esc(fmtOrderDate(o.orderDate))}</span>
+            <span class="units">${o.totalUnits} unit${o.totalUnits === 1 ? '' : 's'}</span>
+          </div>
+        </header>
+        <table class="work-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Item</th><th>Size</th><th>Qty</th><th>Personalisation</th>
+            </tr>
+          </thead>
+          <tbody>${rows || '<tr><td colspan="5" class="muted">No lines</td></tr>'}</tbody>
+        </table>
+      </section>`;
+    })
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fulfilment pick — ${esc(filters.tag)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #0f172a; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 24px; font-size: 11px; line-height: 1.45; }
+    .toolbar { position: sticky; top: 0; z-index: 20; background: #0f4c5c; color: #fff; padding: 12px 16px; margin: 0 0 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-radius: 8px; }
+    .toolbar .hint { flex: 1; min-width: 200px; font-size: 11px; opacity: 0.9; }
+    .toolbar button { padding: 8px 14px; border: none; border-radius: 8px; font-weight: 800; font-size: 11px; cursor: pointer; }
+    #print-btn { background: #14b8a6; color: #fff; }
+    #reset-done { background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); }
+    #progress { font-weight: 800; font-size: 12px; padding: 6px 10px; background: rgba(255,255,255,0.12); border-radius: 6px; }
+    .callout-box { background: #ecfeff; border: 1px solid #99f6e4; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 11px; color: #0f766e; }
+    .cover { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px solid #0f4c5c; }
+    .cover h1 { margin: 0 0 6px; font-size: 22px; }
+    .cover .tag { display: inline-block; background: #ccfbf1; color: #0f766e; padding: 4px 12px; border-radius: 999px; font-weight: 800; font-size: 12px; margin-bottom: 8px; }
+    .cover .batch { font-size: 13px; font-weight: 700; color: #334155; margin: 8px 0; }
+    .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .kpi { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; background: #f8fafc; }
+    .kpi span { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 800; }
+    .kpi strong { font-size: 16px; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #0f4c5c; margin: 20px 0 8px; border-bottom: 2px solid #99f6e4; padding-bottom: 4px; }
+    .work-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    .work-table th, .work-table td { border: 1px solid #cbd5e1; padding: 8px 10px; vertical-align: middle; }
+    .work-table th { background: #f1f5f9; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; }
+    .bundle-row { background: #f0fdfa; font-weight: 700; }
+    .bundle-row td { border-bottom: 2px solid #99f6e4; }
+    .alloc-row { cursor: pointer; }
+    .alloc-row:hover { background: #f0fdfa !important; }
+    .alloc-row.row-done { background: #dcfce7 !important; }
+    .alloc-product strong { font-size: 14px; color: #0f4c5c; margin-right: 8px; }
+    .cust-inline { color: #64748b; margin-right: 8px; }
+    .date-inline { font-size: 9px; color: #94a3b8; display: block; margin-top: 2px; }
+    .work-row.row-done { background: #dcfce7 !important; }
+    td.size-col { text-align: center; font-size: 15px; font-weight: 900; color: #0f4c5c; }
+    td.product .item-club { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+    td.product .item-meta { font-size: 15px; font-weight: 800; }
+    td.qty { text-align: center; font-weight: 800; }
+    .pers-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .pers-chip { display: inline-flex; flex-direction: column; align-items: flex-start; margin: 0; padding: 6px 10px; background: #ccfbf1; border: 1px solid #5eead4; border-radius: 8px; color: #0f766e; cursor: copy; }
+    .pers-chip.chip-done { background: #bbf7d0 !important; border-color: #22c55e !important; color: #166534 !important; }
+    .muted { color: #94a3b8; }
+    .order-card { margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+    .order-card header { display: flex; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(120%); background: #0f4c5c; color: #fff; padding: 10px 18px; border-radius: 8px; font-weight: 700; z-index: 100; transition: transform 0.2s; }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    .page-break { page-break-before: always; break-before: page; margin-top: 24px; }
+    @media print { .toolbar, #toast { display: none !important; } body { padding: 8mm; } .alloc-row.row-done, .work-row.row-done { background: #dcfce7 !important; print-color-adjust: exact; } }
+  </style>
+</head>
+<body>
+  <div id="toast"></div>
+  <div class="toolbar no-print">
+    <span class="hint">Fulfilment pick: product first, then <strong>order #</strong> under each line. Click order row or personalisation to mark done.</span>
+    <span id="progress">0 / 0 units done</span>
+    <button type="button" id="reset-done">Reset done</button>
+    <button type="button" id="print-btn">Print / Save PDF</button>
+  </div>
+  <div class="callout-box no-print">Matches Lucian&apos;s Excel pivot layout. Done marks sync with fulfilment mode in the app.</div>
+  <div class="cover">
+    <div class="tag">${esc(filters.tag)}</div>
+    <h1>Fulfilment pick</h1>
+    <p class="batch">${esc(batch.pivotTitle)}</p>
+    <p class="sub">${esc(fmtDate(filters.dateFrom))} – ${esc(fmtDate(filters.dateTo))} · Unfulfilled · ${esc(printed)}</p>
+    <div class="kpis">
+      <div class="kpi"><span>Orders</span><strong>${stats.orderCount}</strong></div>
+      <div class="kpi"><span>Products</span><strong>${bundles.length}</strong></div>
+      <div class="kpi"><span>Total units</span><strong>${stats.totalUnits}</strong></div>
+    </div>
+  </div>
+  <h2>Pick by product — with order numbers</h2>
+  <table class="work-table">
+    <thead><tr><th>#</th><th>Item</th><th>Size</th><th>Qty</th><th></th></tr></thead>
+    <tbody>${pivotTableRows || '<tr><td colspan="5" class="muted">No lines</td></tr>'}</tbody>
+  </table>
+  <div class="page-break"></div>
+  <h2>Orders — oldest first</h2>
+  ${orderBlocks || '<p class="muted">No orders</p>'}
+  <script>${buildFulfillmentInteractiveScript(storageKey)}</script>
+</body>
+</html>`;
 }
