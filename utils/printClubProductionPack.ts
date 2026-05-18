@@ -313,7 +313,7 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     td.size-col strong { font-size: 16px; }
     td.mono { font-family: ui-monospace, monospace; font-size: 9px; }
     td.vendor, td.color { font-size: 10px; }
-    td.product .item-club { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 3px; }
+    td.product .item-club { font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.35; margin-bottom: 4px; }
     td.product .item-meta { font-size: 15px; font-weight: 800; color: #0f172a; line-height: 1.35; }
     td.qty { text-align: center; font-weight: 800; }
     .pers-chips { display: flex; flex-wrap: wrap; gap: 6px; }
