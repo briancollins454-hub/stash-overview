@@ -138,7 +138,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     for (const row of pivotRows) {
       if (row.personalizationChips.length === 0) {
         total += 1;
-        if (doneIds.has(row.id)) done += 1;
+        if (doneIds.has(row.id) || doneIds.has(`${row.id}:plain`)) done += 1;
       } else {
         for (const c of row.personalizationChips) {
           total += 1;
