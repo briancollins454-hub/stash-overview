@@ -97,8 +97,14 @@ export function parseVariantFromLineName(lineName: string): ParsedVariant {
     }
     return { productTitle: parts[0], color: last, size: '' };
   }
-  const size = extractSizeLabel(lineName);
-  return { productTitle: lineName, color: '', size };
+  if (parts.length === 1) {
+    const only = parts[0];
+    if (looksLikeSizeToken(only)) {
+      return { productTitle: '', color: '', size: only };
+    }
+    return { productTitle: only, color: '', size: '' };
+  }
+  return { productTitle: lineName, color: '', size: '' };
 }
 
 function looksLikeSizeToken(token: string): boolean {
@@ -109,7 +115,14 @@ function looksLikeSizeToken(token: string): boolean {
 
 /** Last segment after " - " when it looks like a size. */
 export function extractSizeLabel(lineName: string): string {
-  return parseVariantFromLineName(lineName).size;
+  const parts = lineName
+    .split(' - ')
+    .map(p => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 3) return parts[parts.length - 1];
+  if (parts.length === 2 && looksLikeSizeToken(parts[1])) return parts[1];
+  if (parts.length === 1 && looksLikeSizeToken(parts[0])) return parts[0];
+  return '';
 }
 
 const LETTER_SIZE_ORDER: Record<string, number> = {
