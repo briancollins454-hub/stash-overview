@@ -79,20 +79,37 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
 
   const handleExportCsv = useCallback(() => {
     if (!report?.lines.length) return;
-    const header = ['Order', 'Customer', 'Email', 'Date', 'Product', 'Qty', 'SKU', 'Personalisation'];
+    const header = [
+      'Order',
+      'Customer',
+      'Email',
+      'Date',
+      'Item name',
+      'Line name',
+      'SKU',
+      'Vendor',
+      'Colour',
+      'Size',
+      'Qty',
+      'Personalisation',
+    ];
     const rows = report.lines.map(l => {
       const pers =
         l.displayProperties.map(p => `${p.name}: ${p.value}`).join('; ') ||
-        l.pivotPersonalization ||
+        l.personalizationLabel ||
         '';
       return [
         l.orderNumber,
         l.customerName,
         l.email,
         fmtDate(l.orderDate),
+        l.itemName,
         l.lineName,
-        String(l.quantity),
         l.sku,
+        l.vendor,
+        l.colorLabel,
+        l.sizeLabel,
+        String(l.quantity),
         pers,
       ];
     });
@@ -123,9 +140,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                 Club production pack
               </h2>
               <p className="text-[10px] text-gray-500 font-medium mt-0.5 max-w-xl">
-                Replaces the Excel export + pivot: pick a Shopify tag and date range, get quantity
-                totals by product &amp; personalisation, plus per-order detail for Deco entry.
-                Unfulfilled orders only.
+                Pick a Shopify tag and date range. Excludes refunded orders and refunded lines.
+                Sorted by product, colour (A–Z), then size (XS → XL, etc.). All personalisation
+                fields shown (names, initials, shirt text, etc.).
               </p>
             </div>
           </div>
@@ -275,9 +292,11 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                   <thead className="sticky top-0 z-[1] bg-gray-50 border-b border-gray-200">
                     <tr className="text-[9px] font-black uppercase tracking-widest text-gray-500">
                       <th className="px-3 py-2 w-10">#</th>
-                      <th className="px-3 py-2">Product</th>
-                      <th className="px-3 py-2 text-right w-24">Total</th>
-                      <th className="px-3 py-2">Personalisation</th>
+                      <th className="px-3 py-2">Item / variant</th>
+                      <th className="px-3 py-2 w-24">SKU</th>
+                      <th className="px-3 py-2 w-20">Vendor</th>
+                      <th className="px-3 py-2 text-right w-20">Total</th>
+                      <th className="px-3 py-2 min-w-[200px]">Personalisation</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -286,8 +305,32 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                       return (
                         <tr key={bundle.lineName} className="hover:bg-violet-50/30 align-top">
                           <td className="px-3 py-3 text-gray-400 font-mono">{i + 1}</td>
-                          <td className="px-3 py-3 font-semibold text-gray-900 max-w-md">
-                            {bundle.lineName}
+                          <td className="px-3 py-3 max-w-xs">
+                            <div className="font-semibold text-gray-900">{bundle.itemName}</div>
+                            {(bundle.colorLabel || bundle.sizeLabel) && (
+                              <div className="text-[10px] text-gray-500 mt-0.5">
+                                {bundle.colorLabel && (
+                                  <span>
+                                    Colour: <strong>{bundle.colorLabel}</strong>
+                                  </span>
+                                )}
+                                {bundle.colorLabel && bundle.sizeLabel ? ' · ' : ''}
+                                {bundle.sizeLabel && (
+                                  <span>
+                                    Size: <strong>{bundle.sizeLabel}</strong>
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="text-[9px] text-gray-400 mt-0.5 leading-snug">
+                              {bundle.lineName}
+                            </div>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-[10px] text-gray-600">
+                            {bundle.sku || '—'}
+                          </td>
+                          <td className="px-3 py-3 text-[10px] text-gray-600">
+                            {bundle.vendor || '—'}
                           </td>
                           <td className="px-3 py-3 text-right whitespace-nowrap">
                             <span className="inline-block px-2.5 py-1 rounded-lg bg-violet-600 text-white font-black text-[13px] tabular-nums">
@@ -300,7 +343,8 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                                 {units.map((label, idx) => (
                                   <span
                                     key={`${bundle.lineName}-${idx}-${label}`}
-                                    className="inline-block px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-black text-[12px]"
+                                    title={label}
+                                    className="inline-block max-w-[220px] truncate px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px]"
                                   >
                                     {label}
                                   </span>
@@ -318,7 +362,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                   </tbody>
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
-                      <td colSpan={2} className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500">
+                      <td colSpan={4} className="px-3 py-2 text-right font-black uppercase text-[9px] tracking-widest text-gray-500">
                         Total units
                       </td>
                       <td className="px-3 py-2 text-right font-black text-lg tabular-nums">
@@ -354,13 +398,29 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                       </div>
                     </header>
                     <table className="min-w-full text-[11px]">
+                      <thead>
+                        <tr className="text-[9px] font-black uppercase tracking-widest text-gray-400 bg-gray-50/80">
+                          <th className="px-3 py-1.5 text-left">Item</th>
+                          <th className="px-3 py-1.5 text-left">SKU</th>
+                          <th className="px-3 py-1.5 text-left">Vendor</th>
+                          <th className="px-3 py-1.5 text-center">Qty</th>
+                          <th className="px-3 py-1.5 text-left">Personalisation</th>
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-gray-50">
                         {o.lines.map((line, idx) => (
                           <tr key={`${line.orderId}-${idx}`}>
-                            <td className="px-3 py-2 font-medium text-gray-800 w-[45%]">
-                              {line.lineName}
+                            <td className="px-3 py-2 font-medium text-gray-800">
+                              <div>{line.itemName}</div>
+                              <div className="text-[9px] text-gray-400">{line.lineName}</div>
                             </td>
-                            <td className="px-3 py-2 text-center font-black tabular-nums w-12">
+                            <td className="px-3 py-2 font-mono text-[10px] text-gray-600">
+                              {line.sku || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-[10px] text-gray-600">
+                              {line.vendor || '—'}
+                            </td>
+                            <td className="px-3 py-2 text-center font-black tabular-nums">
                               {line.quantity}
                             </td>
                             <td className="px-3 py-2">
@@ -376,9 +436,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                                     </span>
                                   ))}
                                 </div>
-                              ) : line.pivotPersonalization ? (
+                              ) : line.personalizationLabel ? (
                                 <span className="px-2 py-0.5 rounded-md bg-violet-100 text-violet-800 font-black">
-                                  {line.pivotPersonalization}
+                                  {line.personalizationLabel}
                                 </span>
                               ) : (
                                 <span className="text-gray-300 text-[10px]">—</span>

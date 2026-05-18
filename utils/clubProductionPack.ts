@@ -2,25 +2,13 @@ import type { UnifiedOrder } from '../types';
 import { isEligibleForMapping } from '../services/apiService';
 import { isShopifyLineItemActiveForOps, shopifyLineRemainingQuantity } from '../services/shopifyLineItems';
 
-/** Shopify line properties used for pivot row (matches Excel “Enter Initials New” column). */
-export const PIVOT_PERSONALIZATION_KEYS = [
-  'Enter Initials New',
-  'Enter Initials',
-  'Initials Text',
-  'Enter Name',
-  'Enter Shirt Name',
-  'Enter Shirt Number',
-  'Personalisation Details',
-  'Personalisation Details 1',
-  'Free Initials',
-] as const;
-
-const DISPLAY_PERSONALIZATION_KEYS = [
-  ...PIVOT_PERSONALIZATION_KEYS,
-  'Add Initials',
-  'Add Name',
-  'Add Squad Number',
-] as const;
+/** Addon checkbox lines — real text lives in companion fields. */
+const ADDON_TOGGLE_PROP_NAMES = new Set([
+  'add initials',
+  'add name',
+  'add squad number',
+  'free initials',
+]);
 
 export interface ProductionPackFilters {
   tag: string;
@@ -36,25 +24,25 @@ export interface ProductionPackLine {
   email: string;
   orderDate: string;
   lineName: string;
+  itemName: string;
   quantity: number;
   sku: string;
-  pivotPersonalization: string;
+  vendor: string;
+  colorLabel: string;
+  sizeLabel: string;
+  personalizationLabel: string;
   displayProperties: { name: string; value: string }[];
 }
 
-/** @deprecated Flat pivot row — use ProductionPackPivotBundle */
-export interface ProductionPackPivotRow {
-  lineName: string;
-  personalization: string;
-  quantity: number;
-}
-
-/** One product line with total qty and one personalisation label per garment. */
 export interface ProductionPackPivotBundle {
   lineName: string;
+  itemName: string;
+  sku: string;
+  vendor: string;
+  colorLabel: string;
   sizeLabel: string;
   totalQuantity: number;
-  /** One label per unit to make — e.g. ["AA", "AA"] when qty 2 with initials AA */
+  /** One full personalisation label per garment (initials, names, shirt number, etc.) */
   personalizationUnits: string[];
 }
 
@@ -70,7 +58,6 @@ export interface ProductionPackOrderGroup {
 export interface ProductionPackReport {
   filters: ProductionPackFilters;
   lines: ProductionPackLine[];
-  /** Product types bundled with total qty + personalisation list */
   pivotBundles: ProductionPackPivotBundle[];
   orders: ProductionPackOrderGroup[];
   stats: {
@@ -81,17 +68,102 @@ export interface ProductionPackReport {
   };
 }
 
-/** Last segment after " - " when it looks like a size (e.g. M, 7-8, 2XL). */
-export function extractSizeLabel(lineName: string): string {
-  const trimmed = lineName.trim();
-  const dashParts = trimmed.split(' - ').map(p => p.trim()).filter(Boolean);
-  if (dashParts.length >= 2) {
-    const last = dashParts[dashParts.length - 1];
-    if (last.length > 0 && last.length <= 14) return last;
+export interface ParsedVariant {
+  productTitle: string;
+  color: string;
+  size: string;
+}
+
+function normPropName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/** Parse "Club Product - Burgundy - M" → title, colour, size. */
+export function parseVariantFromLineName(lineName: string): ParsedVariant {
+  const parts = lineName
+    .split(' - ')
+    .map(p => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 3) {
+    const size = parts[parts.length - 1];
+    const color = parts[parts.length - 2];
+    const productTitle = parts.slice(0, -2).join(' - ');
+    return { productTitle, color, size };
   }
-  const tail = trimmed.match(/\s[-–]\s([^-–]+)$/);
-  if (tail?.[1] && tail[1].length <= 14) return tail[1].trim();
-  return '';
+  if (parts.length === 2) {
+    const last = parts[1];
+    if (looksLikeSizeToken(last)) {
+      return { productTitle: parts[0], color: '', size: last };
+    }
+    return { productTitle: parts[0], color: last, size: '' };
+  }
+  const size = extractSizeLabel(lineName);
+  return { productTitle: lineName, color: '', size };
+}
+
+function looksLikeSizeToken(token: string): boolean {
+  const t = token.trim();
+  if (!t || t.length > 14) return false;
+  return sizeSortIndex(t) < 900;
+}
+
+/** Last segment after " - " when it looks like a size. */
+export function extractSizeLabel(lineName: string): string {
+  return parseVariantFromLineName(lineName).size;
+}
+
+const LETTER_SIZE_ORDER: Record<string, number> = {
+  xxxs: 10,
+  xxs: 20,
+  xs: 30,
+  s: 40,
+  small: 40,
+  m: 50,
+  medium: 50,
+  l: 60,
+  large: 60,
+  xl: 70,
+  xlarge: 70,
+  '2xl': 80,
+  xxl: 80,
+  '3xl': 90,
+  xxxl: 90,
+  '4xl': 100,
+  '5xl': 110,
+  one: 5,
+  onesize: 5,
+  os: 5,
+};
+
+/** Lower = earlier in size runs (XS → S → M → L → XL, then 7-8, 9-10, etc.). */
+export function sizeSortIndex(size: string): number {
+  const raw = size.trim();
+  if (!raw) return 9999;
+  const key = raw.toLowerCase().replace(/\s+/g, '');
+  if (LETTER_SIZE_ORDER[key] !== undefined) return LETTER_SIZE_ORDER[key];
+
+  const youth = key.match(/^(\d+)\s*[-/]\s*(\d+)$/);
+  if (youth) return 200 + parseInt(youth[1], 10) * 10 + parseInt(youth[2], 10);
+
+  const age = key.match(/^(\d+)(?:y|yr|years?)?$/i);
+  if (age) return 300 + parseInt(age[1], 10);
+
+  if (/^\d+(\.\d+)?$/.test(key)) return 400 + parseFloat(key);
+
+  return 800 + raw.toLowerCase().charCodeAt(0);
+}
+
+export function comparePivotBundles(a: ProductionPackPivotBundle, b: ProductionPackPivotBundle): number {
+  const title = a.itemName.localeCompare(b.itemName, undefined, { sensitivity: 'base' });
+  if (title !== 0) return title;
+
+  const color = a.colorLabel.localeCompare(b.colorLabel, undefined, { sensitivity: 'base' });
+  if (color !== 0) return color;
+
+  const sizeDiff = sizeSortIndex(a.sizeLabel) - sizeSortIndex(b.sizeLabel);
+  if (sizeDiff !== 0) return sizeDiff;
+
+  return a.lineName.localeCompare(b.lineName, undefined, { sensitivity: 'base' });
 }
 
 export function formatBundleQty(sizeLabel: string, totalQuantity: number): string {
@@ -99,49 +171,48 @@ export function formatBundleQty(sizeLabel: string, totalQuantity: number): strin
   return `${totalQuantity}×`;
 }
 
-/** Space-separated list for copy/paste (e.g. "AA AA FT"). */
 export function formatPersonalizationUnits(units: string[]): string {
-  return units.filter(Boolean).join(' ');
+  return units.filter(Boolean).join(' · ');
 }
 
-function normPropName(name: string): string {
-  return name.trim().toLowerCase();
+function isMeaningfulPersonalizationProp(name: string, value: string): boolean {
+  const n = normPropName(name);
+  if (n.startsWith('_') || n.includes('dispatch')) return false;
+  const v = value.trim();
+  if (!v) return false;
+  if (ADDON_TOGGLE_PROP_NAMES.has(n) && /^(yes|no|true|false)$/i.test(v)) return false;
+  return true;
 }
 
-function propValue(props: { name: string; value: string | number }[], key: string): string {
-  const want = normPropName(key);
-  const hit = props.find(p => normPropName(String(p.name)) === want);
-  if (!hit || hit.value == null || hit.value === '') return '';
-  return String(hit.value).trim();
+/** All line-item properties customers filled in (not just initials). */
+export function allPersonalizationProperties(
+  properties: { name: string; value: string | number }[] | undefined
+): { name: string; value: string }[] {
+  if (!properties?.length) return [];
+  return properties
+    .filter(p => isMeaningfulPersonalizationProp(String(p.name), String(p.value ?? '')))
+    .map(p => ({ name: String(p.name).trim(), value: String(p.value).trim() }));
 }
 
-/** Value for pivot’s second row field (Excel: Enter Initials New). */
-export function pivotPersonalizationFromProperties(
+/** One readable label per garment for pivot chips. */
+export function personalizationLabelFromProperties(
   properties: { name: string; value: string | number }[] | undefined
 ): string {
-  if (!properties?.length) return '';
-  for (const key of PIVOT_PERSONALIZATION_KEYS) {
-    const v = propValue(properties, key);
-    if (v) return v;
-  }
-  return '';
+  const list = allPersonalizationProperties(properties);
+  if (!list.length) return '';
+  if (list.length === 1) return list[0].value;
+  return list
+    .map(p => {
+      const short = p.name.replace(/^Enter\s+/i, '').replace(/^Add\s+/i, '').trim();
+      return short ? `${short}: ${p.value}` : p.value;
+    })
+    .join(' · ');
 }
 
 export function displayPersonalizationProperties(
   properties: { name: string; value: string | number }[] | undefined
 ): { name: string; value: string }[] {
-  if (!properties?.length) return [];
-  const allowed = new Set(DISPLAY_PERSONALIZATION_KEYS.map(normPropName));
-  return properties
-    .filter(p => {
-      const n = String(p.name);
-      if (n.startsWith('_')) return false;
-      if (normPropName(n).includes('dispatch')) return false;
-      const v = p.value;
-      if (v == null || String(v).trim() === '') return false;
-      return allowed.has(normPropName(n));
-    })
-    .map(p => ({ name: String(p.name), value: String(p.value).trim() }));
+  return allPersonalizationProperties(properties);
 }
 
 function parseYmd(ymd: string): number | null {
@@ -164,6 +235,14 @@ export function orderMatchesTag(order: UnifiedOrder, tag: string): boolean {
   return order.shopify.tags.some(t => t.trim() === want);
 }
 
+/** Excludes refunded / restocked orders (line-level refunds handled separately). */
+export function isOrderEligibleForProductionPack(order: UnifiedOrder): boolean {
+  if (order.shopify.paymentStatus === 'refunded') return false;
+  const fs = (order.shopify.fulfillmentStatus || '').toLowerCase();
+  if (fs === 'refunded' || fs === 'restocked') return false;
+  return true;
+}
+
 export function isOrderUnfulfilledForPack(order: UnifiedOrder): boolean {
   const s = (order.shopify.fulfillmentStatus || '').toLowerCase();
   return s !== 'fulfilled' && s !== 'restocked';
@@ -176,6 +255,7 @@ export function collectAvailableTags(
   const excluded = new Set(excludedTags.map(t => t.trim()));
   const tags = new Set<string>();
   for (const o of orders) {
+    if (!isOrderEligibleForProductionPack(o)) continue;
     for (const t of o.shopify.tags) {
       const trimmed = t?.trim();
       if (trimmed && !excluded.has(trimmed)) tags.add(trimmed);
@@ -191,7 +271,10 @@ function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
     if (!isEligibleForMapping(item.name, item.productType)) continue;
     const qty = shopifyLineRemainingQuantity(item);
     if (qty <= 0) continue;
+
     const props = item.properties || [];
+    const variant = parseVariantFromLineName(item.name);
+
     out.push({
       orderId: order.shopify.id,
       orderNumber: order.shopify.orderNumber,
@@ -199,9 +282,13 @@ function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
       email: order.shopify.email || '',
       orderDate: order.shopify.date,
       lineName: item.name,
+      itemName: variant.productTitle,
       quantity: qty,
       sku: item.sku || '',
-      pivotPersonalization: pivotPersonalizationFromProperties(props),
+      vendor: item.vendor || '',
+      colorLabel: variant.color,
+      sizeLabel: variant.size,
+      personalizationLabel: personalizationLabelFromProperties(props),
       displayProperties: displayPersonalizationProperties(props),
     });
   }
@@ -217,6 +304,7 @@ export function buildProductionPackReport(
   const toEndMs = toMs != null ? toMs + 24 * 60 * 60 * 1000 - 1 : null;
 
   let filtered = orders.filter(o => orderMatchesTag(o, filters.tag));
+  filtered = filtered.filter(isOrderEligibleForProductionPack);
   if (filters.unfulfilledOnly) {
     filtered = filtered.filter(isOrderUnfulfilledForPack);
   }
@@ -236,17 +324,36 @@ export function buildProductionPackReport(
 
   const bundleMap = new Map<
     string,
-    { lineName: string; totalQuantity: number; units: string[] }
+    {
+      lineName: string;
+      itemName: string;
+      sku: string;
+      vendor: string;
+      colorLabel: string;
+      sizeLabel: string;
+      totalQuantity: number;
+      units: string[];
+    }
   >();
+
   for (const line of lines) {
     const key = line.lineName;
     let bundle = bundleMap.get(key);
     if (!bundle) {
-      bundle = { lineName: line.lineName, totalQuantity: 0, units: [] };
+      bundle = {
+        lineName: line.lineName,
+        itemName: line.itemName,
+        sku: line.sku,
+        vendor: line.vendor,
+        colorLabel: line.colorLabel,
+        sizeLabel: line.sizeLabel,
+        totalQuantity: 0,
+        units: [],
+      };
       bundleMap.set(key, bundle);
     }
     bundle.totalQuantity += line.quantity;
-    const label = line.pivotPersonalization.trim();
+    const label = line.personalizationLabel.trim();
     if (label) {
       for (let u = 0; u < line.quantity; u++) {
         bundle.units.push(label);
@@ -257,14 +364,15 @@ export function buildProductionPackReport(
   const pivotBundles: ProductionPackPivotBundle[] = Array.from(bundleMap.values())
     .map(b => ({
       lineName: b.lineName,
-      sizeLabel: extractSizeLabel(b.lineName),
+      itemName: b.itemName,
+      sku: b.sku,
+      vendor: b.vendor,
+      colorLabel: b.colorLabel,
+      sizeLabel: b.sizeLabel,
       totalQuantity: b.totalQuantity,
       personalizationUnits: b.units,
     }))
-    .sort((a, b) => {
-      if (b.totalQuantity !== a.totalQuantity) return b.totalQuantity - a.totalQuantity;
-      return a.lineName.localeCompare(b.lineName);
-    });
+    .sort(comparePivotBundles);
 
   const byOrder = new Map<string, ProductionPackOrderGroup>();
   for (const line of lines) {
@@ -290,7 +398,28 @@ export function buildProductionPackReport(
   });
 
   for (const g of ordersGrouped) {
-    g.lines.sort((a, b) => a.lineName.localeCompare(b.lineName));
+    g.lines.sort((a, b) => comparePivotBundles(
+      {
+        lineName: a.lineName,
+        itemName: a.itemName,
+        sku: a.sku,
+        vendor: a.vendor,
+        colorLabel: a.colorLabel,
+        sizeLabel: a.sizeLabel,
+        totalQuantity: 0,
+        personalizationUnits: [],
+      },
+      {
+        lineName: b.lineName,
+        itemName: b.itemName,
+        sku: b.sku,
+        vendor: b.vendor,
+        colorLabel: b.colorLabel,
+        sizeLabel: b.sizeLabel,
+        totalQuantity: 0,
+        personalizationUnits: [],
+      }
+    ));
   }
 
   const totalUnits = lines.reduce((s, l) => s + l.quantity, 0);

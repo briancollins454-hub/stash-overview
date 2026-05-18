@@ -53,9 +53,21 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
               .map(label => `<span class="pers-chip">${esc(label)}</span>`)
               .join('')
           : '<span class="muted">Plain stock</span>';
+      const meta = [
+        bundle.colorLabel ? `Colour: ${esc(bundle.colorLabel)}` : '',
+        bundle.sizeLabel ? `Size: ${esc(bundle.sizeLabel)}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
       return `<tr class="bundle-row">
         <td class="num">${i + 1}</td>
-        <td class="product">${esc(bundle.lineName)}</td>
+        <td class="product">
+          <strong>${esc(bundle.itemName)}</strong>
+          ${meta ? `<div class="sub">${meta}</div>` : ''}
+          <div class="sub muted">${esc(bundle.lineName)}</div>
+        </td>
+        <td class="mono">${bundle.sku ? esc(bundle.sku) : '—'}</td>
+        <td>${bundle.vendor ? esc(bundle.vendor) : '—'}</td>
         <td class="total"><strong>${esc(formatBundleQty(bundle.sizeLabel, bundle.totalQuantity))}</strong></td>
         <td class="pers-cell">${persHtml}</td>
       </tr>`;
@@ -76,7 +88,9 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
                   .join('')
               : '<span class="muted">No personalisation</span>';
           return `<tr>
-            <td>${esc(line.lineName)}</td>
+            <td><strong>${esc(line.itemName)}</strong><div class="sub muted">${esc(line.lineName)}</div></td>
+            <td class="mono">${line.sku ? esc(line.sku) : '—'}</td>
+            <td>${line.vendor ? esc(line.vendor) : '—'}</td>
             <td class="num">${line.quantity}</td>
             <td class="props">${props}</td>
           </tr>`;
@@ -94,7 +108,7 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
           </div>
         </header>
         <table class="order-lines">
-          <thead><tr><th>Product</th><th>Qty</th><th>Personalisation</th></tr></thead>
+          <thead><tr><th>Item</th><th>SKU</th><th>Vendor</th><th>Qty</th><th>Personalisation</th></tr></thead>
           <tbody>${lineRows}</tbody>
         </table>
       </section>`;
@@ -195,7 +209,9 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     }
     td.num { text-align: right; font-variant-numeric: tabular-nums; width: 40px; }
     td.total { text-align: right; font-weight: 800; font-size: 13px; white-space: nowrap; width: 72px; }
-    td.product { max-width: 280px; }
+    td.product { max-width: 240px; }
+    td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
+    td.mono { font-family: ui-monospace, monospace; font-size: 9px; }
     td.pers-cell { font-size: 10px; }
     .pers-chip {
       display: inline-block;
@@ -204,9 +220,12 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
       background: #f5f3ff;
       border: 1px solid #ddd6fe;
       border-radius: 6px;
-      font-weight: 800;
-      font-size: 12px;
+      font-weight: 700;
+      font-size: 10px;
       color: #5b21b6;
+      max-width: 100%;
+      white-space: normal;
+      line-height: 1.35;
     }
     .pers-qty { font-size: 9px; color: #7c3aed; margin-left: 2px; }
     .muted { color: #64748b; font-weight: 500; }
@@ -294,12 +313,12 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     <p style="color:#64748b;margin:0 0 10px;">One row per product with total qty and all initials listed.</p>
     <table>
       <thead>
-        <tr><th>#</th><th>Product</th><th>Total</th><th>Personalisation</th></tr>
+        <tr><th>#</th><th>Item</th><th>SKU</th><th>Vendor</th><th>Total</th><th>Personalisation</th></tr>
       </thead>
       <tbody>${pivotRows || '<tr><td colspan="4" class="muted">No lines</td></tr>'}</tbody>
       <tfoot>
         <tr>
-          <td colspan="3" style="text-align:right;font-weight:800;">Total units</td>
+          <td colspan="4" style="text-align:right;font-weight:800;">Total units</td>
           <td class="num"><strong>${stats.totalUnits}</strong></td>
         </tr>
       </tfoot>
