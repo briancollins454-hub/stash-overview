@@ -67,8 +67,12 @@ function renderWorkRow(row: ProductionPackWorkRow, index: number): string {
   return `<tr class="work-row" data-row-id="${escAttr(row.id)}" data-chip-count="${chipCount}" title="${escAttr(title)}">
     <td class="num">${index + 1}</td>
     <td class="product">
-      <strong>${esc(row.itemName)}</strong>
-      <div class="sub muted">${esc(formatProductionPackItemMeta(row))}</div>
+      ${
+        row.itemName !== formatProductionPackItemMeta(row)
+          ? `<div class="item-club">${esc(row.itemName)}</div>`
+          : ''
+      }
+      <div class="item-meta">${esc(formatProductionPackItemMeta(row))}</div>
     </td>
     <td class="size-col">${row.sizeLabel ? `<strong>${esc(row.sizeLabel)}</strong>` : '—'}</td>
     <td class="num qty">${row.quantity}</td>
@@ -309,8 +313,8 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     td.size-col strong { font-size: 16px; }
     td.mono { font-family: ui-monospace, monospace; font-size: 9px; }
     td.vendor, td.color { font-size: 10px; }
-    td.product strong { font-size: 11px; display: block; margin-bottom: 2px; }
-    td.product .sub { font-size: 12px; font-weight: 600; color: #334155; margin-top: 4px; line-height: 1.35; }
+    td.product .item-club { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 3px; }
+    td.product .item-meta { font-size: 15px; font-weight: 800; color: #0f172a; line-height: 1.35; }
     td.qty { text-align: center; font-weight: 800; }
     .pers-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .pers-chip {
