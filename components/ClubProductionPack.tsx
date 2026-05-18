@@ -109,23 +109,31 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     [storageKey]
   );
 
-  const markChipDone = useCallback(
+  const toggleChipDone = useCallback(
     (chipId: string, copyValue: string, e?: React.MouseEvent) => {
       e?.stopPropagation();
-      const run = () => {
-        setCopyHint(copyValue);
-        window.setTimeout(() => setCopyHint(null), 1400);
-      };
-      if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(copyValue).then(run).catch(run);
-      } else {
-        run();
-      }
       if (!storageKey) return;
+
       setDoneIds(prev => {
         const next = new Set(prev);
+        if (next.has(chipId)) {
+          next.delete(chipId);
+          saveProductionPackDoneIds(storageKey, next);
+          setCopyHint('Unmarked');
+          window.setTimeout(() => setCopyHint(null), 1200);
+          return next;
+        }
         next.add(chipId);
         saveProductionPackDoneIds(storageKey, next);
+        const showCopied = () => {
+          setCopyHint(copyValue);
+          window.setTimeout(() => setCopyHint(null), 1400);
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(copyValue).then(showCopied).catch(showCopied);
+        } else {
+          showCopied();
+        }
         return next;
       });
     },
@@ -358,7 +366,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               <span className="font-bold text-violet-800">
                 {chipProgress.done} / {chipProgress.total}
               </span>{' '}
-              fields copied & marked · click each label to copy (row turns green when all done)
+              fields done · click to copy & mark, click again to unmark (row green when all done)
             </div>
             <div className="px-4 pt-3 flex gap-2 border-b border-gray-100">
               <TabButton
@@ -395,7 +403,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                         index={i}
                         doneIds={doneIds}
                         onToggleRow={toggleRowDone}
-                        onChipDone={markChipDone}
+                        onChipToggle={toggleChipDone}
                       />
                     ))}
                   </tbody>
@@ -458,7 +466,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                               index={idx}
                               doneIds={doneIds}
                               onToggleRow={toggleRowDone}
-                              onChipDone={markChipDone}
+                              onChipToggle={toggleChipDone}
                               compact
                             />
                           ))}
@@ -505,14 +513,14 @@ function PackWorkRow({
   index,
   doneIds,
   onToggleRow,
-  onChipDone,
+  onChipToggle,
   compact,
 }: {
   row: ProductionPackWorkRow;
   index: number;
   doneIds: Set<string>;
   onToggleRow: (id: string) => void;
-  onChipDone: (chipId: string, copyValue: string, e?: React.MouseEvent) => void;
+  onChipToggle: (chipId: string, copyValue: string, e?: React.MouseEvent) => void;
   compact?: boolean;
 }) {
   const py = compact ? 'py-2' : 'py-3';
@@ -526,7 +534,7 @@ function PackWorkRow({
       title={
         plainStock
           ? 'Click row to mark done'
-          : 'Click each field to copy — row turns green when all are done'
+          : 'Click to copy & mark — click again to unmark — row green when all done'
       }
       className={`align-top transition-colors ${
         rowDone
@@ -564,8 +572,12 @@ function PackWorkRow({
                 <button
                   key={chip.id}
                   type="button"
-                  onClick={e => onChipDone(chip.id, chip.value, e)}
-                  title={`Copy ${chip.label.toLowerCase()}`}
+                  onClick={e => onChipToggle(chip.id, chip.value, e)}
+                  title={
+                    chipDone
+                      ? `Click to unmark ${chip.label.toLowerCase()}`
+                      : `Click to copy ${chip.label.toLowerCase()}`
+                  }
                   className={`inline-flex flex-col items-start max-w-[200px] px-2 py-1 rounded-md border text-left transition-colors ${
                     chipDone
                       ? 'bg-emerald-200 border-emerald-400 text-emerald-950 ring-2 ring-emerald-400/60'
@@ -583,7 +595,7 @@ function PackWorkRow({
         ) : row.personalization.trim() ? (
           <button
             type="button"
-            onClick={e => onChipDone(`${row.id}:plain`, row.personalization, e)}
+            onClick={e => onChipToggle(`${row.id}:plain`, row.personalization, e)}
             className={`inline-flex flex-col items-start px-2 py-1 rounded-md border text-left ${
               doneIds.has(`${row.id}:plain`)
                 ? 'bg-emerald-200 border-emerald-400 text-emerald-950'

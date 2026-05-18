@@ -173,23 +173,31 @@ function buildInteractiveScript(storageKey: string): string {
       var text = btn.getAttribute('data-copy') || '';
       var label = btn.querySelector('.pers-label');
       var labelText = label ? label.textContent : '';
-      function ok() {
-        var id = btn.getAttribute('data-chip-id');
-        if (id) {
-          done.add(id);
-          saveDone(done);
-        }
+      var id = btn.getAttribute('data-chip-id');
+      if (!id) return;
+
+      if (done.has(id)) {
+        done.delete(id);
+        saveDone(done);
+        applyDoneState();
+        showToast('Unmarked');
+        return;
+      }
+
+      function markDone() {
+        done.add(id);
+        saveDone(done);
         applyDoneState();
         showToast('Copied ' + (labelText ? labelText + ': ' : '') + text);
       }
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(ok).catch(function () {
+        navigator.clipboard.writeText(text).then(markDone).catch(function () {
           window.prompt('Copy:', text);
-          ok();
+          markDone();
         });
       } else {
         window.prompt('Copy:', text);
-        ok();
+        markDone();
       }
     });
   });
@@ -337,7 +345,7 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
 <body>
   <div id="toast"></div>
   <div class="toolbar no-print">
-    <span class="hint">Click each <strong>labelled field</strong> to copy (stays green). Row turns green when every field on that line is done. Plain stock: click the row.</span>
+    <span class="hint">Click a <strong>labelled field</strong> to copy (turns green). Click again to unmark. Row green when all fields done. Plain stock: click row.</span>
     <span id="progress">0 / 0 done</span>
     <button type="button" id="reset-done">Reset done</button>
     <button type="button" id="print-btn">Print / Save PDF</button>
