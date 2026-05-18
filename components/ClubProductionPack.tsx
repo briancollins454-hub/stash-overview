@@ -144,7 +144,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     ];
     const rows = report.lines.map(l => {
       const pers =
-        l.displayProperties.map(p => `${p.name}: ${p.value}`).join('; ') ||
+        l.personalizationValues.join(' ') ||
         l.personalizationLabel ||
         '';
       return [

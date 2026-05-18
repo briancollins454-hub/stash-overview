@@ -31,6 +31,8 @@ export interface ProductionPackLine {
   colorLabel: string;
   sizeLabel: string;
   personalizationLabel: string;
+  /** Values only — one per property (initials, name, number, etc.). */
+  personalizationValues: string[];
   displayProperties: { name: string; value: string }[];
 }
 
@@ -279,7 +281,7 @@ export function buildWorkRowsFromReport(report: ProductionPackReport): {
         ...base,
         id: `o:${o.orderNumber}:${line.orderId}`,
         personalization: line.personalizationLabel.trim(),
-        personalizationUnits: [],
+        personalizationUnits: line.personalizationValues,
         quantity: line.quantity,
       });
     }
@@ -307,19 +309,18 @@ export function allPersonalizationProperties(
     .map(p => ({ name: String(p.name).trim(), value: String(p.value).trim() }));
 }
 
-/** One readable label per garment for pivot chips. */
+/** Customer-entered values only (no "Initials:" prefixes) — used for chips and copy. */
+export function personalizationValuesFromProperties(
+  properties: { name: string; value: string | number }[] | undefined
+): string[] {
+  return allPersonalizationProperties(properties).map(p => p.value);
+}
+
+/** Summary string for CSV (values only, space-separated). */
 export function personalizationLabelFromProperties(
   properties: { name: string; value: string | number }[] | undefined
 ): string {
-  const list = allPersonalizationProperties(properties);
-  if (!list.length) return '';
-  if (list.length === 1) return list[0].value;
-  return list
-    .map(p => {
-      const short = p.name.replace(/^Enter\s+/i, '').replace(/^Add\s+/i, '').trim();
-      return short ? `${short}: ${p.value}` : p.value;
-    })
-    .join(' · ');
+  return personalizationValuesFromProperties(properties).join(' ');
 }
 
 export function displayPersonalizationProperties(
@@ -387,6 +388,7 @@ function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
 
     const props = item.properties || [];
     const variant = parseVariantFromLineName(item.name);
+    const persValues = personalizationValuesFromProperties(props);
 
     out.push({
       orderId: order.shopify.id,
@@ -401,7 +403,8 @@ function expandOrderLines(order: UnifiedOrder): ProductionPackLine[] {
       vendor: item.vendor || '',
       colorLabel: variant.color,
       sizeLabel: variant.size,
-      personalizationLabel: personalizationLabelFromProperties(props),
+      personalizationLabel: persValues.join(' '),
+      personalizationValues: persValues,
       displayProperties: displayPersonalizationProperties(props),
     });
   }
@@ -466,10 +469,12 @@ export function buildProductionPackReport(
       bundleMap.set(key, bundle);
     }
     bundle.totalQuantity += line.quantity;
-    const label = line.personalizationLabel.trim();
-    if (label) {
+    const values = line.personalizationValues;
+    if (values.length > 0) {
       for (let u = 0; u < line.quantity; u++) {
-        bundle.units.push(label);
+        for (const v of values) {
+          bundle.units.push(v);
+        }
       }
     }
   }
