@@ -5,6 +5,7 @@ import {
   buildWorkRowsFromReport,
   collectAvailableTags,
   formatProductionPackItemMeta,
+  isPackRowFullyDone,
   loadProductionPackDoneIds,
   productionPackDoneStorageKey,
   saveProductionPackDoneIds,
@@ -94,7 +95,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     setDoneIds(loadProductionPackDoneIds(storageKey));
   }, [storageKey]);
 
-  const toggleDone = useCallback(
+  const toggleRowDone = useCallback(
     (id: string) => {
       if (!storageKey) return;
       setDoneIds(prev => {
@@ -108,18 +109,45 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     [storageKey]
   );
 
-  const copyText = useCallback((text: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const run = () => {
-      setCopyHint(text);
-      window.setTimeout(() => setCopyHint(null), 1400);
-    };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(run).catch(run);
-    } else {
-      run();
+  const markChipDone = useCallback(
+    (chipId: string, copyValue: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      const run = () => {
+        setCopyHint(copyValue);
+        window.setTimeout(() => setCopyHint(null), 1400);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(copyValue).then(run).catch(run);
+      } else {
+        run();
+      }
+      if (!storageKey) return;
+      setDoneIds(prev => {
+        const next = new Set(prev);
+        next.add(chipId);
+        saveProductionPackDoneIds(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey]
+  );
+
+  const chipProgress = useMemo(() => {
+    let total = 0;
+    let done = 0;
+    for (const row of pivotRows) {
+      if (row.personalizationChips.length === 0) {
+        total += 1;
+        if (doneIds.has(row.id)) done += 1;
+      } else {
+        for (const c of row.personalizationChips) {
+          total += 1;
+          if (doneIds.has(c.id)) done += 1;
+        }
+      }
     }
-  }, []);
+    return { total, done };
+  }, [pivotRows, doneIds]);
 
   const handlePrint = useCallback(() => {
     if (!report || report.stats.lineCount === 0) return;
@@ -328,9 +356,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           <>
             <div className="px-4 py-2 text-[10px] text-gray-600 border-b border-gray-100 bg-white">
               <span className="font-bold text-violet-800">
-                {pivotRows.filter(r => doneIds.has(r.id)).length} / {pivotRows.length}
+                {chipProgress.done} / {chipProgress.total}
               </span>{' '}
-              lines marked done · click a row to toggle
+              fields copied & marked · click each label to copy (row turns green when all done)
             </div>
             <div className="px-4 pt-3 flex gap-2 border-b border-gray-100">
               <TabButton
@@ -365,9 +393,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                         key={row.id}
                         row={row}
                         index={i}
-                        done={doneIds.has(row.id)}
-                        onToggle={toggleDone}
-                        onCopy={copyText}
+                        doneIds={doneIds}
+                        onToggleRow={toggleRowDone}
+                        onChipDone={markChipDone}
                       />
                     ))}
                   </tbody>
@@ -428,9 +456,9 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
                               key={row.id}
                               row={row}
                               index={idx}
-                              done={doneIds.has(row.id)}
-                              onToggle={toggleDone}
-                              onCopy={copyText}
+                              doneIds={doneIds}
+                              onToggleRow={toggleRowDone}
+                              onChipDone={markChipDone}
                               compact
                             />
                           ))}
@@ -475,32 +503,37 @@ function Stat({
 function PackWorkRow({
   row,
   index,
-  done,
-  onToggle,
-  onCopy,
+  doneIds,
+  onToggleRow,
+  onChipDone,
   compact,
 }: {
   row: ProductionPackWorkRow;
   index: number;
-  done: boolean;
-  onToggle: (id: string) => void;
-  onCopy: (text: string, e?: React.MouseEvent) => void;
+  doneIds: Set<string>;
+  onToggleRow: (id: string) => void;
+  onChipDone: (chipId: string, copyValue: string, e?: React.MouseEvent) => void;
   compact?: boolean;
 }) {
   const py = compact ? 'py-2' : 'py-3';
-  const persUnits =
-    row.personalizationUnits.length > 0
-      ? row.personalizationUnits
-      : row.personalization.trim()
-        ? [row.personalization]
-        : [];
+  const rowDone = isPackRowFullyDone(row, doneIds);
+  const chips = row.personalizationChips;
+  const plainStock = chips.length === 0 && !row.personalization.trim();
 
   return (
     <tr
-      onClick={() => onToggle(row.id)}
-      title="Click row to mark done"
-      className={`cursor-pointer align-top transition-colors ${
-        done ? 'bg-emerald-100 hover:bg-emerald-100' : 'hover:bg-violet-50/40'
+      onClick={plainStock ? () => onToggleRow(row.id) : undefined}
+      title={
+        plainStock
+          ? 'Click row to mark done'
+          : 'Click each field to copy — row turns green when all are done'
+      }
+      className={`align-top transition-colors ${
+        rowDone
+          ? 'bg-emerald-100 hover:bg-emerald-100'
+          : plainStock
+            ? 'cursor-pointer hover:bg-violet-50/40'
+            : 'hover:bg-violet-50/20'
       }`}
     >
       {!compact && <td className={`px-3 ${py} text-gray-400 font-mono`}>{index + 1}</td>}
@@ -523,20 +556,43 @@ function PackWorkRow({
         </span>
       </td>
       <td className={`px-3 ${py}`}>
-        {persUnits.length > 0 ? (
+        {chips.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {persUnits.map((label, idx) => (
-              <button
-                key={`${row.id}-p-${idx}`}
-                type="button"
-                onClick={e => onCopy(label, e)}
-                title="Click to copy"
-                className="inline-block max-w-[220px] px-2 py-0.5 rounded-md bg-violet-100 text-violet-900 font-bold text-[11px] hover:bg-violet-200 border border-violet-200"
-              >
-                {label}
-              </button>
-            ))}
+            {chips.map(chip => {
+              const chipDone = doneIds.has(chip.id);
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={e => onChipDone(chip.id, chip.value, e)}
+                  title={`Copy ${chip.label.toLowerCase()}`}
+                  className={`inline-flex flex-col items-start max-w-[200px] px-2 py-1 rounded-md border text-left transition-colors ${
+                    chipDone
+                      ? 'bg-emerald-200 border-emerald-400 text-emerald-950 ring-2 ring-emerald-400/60'
+                      : 'bg-violet-100 border-violet-200 text-violet-900 hover:bg-violet-200'
+                  }`}
+                >
+                  <span className="text-[8px] font-black uppercase tracking-widest opacity-80">
+                    {chip.label}
+                  </span>
+                  <span className="font-black text-[12px] leading-tight">{chip.value}</span>
+                </button>
+              );
+            })}
           </div>
+        ) : row.personalization.trim() ? (
+          <button
+            type="button"
+            onClick={e => onChipDone(`${row.id}:plain`, row.personalization, e)}
+            className={`inline-flex flex-col items-start px-2 py-1 rounded-md border text-left ${
+              doneIds.has(`${row.id}:plain`)
+                ? 'bg-emerald-200 border-emerald-400 text-emerald-950'
+                : 'bg-violet-100 border-violet-200 text-violet-900'
+            }`}
+          >
+            <span className="text-[8px] font-black uppercase tracking-widest">Text</span>
+            <span className="font-black text-[12px]">{row.personalization}</span>
+          </button>
         ) : (
           <span className="text-gray-400 text-[10px] font-bold uppercase tracking-wider">
             Plain stock

@@ -42,25 +42,29 @@ function fmtOrderDate(iso: string): string {
 }
 
 function renderPersCell(row: ProductionPackWorkRow): string {
-  const units =
-    row.personalizationUnits.length > 0
-      ? row.personalizationUnits
-      : row.personalization.trim()
-        ? [row.personalization]
-        : [];
-  if (units.length === 0) {
+  const chips = row.personalizationChips;
+  if (chips.length === 0) {
+    if (row.personalization.trim()) {
+      const id = `${row.id}:plain`;
+      return `<button type="button" class="pers-chip copyable" data-chip-id="${escAttr(id)}" data-copy="${escAttr(row.personalization)}"><span class="pers-label">Text</span><span class="pers-value">${esc(row.personalization)}</span></button>`;
+    }
     return '<span class="muted">Plain stock</span>';
   }
-  return `<div class="pers-chips">${units
+  return `<div class="pers-chips">${chips
     .map(
-      label =>
-        `<button type="button" class="pers-chip copyable" data-copy="${escAttr(label)}">${esc(label)}</button>`
+      chip =>
+        `<button type="button" class="pers-chip copyable" data-chip-id="${escAttr(chip.id)}" data-copy="${escAttr(chip.value)}"><span class="pers-label">${esc(chip.label)}</span><span class="pers-value">${esc(chip.value)}</span></button>`
     )
     .join('')}</div>`;
 }
 
 function renderWorkRow(row: ProductionPackWorkRow, index: number): string {
-  return `<tr class="work-row" data-row-id="${escAttr(row.id)}" title="Click row to mark done">
+  const chipCount = row.personalizationChips.length;
+  const title =
+    chipCount === 0 && !row.personalization.trim()
+      ? 'Click row to mark done'
+      : 'Click each field to copy — row turns green when all are done';
+  return `<tr class="work-row" data-row-id="${escAttr(row.id)}" data-chip-count="${chipCount}" title="${escAttr(title)}">
     <td class="num">${index + 1}</td>
     <td class="product">
       <strong>${esc(row.itemName)}</strong>
@@ -105,19 +109,44 @@ function buildInteractiveScript(storageKey: string): string {
     showToast._t = setTimeout(function () { toastEl.classList.remove('show'); }, 1600);
   }
 
+  function rowIsComplete(row) {
+    var chips = row.querySelectorAll('.pers-chip[data-chip-id]');
+    if (chips.length === 0) {
+      var rid = row.getAttribute('data-row-id');
+      return rid && done.has(rid);
+    }
+    for (var i = 0; i < chips.length; i++) {
+      var cid = chips[i].getAttribute('data-chip-id');
+      if (!cid || !done.has(cid)) return false;
+    }
+    return true;
+  }
+
   function updateProgress() {
-    var rows = document.querySelectorAll('.work-row');
-    var total = rows.length;
+    var chips = document.querySelectorAll('.pers-chip[data-chip-id]');
+    var plainRows = document.querySelectorAll('.work-row[data-chip-count="0"]');
+    var total = chips.length + plainRows.length;
     var n = 0;
-    rows.forEach(function (r) { if (r.classList.contains('row-done')) n++; });
+    chips.forEach(function (btn) {
+      var id = btn.getAttribute('data-chip-id');
+      if (id && done.has(id)) n++;
+    });
+    plainRows.forEach(function (row) {
+      var id = row.getAttribute('data-row-id');
+      if (id && done.has(id)) n++;
+    });
     var el = document.getElementById('progress');
-    if (el) el.textContent = n + ' / ' + total + ' done';
+    if (el) el.textContent = n + ' / ' + total + ' fields done';
   }
 
   function applyDoneState() {
+    document.querySelectorAll('.pers-chip[data-chip-id]').forEach(function (btn) {
+      var id = btn.getAttribute('data-chip-id');
+      if (id && done.has(id)) btn.classList.add('chip-done');
+      else btn.classList.remove('chip-done');
+    });
     document.querySelectorAll('.work-row').forEach(function (row) {
-      var id = row.getAttribute('data-row-id');
-      if (id && done.has(id)) row.classList.add('row-done');
+      if (rowIsComplete(row)) row.classList.add('row-done');
       else row.classList.remove('row-done');
     });
     updateProgress();
@@ -125,7 +154,9 @@ function buildInteractiveScript(storageKey: string): string {
 
   document.querySelectorAll('.work-row').forEach(function (row) {
     row.addEventListener('click', function (e) {
-      if (e.target && e.target.closest && e.target.closest('.copyable')) return;
+      if (e.target && e.target.closest && e.target.closest('.pers-chip')) return;
+      var chipCount = parseInt(row.getAttribute('data-chip-count') || '0', 10);
+      if (chipCount > 0) return;
       var id = row.getAttribute('data-row-id');
       if (!id) return;
       if (done.has(id)) done.delete(id);
@@ -135,19 +166,26 @@ function buildInteractiveScript(storageKey: string): string {
     });
   });
 
-  document.querySelectorAll('.copyable').forEach(function (btn) {
+  document.querySelectorAll('.pers-chip[data-chip-id]').forEach(function (btn) {
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       e.preventDefault();
-      var text = btn.getAttribute('data-copy') || btn.textContent || '';
+      var text = btn.getAttribute('data-copy') || '';
+      var label = btn.querySelector('.pers-label');
+      var labelText = label ? label.textContent : '';
       function ok() {
-        btn.classList.add('copied');
-        showToast('Copied: ' + text);
-        setTimeout(function () { btn.classList.remove('copied'); }, 1200);
+        var id = btn.getAttribute('data-chip-id');
+        if (id) {
+          done.add(id);
+          saveDone(done);
+        }
+        applyDoneState();
+        showToast('Copied ' + (labelText ? labelText + ': ' : '') + text);
       }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(ok).catch(function () {
           window.prompt('Copy:', text);
+          ok();
         });
       } else {
         window.prompt('Copy:', text);
@@ -265,15 +303,17 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     td.vendor, td.color { font-size: 10px; }
     td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
     td.qty { text-align: center; font-weight: 800; }
-    .pers-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pers-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .pers-chip {
-      display: inline-block; margin: 0; padding: 4px 10px;
-      background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 6px;
-      font-weight: 700; font-size: 11px; color: #5b21b6; cursor: copy;
-      text-align: left; max-width: 280px; white-space: normal; line-height: 1.35;
+      display: inline-flex; flex-direction: column; align-items: flex-start; margin: 0; padding: 6px 10px;
+      background: #f5f3ff; border: 1px solid #c4b5fd; border-radius: 8px;
+      color: #5b21b6; cursor: copy; text-align: left; max-width: 200px;
     }
+    .pers-chip .pers-label { font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.85; }
+    .pers-chip .pers-value { font-size: 13px; font-weight: 800; line-height: 1.2; margin-top: 2px; }
     .pers-chip:hover { background: #ede9fe; }
-    .pers-chip.copied { background: #bbf7d0; border-color: #22c55e; color: #166534; }
+    .pers-chip.chip-done { background: #bbf7d0 !important; border-color: #22c55e !important; color: #166534 !important; box-shadow: 0 0 0 2px rgba(34,197,94,0.35); }
+    .work-row.row-done .pers-chip.chip-done { background: #86efac !important; }
     .muted { color: #94a3b8; }
     .order-card { margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
     .order-card header { display: flex; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
@@ -297,7 +337,7 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
 <body>
   <div id="toast"></div>
   <div class="toolbar no-print">
-    <span class="hint">Interactive pack — click a <strong>row</strong> to mark done (saved on this device). Click <strong>personalisation</strong> to copy. Use Print for PDF (colours kept).</span>
+    <span class="hint">Click each <strong>labelled field</strong> to copy (stays green). Row turns green when every field on that line is done. Plain stock: click the row.</span>
     <span id="progress">0 / 0 done</span>
     <button type="button" id="reset-done">Reset done</button>
     <button type="button" id="print-btn">Print / Save PDF</button>

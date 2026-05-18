@@ -44,8 +44,14 @@ export interface ProductionPackPivotBundle {
   colorLabel: string;
   sizeLabel: string;
   totalQuantity: number;
-  /** One full personalisation label per garment (initials, names, shirt number, etc.) */
-  personalizationUnits: string[];
+  /** One chip per property per garment (labelled initials, name, etc.). */
+  personalizationChips: PersonalizationChip[];
+}
+
+export interface PersonalizationChip {
+  id: string;
+  label: string;
+  value: string;
 }
 
 export interface ProductionPackOrderGroup {
@@ -199,13 +205,47 @@ export interface ProductionPackWorkRow {
   vendor: string;
   colorLabel: string;
   sizeLabel: string;
-  /** Single label (order lines). */
   personalization: string;
-  /** One chip per garment when pivot bundles are personalised. */
-  personalizationUnits: string[];
+  personalizationChips: PersonalizationChip[];
   quantity: number;
   orderNumber?: string;
 }
+
+export function shortPersonalizationLabel(propName: string): string {
+  let s = propName.trim();
+  s = s.replace(/^Enter\s+/i, '').replace(/^Add\s+/i, '').replace(/\s+New\s*$/i, '');
+  if (/^personalisation\s+details?$/i.test(s) || /^personalization\s+details?$/i.test(s)) {
+    return 'Name';
+  }
+  if (/initial/i.test(s)) return 'Initials';
+  if (/squad|number|#/i.test(s)) return 'Number';
+  if (/name/i.test(s)) return 'Name';
+  if (/shirt|text/i.test(s)) return 'Shirt text';
+  return s || 'Detail';
+}
+
+export function personalizationChipsFromProperties(
+  properties: { name: string; value: string }[],
+  idPrefix: string,
+  garmentIndex: number
+): PersonalizationChip[] {
+  return allPersonalizationProperties(properties).map((p, i) => ({
+    id: `${idPrefix}:g${garmentIndex}:c${i}`,
+    label: shortPersonalizationLabel(p.name),
+    value: p.value,
+  }));
+}
+
+export function isPackRowFullyDone(row: ProductionPackWorkRow, doneIds: Set<string>): boolean {
+  if (row.personalizationChips.length > 0) {
+    return row.personalizationChips.every(c => doneIds.has(c.id));
+  }
+  if (row.personalization.trim()) {
+    return doneIds.has(`${row.id}:plain`);
+  }
+  return doneIds.has(row.id);
+}
+
 
 export function formatProductionPackItemMeta(row: {
   sku: string;
@@ -260,7 +300,7 @@ export function buildWorkRowsFromReport(report: ProductionPackReport): {
       colorLabel: b.colorLabel,
       sizeLabel: b.sizeLabel,
       personalization: '',
-      personalizationUnits: b.personalizationUnits,
+      personalizationChips: b.personalizationChips,
       quantity: b.totalQuantity,
     });
   }
@@ -277,11 +317,18 @@ export function buildWorkRowsFromReport(report: ProductionPackReport): {
         sizeLabel: line.sizeLabel,
         orderNumber: o.orderNumber,
       };
+      const chips: PersonalizationChip[] = [];
+      const prefix = `o:${o.orderNumber}:${line.orderId}`;
+      for (let g = 0; g < line.quantity; g++) {
+        chips.push(
+          ...personalizationChipsFromProperties(line.displayProperties, prefix, g)
+        );
+      }
       orderRows.push({
         ...base,
         id: `o:${o.orderNumber}:${line.orderId}`,
         personalization: line.personalizationLabel.trim(),
-        personalizationUnits: line.personalizationValues,
+        personalizationChips: chips,
         quantity: line.quantity,
       });
     }
@@ -448,7 +495,8 @@ export function buildProductionPackReport(
       colorLabel: string;
       sizeLabel: string;
       totalQuantity: number;
-      units: string[];
+      chips: PersonalizationChip[];
+      nextGarment: number;
     }
   >();
 
@@ -464,17 +512,22 @@ export function buildProductionPackReport(
         colorLabel: line.colorLabel,
         sizeLabel: line.sizeLabel,
         totalQuantity: 0,
-        units: [],
+        chips: [],
+        nextGarment: 0,
       };
       bundleMap.set(key, bundle);
     }
     bundle.totalQuantity += line.quantity;
-    const values = line.personalizationValues;
-    if (values.length > 0) {
-      for (let u = 0; u < line.quantity; u++) {
-        for (const v of values) {
-          bundle.units.push(v);
-        }
+    const prefix = `p:${key}`;
+    for (let u = 0; u < line.quantity; u++) {
+      const g = bundle.nextGarment++;
+      const garmentChips = personalizationChipsFromProperties(
+        line.displayProperties,
+        prefix,
+        g
+      );
+      if (garmentChips.length > 0) {
+        bundle.chips.push(...garmentChips);
       }
     }
   }
@@ -488,7 +541,7 @@ export function buildProductionPackReport(
       colorLabel: b.colorLabel,
       sizeLabel: b.sizeLabel,
       totalQuantity: b.totalQuantity,
-      personalizationUnits: b.units,
+      personalizationChips: b.chips,
     }))
     .sort(comparePivotBundles);
 
@@ -525,7 +578,7 @@ export function buildProductionPackReport(
         colorLabel: a.colorLabel,
         sizeLabel: a.sizeLabel,
         totalQuantity: 0,
-        personalizationUnits: [],
+        personalizationChips: [],
       },
       {
         lineName: b.lineName,
@@ -535,7 +588,7 @@ export function buildProductionPackReport(
         colorLabel: b.colorLabel,
         sizeLabel: b.sizeLabel,
         totalQuantity: 0,
-        personalizationUnits: [],
+        personalizationChips: [],
       }
     ));
   }
