@@ -545,9 +545,9 @@ function PackWorkRow({
       }`}
     >
       {!compact && <td className={`px-3 ${py} text-gray-400 font-mono`}>{index + 1}</td>}
-      <td className={`px-3 ${py} max-w-sm`}>
-        <div className="font-semibold text-gray-900">{row.itemName}</div>
-        <div className="text-[9px] text-gray-500 mt-0.5 leading-snug">
+      <td className={`px-3 ${py} max-w-md min-w-[200px]`}>
+        <div className="text-[11px] font-bold text-gray-800 leading-snug">{row.itemName}</div>
+        <div className="text-[12px] font-semibold text-slate-700 mt-1 leading-snug">
           {formatProductionPackItemMeta(row)}
         </div>
       </td>

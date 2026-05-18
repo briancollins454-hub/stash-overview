@@ -309,7 +309,8 @@ export function buildClubProductionPackPrintHtml(report: ProductionPackReport): 
     td.size-col strong { font-size: 16px; }
     td.mono { font-family: ui-monospace, monospace; font-size: 9px; }
     td.vendor, td.color { font-size: 10px; }
-    td.product .sub { font-size: 9px; color: #64748b; margin-top: 2px; }
+    td.product strong { font-size: 11px; display: block; margin-bottom: 2px; }
+    td.product .sub { font-size: 12px; font-weight: 600; color: #334155; margin-top: 4px; line-height: 1.35; }
     td.qty { text-align: center; font-weight: 800; }
     .pers-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .pers-chip {
