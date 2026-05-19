@@ -42,6 +42,7 @@ export const APP_TAB_DEFINITIONS: ReadonlyArray<{ id: string; label: string }> =
   { id: 'credit-block', label: 'Credit block' },
   { id: 'unpaid-orders', label: 'Unpaid orders' },
   { id: 'digest', label: 'Email digest' },
+  { id: 'rota', label: 'Rota' },
   { id: 'users', label: 'User management' },
   { id: 'cloud-health', label: 'Cloud health' },
   { id: 'manual', label: 'Manual' },
@@ -73,11 +74,16 @@ const MANAGER_TAB_IDS: string[] = [
   'issues',
   'fulfill',
   'autolink',
+  'rota',
   'manual',
   'alerts',
 ];
 
 const VIEWER_TAB_IDS: string[] = ['dashboard', 'briefing', 'summary', 'reports', 'revenue', 'sales'];
+
+// "staff" is the Rota-only role — these users land on the simplified rota
+// surface and never see the main app. allowedTabs is locked to ['rota'].
+const STAFF_TAB_IDS: string[] = ['rota'];
 
 /** Default tab sets when creating a user or resetting role — copy returned fresh. */
 export function getDefaultTabsForRole(role: string): string[] {
@@ -90,7 +96,16 @@ export function getDefaultTabsForRole(role: string): string[] {
       return [...MANAGER_TAB_IDS];
     case 'viewer':
       return [...VIEWER_TAB_IDS];
+    case 'staff':
+      return [...STAFF_TAB_IDS];
     default:
       return [...VIEWER_TAB_IDS];
   }
+}
+
+/** True when the user is constrained to the rota-only surface. */
+export function isRotaOnlyUser(role: string | undefined, allowedTabs: string[] | undefined): boolean {
+  if (role === 'staff') return true;
+  if (!allowedTabs) return false;
+  return allowedTabs.length === 1 && allowedTabs[0] === 'rota';
 }

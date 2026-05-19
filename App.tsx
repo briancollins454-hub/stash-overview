@@ -101,6 +101,7 @@ const MobileSummary = lazyRetry(() => import('./components/MobileSummary'));
 const ProductionIssueLog = lazyRetry(() => import('./components/ProductionIssueLog'));
 const DailyTaskList = lazyRetry(() => import('./components/DailyTaskList'));
 const WholesalerLookup = lazyRetry(() => import('./components/WholesalerLookup'));
+const RotaApp = lazyRetry(() => import('./components/RotaApp'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -141,6 +142,11 @@ const LoginScreen: React.FC<{
   const [loginUsername, setLoginUsername] = React.useState('');
   const [loginPassword, setLoginPassword] = React.useState('');
   const [loginLoading, setLoginLoading] = React.useState(false);
+  // Visual mode only — the back-end decides which surface a user can reach
+  // based on their role. "Rota mode" recolours the form and hides the
+  // Google button so non-Stash staff don't try to sign in with a Google
+  // account they don't have.
+  const [rotaMode, setRotaMode] = React.useState(false);
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,15 +155,26 @@ const LoginScreen: React.FC<{
     setLoginLoading(false);
   };
 
+  const accent = rotaMode ? 'teal' : 'indigo';
+  const accentBorderColour = rotaMode ? 'border-teal-600' : 'border-indigo-600';
+  const accentBgColour = rotaMode ? 'bg-teal-600' : 'bg-indigo-600';
+  const accentRingColour = rotaMode ? 'focus:border-teal-500 focus:ring-teal-500' : 'focus:border-indigo-500 focus:ring-indigo-500';
+  const accentSubmitBg = rotaMode ? 'bg-teal-600 hover:bg-teal-500' : 'bg-indigo-600 hover:bg-indigo-500';
+  const accentHover = rotaMode ? 'hover:bg-teal-50' : 'hover:bg-indigo-50';
+
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-slate-900 rounded-3xl shadow-2xl border-b-8 border-indigo-600 p-10 text-center animate-in zoom-in-95 duration-500">
-        <div className="w-20 h-20 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 rotate-3 shadow-lg">
-          <ShieldCheck className="w-10 h-10 text-white" />
+      <div className={`max-w-md w-full bg-slate-900 rounded-3xl shadow-2xl border-b-8 ${accentBorderColour} p-10 text-center animate-in zoom-in-95 duration-500`}>
+        <div className={`w-20 h-20 ${accentBgColour} rounded-2xl flex items-center justify-center mx-auto mb-8 rotate-3 shadow-lg`}>
+          {rotaMode ? <CalendarIcon className="w-10 h-10 text-white" /> : <ShieldCheck className="w-10 h-10 text-white" />}
         </div>
-        <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Secure Access</h1>
+        <h1 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">
+          {rotaMode ? 'Rota Access' : 'Secure Access'}
+        </h1>
         <p className="text-slate-400 text-sm font-bold uppercase tracking-widest mb-8 leading-relaxed">
-          Stash Shop Sync is restricted to authorized personnel only.
+          {rotaMode
+            ? 'Sign in with your Stash username to view your rota.'
+            : 'Stash Shop Sync is restricted to authorized personnel only.'}
         </p>
 
         {authError && (
@@ -167,21 +184,25 @@ const LoginScreen: React.FC<{
           </div>
         )}
 
-        {/* Google Sign-In */}
-        <button
-          onClick={() => signIn()}
-          className="w-full bg-white text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-indigo-50 transition-all active:scale-95 shadow-xl"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-          Sign in with Google
-        </button>
+        {!rotaMode && (
+          <>
+            {/* Google Sign-In */}
+            <button
+              onClick={() => signIn()}
+              className={`w-full bg-white text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 ${accentHover} transition-all active:scale-95 shadow-xl`}
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+              Sign in with Google
+            </button>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 my-6">
-          <div className="flex-1 h-px bg-slate-700" />
-          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">or</span>
-          <div className="flex-1 h-px bg-slate-700" />
-        </div>
+            {/* Divider */}
+            <div className="flex items-center gap-3 my-6">
+              <div className="flex-1 h-px bg-slate-700" />
+              <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">or</span>
+              <div className="flex-1 h-px bg-slate-700" />
+            </div>
+          </>
+        )}
 
         {/* Username/Password Toggle */}
         {!showPasswordLogin ? (
@@ -202,7 +223,7 @@ const LoginScreen: React.FC<{
                 onChange={e => setLoginUsername(e.target.value)}
                 required
                 autoFocus
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                className={`w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold ${accentRingColour} focus:ring-1 outline-none`}
                 placeholder="Enter your username"
               />
             </div>
@@ -213,14 +234,14 @@ const LoginScreen: React.FC<{
                 value={loginPassword}
                 onChange={e => setLoginPassword(e.target.value)}
                 required
-                className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                className={`w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-bold ${accentRingColour} focus:ring-1 outline-none`}
                 placeholder="Enter your password"
               />
             </div>
             <button
               type="submit"
               disabled={loginLoading}
-              className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-500 transition-all active:scale-95 disabled:opacity-50 shadow-lg"
+              className={`w-full ${accentSubmitBg} text-white py-3.5 rounded-xl font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-lg`}
             >
               {loginLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4 rotate-180" />}
               Sign In
@@ -235,7 +256,19 @@ const LoginScreen: React.FC<{
           </form>
         )}
 
-        <div className="mt-10 pt-8 border-t border-slate-800">
+        {/* Surface switcher — TOA (staff Rota) vs full Stash login. */}
+        <div className="mt-8 pt-6 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={() => { setRotaMode(prev => !prev); setShowPasswordLogin(true); }}
+            className={`text-[10px] font-black uppercase tracking-[0.2em] ${rotaMode ? 'text-slate-400 hover:text-white' : 'text-teal-400 hover:text-teal-300'} flex items-center justify-center gap-2 mx-auto`}
+          >
+            <CalendarIcon className="w-3.5 h-3.5" />
+            {rotaMode ? 'Switch to Stash sign-in' : 'Sign in to Rota only (TOA)'}
+          </button>
+        </div>
+
+        <div className="mt-6 pt-6 border-t border-slate-800">
           <p className="text-[9px] text-slate-500 font-black uppercase tracking-[0.2em]">
             Authorized Domains: marxcorporate.com | stashshop.co.uk
           </p>
@@ -289,7 +322,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale', 'rota'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2643,6 +2676,56 @@ const App: React.FC = () => {
     return <LoginScreen signIn={signIn} loginWithPassword={loginWithPassword} authError={authError} />;
   }
 
+  // Rota-only users (role === 'staff' or allowedTabs locked to ['rota']) get
+  // a dedicated surface — no main-app navigation, no settings, no Stash
+  // dashboard chrome. Their login screen is the same; access is gated by
+  // their account, not by the button they pressed.
+  if (isCustomUser && customUserData) {
+    const onlyRota = (customUserData.role === 'staff') ||
+        (Array.isArray(customUserData.allowedTabs) && customUserData.allowedTabs.length === 1 && customUserData.allowedTabs[0] === 'rota');
+    if (onlyRota) {
+      return (
+        <div className="min-h-screen flex flex-col bg-slate-50">
+          <nav className="bg-gradient-to-r from-teal-700 to-emerald-700 text-white shadow-md sticky top-0 z-40">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5 opacity-90" />
+                <span className="font-black uppercase tracking-widest text-[12px]">Stash · Rota</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] font-bold uppercase tracking-widest opacity-80 hidden sm:inline">
+                  {customUserData.displayName || customUserData.username}
+                </span>
+                <button
+                  onClick={() => signOut()}
+                  className="px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-black uppercase tracking-widest flex items-center gap-2"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </nav>
+          <main className="flex-1">
+            <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-teal-500 animate-spin" /></div>}>
+              <ErrorBoundary fallbackTitle="Rota Error">
+                <RotaApp
+                  forceStaffOnly
+                  currentUser={{
+                    id: customUserData.id || '',
+                    username: customUserData.username || '',
+                    displayName: customUserData.displayName || customUserData.username || '',
+                    role: customUserData.role || 'staff',
+                  }}
+                />
+              </ErrorBoundary>
+            </Suspense>
+          </main>
+        </div>
+      );
+    }
+  }
+
   if (isWidgetView && widgetOrderId) {
     const widgetOrder = unifiedOrders.find(o => o.shopify.id === widgetOrderId);
     if (loading && !widgetOrder) {
@@ -2732,6 +2815,7 @@ const App: React.FC = () => {
                   { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                   { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
+                  { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
                   { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                 ].map(group => {
                   const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
@@ -2828,6 +2912,7 @@ const App: React.FC = () => {
                       { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                       { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
+                      { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
                       { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                     ].map(group => {
                       const allowedTabs = group.tabs.filter(t => isTabAllowed(t.id));
@@ -3661,6 +3746,23 @@ const App: React.FC = () => {
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <ErrorBoundary fallbackTitle="Wholesale Lookup Error">
                   <WholesalerLookup />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Rota — salaried-staff scheduling, time off, manual bank holidays */}
+            {activeTab === 'rota' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-teal-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Rota Error">
+                  <RotaApp
+                    currentUser={{
+                      id: isCustomUser ? (customUserData?.id || '') : `google:${user?.email || ''}`,
+                      username: isCustomUser ? (customUserData?.username || '') : (user?.email || ''),
+                      displayName: isCustomUser ? (customUserData?.displayName || customUserData?.username || '') : (user?.displayName || user?.email || ''),
+                      role: isCustomUser ? (customUserData?.role || 'viewer') : 'superuser',
+                      email: isCustomUser ? '' : (user?.email || ''),
+                    }}
+                  />
                 </ErrorBoundary>
               </Suspense>
             )}

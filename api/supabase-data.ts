@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // means RLS isn't our last line of defence for the most sensitive
   // row in the database.
   const tableName = path.split('?')[0];
-  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes', 'stash_finance_cache', 'stash_deco_stitch_cache', 'stash_production_issues', 'stash_wholesaler_prices', 'stash_daily_tasks', 'stash_priority_notes', 'stash_stock_take_sessions', 'stash_stock_take_lines', 'stash_supplier_imports', 'stash_supplier_catalog'];
+  const ALLOWED_TABLES = ['stash_orders', 'stash_mappings', 'stash_stock', 'stash_returns', 'stash_reference_products', 'stash_links', 'stash_product_mappings', 'stash_job_links', 'stash_product_patterns', 'stash_deco_jobs', 'stash_settings', 'order_notes', 'stash_finance_cache', 'stash_deco_stitch_cache', 'stash_production_issues', 'stash_wholesaler_prices', 'stash_daily_tasks', 'stash_priority_notes', 'stash_stock_take_sessions', 'stash_stock_take_lines', 'stash_supplier_imports', 'stash_supplier_catalog', 'stash_rota_employees', 'stash_rota_shifts', 'stash_rota_time_off', 'stash_rota_closures', 'stash_rota_swap_requests'];
   if (!ALLOWED_TABLES.includes(tableName)) {
     return res.status(403).json({ error: 'Table not allowed' });
   }

@@ -36,6 +36,7 @@ const APP_TAB_IDS: readonly string[] = [
   'credit-block',
   'unpaid-orders',
   'digest',
+  'rota',
   'users',
   'cloud-health',
   'manual',
@@ -65,11 +66,13 @@ const MANAGER_TAB_IDS: readonly string[] = [
   'issues',
   'fulfill',
   'autolink',
+  'rota',
   'manual',
   'alerts',
 ];
 
 const VIEWER_TAB_IDS: readonly string[] = ['dashboard', 'briefing', 'summary', 'reports', 'revenue', 'sales'];
+const STAFF_TAB_IDS: readonly string[] = ['rota'];
 
 function getDefaultTabsForRole(role: string): string[] {
   switch (role) {
@@ -81,6 +84,8 @@ function getDefaultTabsForRole(role: string): string[] {
       return [...MANAGER_TAB_IDS];
     case 'viewer':
       return [...VIEWER_TAB_IDS];
+    case 'staff':
+      return [...STAFF_TAB_IDS];
     default:
       return [...VIEWER_TAB_IDS];
   }
@@ -398,7 +403,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!firstName || !lastName || !username || !password) {
           return res.status(400).json({ error: 'All fields are required' });
         }
-        const validRoles = ['superuser', 'admin', 'manager', 'viewer'];
+        const validRoles = ['superuser', 'admin', 'manager', 'viewer', 'staff'];
         if (!validRoles.includes(role)) {
           return res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
         }
@@ -437,7 +442,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (firstName !== undefined) updates.first_name = firstName;
         if (lastName !== undefined) updates.last_name = lastName;
         if (role !== undefined) {
-          const validRoles = ['superuser', 'admin', 'manager', 'viewer'];
+          const validRoles = ['superuser', 'admin', 'manager', 'viewer', 'staff'];
           if (!validRoles.includes(role)) {
             return res.status(400).json({ error: 'Invalid role' });
           }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Users, Plus, Edit3, Trash2, Shield, ShieldCheck, Eye, Crown, Loader2, X, Check, RefreshCw, UserPlus, AlertTriangle, Lock, ToggleLeft, ToggleRight, Calendar } from 'lucide-react';
 import { APP_TAB_DEFINITIONS, APP_TAB_IDS, getDefaultTabsForRole } from '../constants/tabPermissions';
 import SeniorManagementAccess from './SeniorManagementAccess';
 
@@ -36,6 +36,8 @@ const ROLES = [
   { value: 'admin', label: 'Admin', icon: ShieldCheck, color: 'text-indigo-400', bg: 'bg-indigo-500/10 border-indigo-500/20' },
   { value: 'manager', label: 'Manager', icon: Shield, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
   { value: 'viewer', label: 'Viewer', icon: Eye, color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/20' },
+  // Rota-only "TOA" account — sees the staff Rota surface, nothing else.
+  { value: 'staff', label: 'Rota only', icon: Calendar, color: 'text-teal-400', bg: 'bg-teal-500/10 border-teal-500/20' },
 ];
 
 /** Tab labels + ids — `constants/tabPermissions.ts` (server mirrors ids in `api/users.ts`). */
@@ -375,6 +377,7 @@ const UserManagement: React.FC<Props> = ({ currentUser, token, firebaseIdToken }
                   u.role === 'superuser' ? 'bg-amber-500/20 text-amber-400' :
                   u.role === 'admin' ? 'bg-indigo-500/20 text-indigo-400' :
                   u.role === 'manager' ? 'bg-emerald-500/20 text-emerald-400' :
+                  u.role === 'staff' ? 'bg-teal-500/20 text-teal-400' :
                   'bg-slate-600/30 text-slate-400'
                 }`}>
                   {u.first_name[0]}{u.last_name[0]}
