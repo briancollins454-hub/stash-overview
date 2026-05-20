@@ -7,6 +7,7 @@ import {
   FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail
 } from 'lucide-react';
 import OpenItemStatementModal from './OpenItemStatementModal';
+import { qbCustomerIdFromInvoices } from '../utils/openItemStatement';
 // exceljs is ~800 KB and only used inside exportDetailedCSV. Import
 // it dynamically so it isn't part of this chunk's initial payload —
 // that drops the FinancialDashboard chunk from ~1 MB to the ~220 KB
@@ -424,20 +425,23 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       });
     }
 
-    const displayName = qb?.name || customerName;
-    const street = (qb?.addressLines ?? []).filter(l => {
-      const t = l.trim();
-      return t && normCustomerName(t) !== normCustomerName(displayName);
-    });
-
-    const addressLines: string[] = [displayName, displayName, ...street];
+    if (qb) {
+      const displayName = qb.name || customerName;
+      return {
+        accountId: qb.id || hintQbCustomerId || '',
+        displayName,
+        email: qb.email ?? null,
+        phone: qb.phone ?? null,
+        addressLines: qb.addressLines?.length ? qb.addressLines : [displayName],
+      };
+    }
 
     return {
-      accountId: qb?.id || hintQbCustomerId || '',
-      displayName,
-      email: qb?.email ?? null,
-      phone: qb?.phone ?? null,
-      addressLines,
+      accountId: hintQbCustomerId || '',
+      displayName: customerName,
+      email: null,
+      phone: null,
+      addressLines: [customerName],
     };
   }, [qbCustomerById, qbCustomerByName, qbCustomerDirectory, qbInvoices]);
 
@@ -1484,7 +1488,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                   {qbConfigured && (
                     <button
                       onClick={() => setStatementCustomer({
-                        customerId: resolveQbCustomerId(account.name) || account.customerId,
+                        customerId: qbCustomerIdFromInvoices(qbInvoices, account.name)
+                          || resolveQbCustomerId(account.name)
+                          || account.customerId,
                         name: account.name,
                       })}
                       className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600 text-teal-400' : 'hover:bg-teal-50 text-teal-600'}`}

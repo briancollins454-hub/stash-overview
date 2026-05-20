@@ -138,6 +138,53 @@ export function invoiceDescription(docNumber: string, dueDateIso: string | null)
   return `Invoice No.${docNumber}: Due ${due}.`;
 }
 
+/** Most common QBO customer Id on open invoices for this name (Deco name may differ from QBO). */
+export function qbCustomerIdFromInvoices(
+  invoices: OpenItemInvoice[],
+  customerName: string,
+): string | null {
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const target = norm(customerName);
+  const matches = invoices.filter(inv => {
+    if (!inv.customerId) return false;
+    const n = norm(inv.customerName);
+    return n === target || n.includes(target) || target.includes(n);
+  });
+  if (!matches.length) return null;
+  const counts = new Map<string, number>();
+  matches.forEach(m => counts.set(m.customerId, (counts.get(m.customerId) || 0) + 1));
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/** TO block lines: name + full billing address from QuickBooks. */
+export function formatCustomerAddressLines(
+  displayName: string,
+  rawLines: string[] = [],
+): string[] {
+  const lines: string[] = [];
+  const push = (s: string) => {
+    const t = s.trim();
+    if (t && !lines.includes(t)) lines.push(t);
+  };
+  push(displayName);
+  for (const l of rawLines) push(l);
+  return lines.length ? lines : [displayName];
+}
+
+export function qboCustomerToStatementInfo(
+  qbo: { id: string; name: string; email: string | null; phone: string | null; addressLines: string[] },
+  fallbackName: string,
+): StatementCustomerInfo {
+  const displayName = qbo.name?.trim() || fallbackName;
+  return {
+    accountId: qbo.id,
+    displayName,
+    email: qbo.email,
+    phone: qbo.phone,
+    addressLines: formatCustomerAddressLines(displayName, qbo.addressLines),
+  };
+}
+
 /** Match QB invoices to a Deco/finance customer display name. */
 export function invoicesForCustomer(
   invoices: OpenItemInvoice[],
@@ -147,8 +194,9 @@ export function invoicesForCustomer(
   const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
   const target = norm(customerName);
   return invoices.filter(inv => {
-    if (customerId && inv.customerId === customerId) return true;
-    return norm(inv.customerName) === target;
+    if (customerId && /^\d+$/.test(customerId) && inv.customerId === customerId) return true;
+    const n = norm(inv.customerName);
+    return n === target || n.includes(target) || target.includes(n);
   });
 }
 
@@ -159,21 +207,12 @@ export function buildStatementCustomerInfo(
   email: string | null = null,
   phone: string | null = null,
 ): StatementCustomerInfo {
-  const lines: string[] = [];
-  const push = (s: string) => {
-    const t = s.trim();
-    if (t && !lines.includes(t)) lines.push(t);
-  };
-  push(customerName);
-  push(customerName);
-  for (const l of addressLines) push(l);
-  if (lines.length < 2) push(customerName);
   return {
     accountId: customerId,
     displayName: customerName,
     email: email?.trim() || null,
     phone: phone?.trim() || null,
-    addressLines: lines,
+    addressLines: formatCustomerAddressLines(customerName, addressLines),
   };
 }
 

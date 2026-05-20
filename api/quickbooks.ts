@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { mapQboCustomer } from './qboCustomerMap';
 /**
  * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
  *
  * POST /api/quickbooks
- * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'customer-directory' | 'test-connection' | 'diagnose' }
+ * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'customer-directory' | 'customer-by-id' | 'test-connection' | 'diagnose' }
  *
  * Credentials are resolved in order (production):
  *   1. Stored OAuth tokens in Supabase (from /api/qbo-auth flow)
@@ -273,62 +274,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ ok: true, customers: results, count: results.length, totalCredit });
     }
 
-    // Customer display names + primary email (for open-item statement chase emails)
     if (action === 'customer-directory') {
       const result = await runQuery(
-        'SELECT Id, DisplayName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer MAXRESULTS 1000',
+        'SELECT Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer MAXRESULTS 1000',
       );
       if (!result.ok) return res.status(result.status).json({ error: `QBO customer directory failed (${result.status})`, detail: result.text.slice(0, 500) });
 
       const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
-
-      const qboAddrLines = (addr: Record<string, unknown> | undefined): string[] => {
-        if (!addr) return [];
-        const lines: string[] = [];
-        const line1 = typeof addr.Line1 === 'string' ? addr.Line1.trim() : '';
-        const line2 = typeof addr.Line2 === 'string' ? addr.Line2.trim() : '';
-        const line3 = typeof addr.Line3 === 'string' ? addr.Line3.trim() : '';
-        const city = typeof addr.City === 'string' ? addr.City.trim() : '';
-        const county = typeof addr.CountrySubDivisionCode === 'string'
-          ? addr.CountrySubDivisionCode.trim()
-          : '';
-        const postal = typeof addr.PostalCode === 'string' ? addr.PostalCode.trim() : '';
-        if (line1) lines.push(line1);
-        if (line2) lines.push(line2);
-        if (line3) lines.push(line3);
-        if (city) lines.push(city);
-        if (county) lines.push(county);
-        if (postal) lines.push(postal);
-        return lines;
-      };
-
-      const customerAddrLines = (c: Record<string, unknown>): string[] => {
-        const bill = qboAddrLines(c.BillAddr as Record<string, unknown> | undefined);
-        if (bill.length > 0) return bill;
-        return qboAddrLines(c.ShipAddr as Record<string, unknown> | undefined);
-      };
-
-      const results = customers.map(c => {
-        const emailObj = c.PrimaryEmailAddr as { Address?: string } | undefined;
-        const email = typeof emailObj?.Address === 'string' ? emailObj.Address.trim() : '';
-        const phoneObj = c.PrimaryPhone as { FreeFormNumber?: string } | undefined;
-        const phone = typeof phoneObj?.FreeFormNumber === 'string' ? phoneObj.FreeFormNumber.trim() : '';
-        const name = typeof c.DisplayName === 'string' ? c.DisplayName : '';
-        const addressLines = customerAddrLines(c);
-        return {
-          id: String(c.Id ?? ''),
-          name,
-          email: email || null,
-          phone: phone || null,
-          addressLines: addressLines.length > 0 ? addressLines : [name],
-          balance: typeof c.Balance === 'number' ? c.Balance : Number(c.Balance) || 0,
-        };
-      });
+      const results = customers.map(c => mapQboCustomer(c));
 
       return res.json({ ok: true, customers: results, count: results.length });
     }
 
-    return res.status(400).json({ error: `Unknown action: ${action}. Use 'ap-aging', 'ar-balance', 'customer-credits', 'customer-directory', or 'test-connection'.` });
+    if (action === 'customer-by-id') {
+      const customerId = String(body.customerId ?? '').trim();
+      if (!customerId || !/^\d+$/.test(customerId)) {
+        return res.status(400).json({ error: 'customerId required (numeric QuickBooks customer Id)' });
+      }
+      const sql = `SELECT Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer WHERE Id = '${escapeQboString(customerId)}'`;
+      const result = await runQuery(sql);
+      if (!result.ok) return res.status(result.status).json({ error: `QBO customer lookup failed (${result.status})`, detail: result.text.slice(0, 500) });
+
+      const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
+      if (!customers.length) {
+        return res.status(404).json({ error: `No QuickBooks customer with Id ${customerId}` });
+      }
+
+      return res.json({ ok: true, customer: mapQboCustomer(customers[0]) });
+    }
+
+    return res.status(400).json({ error: `Unknown action: ${action}. Use 'ap-aging', 'ar-balance', 'customer-credits', 'customer-directory', 'customer-by-id', or 'test-connection'.` });
 
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'QuickBooks API call failed' });

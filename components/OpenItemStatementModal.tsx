@@ -8,6 +8,8 @@ import {
   formatStatementText,
   invoicesForCustomer,
   mailtoLink,
+  qbCustomerIdFromInvoices,
+  qboCustomerToStatementInfo,
   type OpenItemInvoice,
   type StatementCustomerInfo,
 } from '../utils/openItemStatement';
@@ -21,7 +23,7 @@ export interface OpenItemStatementModalProps {
   onClose: () => void;
   customerName: string;
   customerId: string;
-  customerAddressLines?: string[];
+  customerInfo?: StatementCustomerInfo;
   qbInvoices: OpenItemInvoice[];
   defaultEmail?: string;
   isDark: boolean;
@@ -49,6 +51,9 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [showTextFallback, setShowTextFallback] = useState(false);
+  const [resolvedCustomer, setResolvedCustomer] = useState<StatementCustomerInfo | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
+  const [customerFetchError, setCustomerFetchError] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
@@ -58,6 +63,8 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       setPdfBusy(false);
       setPdfError(null);
       setShowTextFallback(false);
+      setResolvedCustomer(null);
+      setCustomerFetchError(null);
     }
   }, [isOpen, defaultEmail, customerName]);
 
@@ -66,16 +73,73 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     [qbInvoices, customerName, customerId],
   );
 
+  const qbIdForFetch = useMemo(() => {
+    const fromInvoices = qbCustomerIdFromInvoices(matchedInvoices, customerName)
+      || qbCustomerIdFromInvoices(qbInvoices, customerName);
+    if (fromInvoices && /^\d+$/.test(fromInvoices)) return fromInvoices;
+    if (customerId && /^\d+$/.test(customerId)) return customerId;
+    return null;
+  }, [matchedInvoices, qbInvoices, customerName, customerId]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    if (!qbIdForFetch) {
+      setResolvedCustomer(customerInfo ?? null);
+      setCustomerLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCustomerLoading(true);
+    setCustomerFetchError(null);
+
+    fetch('/api/quickbooks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'customer-by-id', customerId: qbIdForFetch }),
+    })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Lookup failed (${res.status})`);
+        return data;
+      })
+      .then(data => {
+        if (cancelled) return;
+        if (data.ok && data.customer) {
+          const info = qboCustomerToStatementInfo(data.customer, customerName);
+          setResolvedCustomer({
+            ...info,
+            email: info.email || customerInfo?.email || defaultEmail || null,
+          });
+        } else {
+          setResolvedCustomer(customerInfo ?? null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setCustomerFetchError(e instanceof Error ? e.message : 'Could not load customer from QuickBooks');
+        setResolvedCustomer(customerInfo ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setCustomerLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [isOpen, qbIdForFetch, customerName, customerInfo, defaultEmail]);
+
+  const effectiveCustomer = resolvedCustomer ?? customerInfo ?? null;
+
   const statement = useMemo(() => {
     if (!isOpen) return null;
     return buildOpenItemStatement(
       customerName,
-      customerId,
+      qbIdForFetch || customerId,
       matchedInvoices,
       new Date(),
-      customerInfo,
+      effectiveCustomer ?? undefined,
     );
-  }, [isOpen, customerName, customerId, matchedInvoices, customerInfo]);
+  }, [isOpen, customerName, customerId, qbIdForFetch, matchedInvoices, effectiveCustomer]);
 
   const pdfFilename = useMemo(
     () => (statement ? statementPdfFilename(statement.customerName) : ''),
@@ -179,6 +243,22 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                     <p className={`text-xs mt-1 ${muted}`}>
                       {statement.lines.length} open invoice{statement.lines.length === 1 ? '' : 's'} · {pdfFilename}
                     </p>
+                    {customerLoading && (
+                      <p className={`text-xs mt-2 flex items-center gap-1.5 ${muted}`}>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Loading billing address from QuickBooks…
+                      </p>
+                    )}
+                    {!customerLoading && effectiveCustomer && (
+                      <div className={`text-xs mt-2 leading-relaxed ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
+                        <span className="font-bold">Bill to on PDF: </span>
+                        {effectiveCustomer.addressLines.join(' · ')}
+                        {effectiveCustomer.email ? ` · ${effectiveCustomer.email}` : ''}
+                      </div>
+                    )}
+                    {customerFetchError && (
+                      <p className="text-xs mt-2 text-amber-600 dark:text-amber-400">{customerFetchError}</p>
+                    )}
                   </div>
                   <button
                     type="button"
