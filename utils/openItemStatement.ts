@@ -396,6 +396,35 @@ export function buildStatementEmailTemplate(
   return { subject, body, to: toEmail.trim() };
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function nl2br(s: string): string {
+  return escapeHtml(s).replace(/\n/g, '<br>\n');
+}
+
+/** HTML body for Resend (PDF attached separately). */
+export function buildStatementEmailHtml(
+  statement: OpenItemStatement,
+  opts: EmailTemplateOptions = {},
+): string {
+  const plain = buildStatementEmailTemplate(statement, '', { ...opts, attachPdf: true });
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:20px;background:#f4f4f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#333;line-height:1.6">
+<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;padding:24px;border:1px solid #e5e5e5">
+${nl2br(plain.body)}
+</div>
+</body>
+</html>`;
+}
+
 export function mailtoLink(subject: string, body: string, to: string): string {
   const params = new URLSearchParams();
   if (subject) params.set('subject', subject);

@@ -521,10 +521,10 @@ function redrawAllFooters(doc: import('jspdf').jsPDF) {
 
 const FOOTER_SECTION_HEIGHT = 78;
 
-export async function downloadOpenItemStatementPdf(
+async function renderOpenItemStatementPdf(
   statement: OpenItemStatement,
   opts: StatementPdfOptions = {},
-): Promise<void> {
+): Promise<import('jspdf').jsPDF> {
   const { jsPDF, autoTable } = await loadPdfLibs();
   const brandLogo = await loadImageWithDimensions(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
 
@@ -564,6 +564,26 @@ export async function downloadOpenItemStatementPdf(
 
   drawStatementFooter(doc, footerY, statement, payment);
   redrawAllFooters(doc);
+  return doc;
+}
 
+/** Base64 PDF for Resend attachment (same layout as download). */
+export async function generateOpenItemStatementPdfBase64(
+  statement: OpenItemStatement,
+  opts: StatementPdfOptions = {},
+): Promise<{ filename: string; base64: string }> {
+  const doc = await renderOpenItemStatementPdf(statement, opts);
+  const filename = statementPdfFilename(statement.customerName);
+  const dataUri = doc.output('datauristring');
+  const base64 = dataUri.split(',')[1] || '';
+  if (!base64) throw new Error('Failed to generate PDF');
+  return { filename, base64 };
+}
+
+export async function downloadOpenItemStatementPdf(
+  statement: OpenItemStatement,
+  opts: StatementPdfOptions = {},
+): Promise<void> {
+  const doc = await renderOpenItemStatementPdf(statement, opts);
   doc.save(statementPdfFilename(statement.customerName));
 }

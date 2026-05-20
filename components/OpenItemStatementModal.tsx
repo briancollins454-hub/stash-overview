@@ -5,6 +5,7 @@ import {
 import {
   buildOpenItemStatement,
   buildStatementEmailTemplate,
+  buildStatementEmailHtml,
   formatStatementText,
   invoicesForCustomer,
   mailtoLink,
@@ -16,6 +17,7 @@ import {
 } from '../utils/openItemStatement';
 import {
   downloadOpenItemStatementPdf,
+  generateOpenItemStatementPdfBase64,
   statementPdfFilename,
 } from '../utils/openItemStatementPdf';
 
@@ -51,6 +53,8 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   const [copied, setCopied] = useState<CopyTarget>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendResult, setSendResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [showTextFallback, setShowTextFallback] = useState(false);
   const [resolvedCustomer, setResolvedCustomer] = useState<StatementCustomerInfo | null>(null);
   const [customerLoading, setCustomerLoading] = useState(false);
@@ -63,6 +67,8 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       setCopied(null);
       setPdfBusy(false);
       setPdfError(null);
+      setSendBusy(false);
+      setSendResult(null);
       setShowTextFallback(false);
       setResolvedCustomer(null);
       setCustomerFetchError(null);
@@ -214,6 +220,59 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     }
   }, [statement, companyName, accountsEmail]);
 
+  const handleSendEmail = useCallback(async () => {
+    if (!statement || !emailTemplate) return;
+    const to = toEmail.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to)) {
+      setSendResult({ ok: false, msg: 'Enter a valid customer email address' });
+      return;
+    }
+
+    setSendBusy(true);
+    setSendResult(null);
+    setPdfError(null);
+    try {
+      const { filename, base64 } = await generateOpenItemStatementPdfBase64(statement, {
+        companyName,
+        accountsEmail,
+      });
+      const html = buildStatementEmailHtml(statement, {
+        companyName,
+        accountsEmail,
+        contactName,
+        pdfFilename: filename,
+      });
+
+      const resp = await fetch('/api/send-digest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'statement',
+          to: [to],
+          subject: emailTemplate.subject,
+          html,
+          text: emailTemplate.body,
+          replyTo: accountsEmail || undefined,
+          attachments: [{ filename, content: base64 }],
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.success) {
+        setSendResult({ ok: true, msg: `Statement emailed to ${to}` });
+      } else {
+        setSendResult({ ok: false, msg: data.error || 'Failed to send email' });
+      }
+    } catch (e: unknown) {
+      setSendResult({
+        ok: false,
+        msg: e instanceof Error ? e.message : 'Failed to send statement',
+      });
+    } finally {
+      setSendBusy(false);
+    }
+  }, [statement, emailTemplate, toEmail, companyName, accountsEmail, contactName]);
+
   if (!isOpen) return null;
 
   const card = isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-gray-200 text-gray-900';
@@ -276,25 +335,45 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleDownloadPdf}
-                    disabled={pdfBusy}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 shadow-md"
-                  >
-                    {pdfBusy ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Download className="w-4 h-4" />
-                    )}
-                    Download PDF
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSendEmail}
+                      disabled={sendBusy || pdfBusy || !toEmail.includes('@')}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-60 shadow-md"
+                    >
+                      {sendBusy ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Mail className="w-4 h-4" />
+                      )}
+                      Send statement
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadPdf}
+                      disabled={pdfBusy || sendBusy}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 shadow-md"
+                    >
+                      {pdfBusy ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4" />
+                      )}
+                      Download PDF
+                    </button>
+                  </div>
                 </div>
+                {sendResult && (
+                  <p className={`text-xs mt-2 ${sendResult.ok ? 'text-teal-600 dark:text-teal-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {sendResult.msg}
+                  </p>
+                )}
                 {pdfError && (
                   <p className="text-xs text-red-600 dark:text-red-400 mt-2">{pdfError}</p>
                 )}
                 <p className={`text-[11px] mt-3 leading-relaxed ${muted}`}>
-                  In Outlook: compose email → attach the downloaded PDF → paste the email text below (Copy email).
+                  Send statement emails the PDF via Resend (same as Email Digest). Or download PDF and use copy/paste below for Outlook.
                 </p>
               </div>
 
@@ -414,7 +493,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                 <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
                   <div className="flex items-center gap-2">
                     <Mail className="w-4 h-4 text-indigo-500" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Email to send with PDF</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest">Manual email (Outlook / copy)</span>
                   </div>
 
                   <div>
