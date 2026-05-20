@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  X, Copy, Check, Mail, FileText, AlertTriangle, ExternalLink,
+  X, Copy, Check, Mail, FileText, AlertTriangle, ExternalLink, Download, Loader2,
 } from 'lucide-react';
 import {
   buildOpenItemStatement,
@@ -10,6 +10,10 @@ import {
   mailtoLink,
   type OpenItemInvoice,
 } from '../utils/openItemStatement';
+import {
+  downloadOpenItemStatementPdf,
+  statementPdfFilename,
+} from '../utils/openItemStatementPdf';
 
 export interface OpenItemStatementModalProps {
   isOpen: boolean;
@@ -39,12 +43,18 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   const [toEmail, setToEmail] = useState(defaultEmail);
   const [contactName, setContactName] = useState('');
   const [copied, setCopied] = useState<CopyTarget>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [showTextFallback, setShowTextFallback] = useState(false);
 
   React.useEffect(() => {
     if (isOpen) {
       setToEmail(defaultEmail);
       setContactName('');
       setCopied(null);
+      setPdfBusy(false);
+      setPdfError(null);
+      setShowTextFallback(false);
     }
   }, [isOpen, defaultEmail, customerName]);
 
@@ -58,14 +68,21 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     return buildOpenItemStatement(customerName, customerId, matchedInvoices);
   }, [isOpen, customerName, customerId, matchedInvoices]);
 
+  const pdfFilename = useMemo(
+    () => (statement ? statementPdfFilename(statement.customerName) : ''),
+    [statement],
+  );
+
   const emailTemplate = useMemo(() => {
     if (!statement) return null;
     return buildStatementEmailTemplate(statement, toEmail, {
       companyName,
       accountsEmail,
       contactName,
+      attachPdf: true,
+      pdfFilename,
     });
-  }, [statement, toEmail, companyName, accountsEmail, contactName]);
+  }, [statement, toEmail, companyName, accountsEmail, contactName, pdfFilename]);
 
   const statementText = useMemo(
     () => (statement ? formatStatementText(statement, companyName) : ''),
@@ -78,9 +95,25 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       setCopied(target);
       setTimeout(() => setCopied(null), 2000);
     } catch {
-      /* fallback ignored — user can select manually */
+      /* user can select manually */
     }
   }, []);
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!statement) return;
+    setPdfBusy(true);
+    setPdfError(null);
+    try {
+      await downloadOpenItemStatementPdf(statement, {
+        companyName,
+        accountsEmail,
+      });
+    } catch (e: unknown) {
+      setPdfError(e instanceof Error ? e.message : 'Failed to generate PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [statement, companyName, accountsEmail]);
 
   if (!isOpen) return null;
 
@@ -99,7 +132,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Open item statement</p>
             <h2 className="text-lg font-black">{customerName}</h2>
             <p className={`text-xs mt-0.5 ${muted}`}>
-              Built from QuickBooks open invoices · copy email or statement for accounts chase
+              Download a PDF from QuickBooks open invoices, then attach it when you email the customer
             </p>
           </div>
           <button
@@ -127,6 +160,39 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
             </div>
           ) : (
             <>
+              {/* Primary action: PDF */}
+              <div className={`rounded-xl border p-4 ${isDark ? 'border-indigo-800 bg-indigo-950/40' : 'border-indigo-200 bg-indigo-50/80'}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-indigo-700 dark:text-indigo-300">
+                      {formatMoneyDisplay(statement.totalOutstanding)} outstanding
+                    </p>
+                    <p className={`text-xs mt-1 ${muted}`}>
+                      {statement.lines.length} open invoice{statement.lines.length === 1 ? '' : 's'} · {pdfFilename}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDownloadPdf}
+                    disabled={pdfBusy}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 shadow-md"
+                  >
+                    {pdfBusy ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
+                    Download PDF
+                  </button>
+                </div>
+                {pdfError && (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-2">{pdfError}</p>
+                )}
+                <p className={`text-[11px] mt-3 leading-relaxed ${muted}`}>
+                  In Outlook: compose email → attach the downloaded PDF → paste the email text below (Copy email).
+                </p>
+              </div>
+
               <div className="grid sm:grid-cols-2 gap-3">
                 <label className="block">
                   <span className={`block text-[10px] font-black uppercase tracking-widest mb-1 ${muted}`}>
@@ -154,6 +220,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                 </label>
               </div>
 
+              {/* Preview table */}
               <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
                 <table className="w-full text-xs">
                   <thead className={isDark ? 'bg-slate-800' : 'bg-gray-100'}>
@@ -184,81 +251,97 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                         Total outstanding
                       </td>
                       <td className="p-2 text-right font-black text-red-600 dark:text-red-400">
-                        £{statement.totalOutstanding.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                        {formatMoneyDisplay(statement.totalOutstanding)}
                       </td>
                     </tr>
                   </tfoot>
                 </table>
               </div>
 
+              {/* Email for attach workflow */}
               {emailTemplate && (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Email subject</span>
-                    <button
-                      type="button"
-                      onClick={() => copyText(emailTemplate.subject, 'subject')}
-                      className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-500"
-                    >
-                      {copied === 'subject' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                      Copy subject
-                    </button>
+                <div className={`rounded-xl border p-4 space-y-3 ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-indigo-500" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Email to send with PDF</span>
                   </div>
-                  <p className={`text-sm font-medium px-3 py-2 rounded-lg border ${preBg}`}>{emailTemplate.subject}</p>
-                </div>
-              )}
 
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                  <span className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Statement only</span>
-                  <button
-                    type="button"
-                    onClick={() => copyText(statementText, 'statement')}
-                    className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-500"
-                  >
-                    {copied === 'statement' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    Copy statement
-                  </button>
-                </div>
-                <pre className={`text-[11px] leading-relaxed p-3 rounded-lg border overflow-x-auto whitespace-pre font-mono ${preBg}`}>
-                  {statementText}
-                </pre>
-              </div>
-
-              {emailTemplate && (
-                <div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${muted}`}>Full email (paste into Outlook)</span>
-                    <div className="flex flex-wrap gap-2">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`text-[10px] font-bold uppercase tracking-widest ${muted}`}>Subject</span>
                       <button
                         type="button"
-                        onClick={() => copyText(emailTemplate.body, 'email')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700"
+                        onClick={() => copyText(emailTemplate.subject, 'subject')}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-500"
                       >
-                        {copied === 'email' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        Copy full email
+                        {copied === 'subject' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        Copy
                       </button>
-                      {toEmail.includes('@') && (
-                        <a
-                          href={mailtoLink(emailTemplate.subject, emailTemplate.body, toEmail)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border ${isDark ? 'border-slate-600 hover:bg-slate-800' : 'border-gray-300 hover:bg-gray-50'}`}
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          Open in mail app
-                        </a>
-                      )}
                     </div>
+                    <p className={`text-sm font-medium px-3 py-2 rounded-lg border ${preBg}`}>{emailTemplate.subject}</p>
                   </div>
-                  <pre className={`text-[11px] leading-relaxed p-3 rounded-lg border overflow-x-auto whitespace-pre-wrap max-h-48 ${preBg}`}>
-                    {emailTemplate.body}
-                  </pre>
+
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <span className={`text-[10px] font-bold uppercase tracking-widest ${muted}`}>Message body</span>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => copyText(emailTemplate.body, 'email')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-indigo-600 text-white hover:bg-indigo-700"
+                        >
+                          {copied === 'email' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          Copy email
+                        </button>
+                        {toEmail.includes('@') && (
+                          <a
+                            href={mailtoLink(emailTemplate.subject, emailTemplate.body, toEmail)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border ${isDark ? 'border-slate-600 hover:bg-slate-800' : 'border-gray-300 hover:bg-gray-50'}`}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            Mail app
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <pre className={`text-[11px] leading-relaxed p-3 rounded-lg border overflow-x-auto whitespace-pre-wrap max-h-36 ${preBg}`}>
+                      {emailTemplate.body}
+                    </pre>
+                  </div>
                 </div>
               )}
+
+              {/* Collapsible plain-text fallback */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowTextFallback(v => !v)}
+                  className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${muted} hover:text-indigo-600`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {showTextFallback ? 'Hide' : 'Show'} plain-text fallback (no PDF)
+                </button>
+                {showTextFallback && (
+                  <div className="mt-2 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => copyText(statementText, 'statement')}
+                      className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-indigo-600"
+                    >
+                      {copied === 'statement' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      Copy statement text
+                    </button>
+                    <pre className={`text-[11px] leading-relaxed p-3 rounded-lg border overflow-x-auto whitespace-pre font-mono max-h-32 ${preBg}`}>
+                      {statementText}
+                    </pre>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
 
-        <footer className={`px-5 py-3 border-t shrink-0 flex justify-end ${isDark ? 'border-slate-700 bg-slate-900/80' : 'border-gray-200 bg-gray-50'}`}>
+        <footer className={`px-5 py-3 border-t shrink-0 flex justify-end gap-2 ${isDark ? 'border-slate-700 bg-slate-900/80' : 'border-gray-200 bg-gray-50'}`}>
           <button
             type="button"
             onClick={onClose}
@@ -271,5 +354,9 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     </div>
   );
 };
+
+function formatMoneyDisplay(v: number): string {
+  return '£' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
 
 export default OpenItemStatementModal;

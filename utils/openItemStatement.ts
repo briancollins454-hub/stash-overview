@@ -140,6 +140,9 @@ export interface EmailTemplateOptions {
   accountsEmail?: string;
   contactName?: string;
   customIntro?: string;
+  /** When true, email body refers to an attached PDF instead of inlining the statement. */
+  attachPdf?: boolean;
+  pdfFilename?: string;
 }
 
 /** Subject + body for Outlook / Gmail paste. */
@@ -154,21 +157,28 @@ export function buildStatementEmailTemplate(
     ? `Dear ${opts.contactName.trim()},`
     : 'Dear Accounts Payable,';
 
+  const attachPdf = opts.attachPdf !== false;
+  const pdfName = opts.pdfFilename || `Statement - ${statement.customerName}.pdf`;
+
   const intro =
     opts.customIntro?.trim() ||
-    `Please find below your open-item statement as at ${statement.asAtDate}. The total amount outstanding is ${formatMoney(statement.totalOutstanding)}.`;
+    (attachPdf
+      ? `Please find attached your open-item statement (${pdfName}) as at ${statement.asAtDate}. The total amount outstanding is ${formatMoney(statement.totalOutstanding)}.`
+      : `Please find below your open-item statement as at ${statement.asAtDate}. The total amount outstanding is ${formatMoney(statement.totalOutstanding)}.`);
 
-  const statementBlock = formatStatementText(statement, company);
+  const bodyParts = [greeting, '', intro, ''];
 
-  const body = [
-    greeting,
-    '',
-    intro,
-    '',
-    '---',
-    statementBlock,
-    '---',
-    '',
+  if (!attachPdf) {
+    const statementBlock = formatStatementText(statement, company);
+    bodyParts.push('---', statementBlock, '---', '');
+  } else {
+    bodyParts.push(
+      'A PDF copy of the statement is attached to this email for your records.',
+      '',
+    );
+  }
+
+  bodyParts.push(
     'If you have already remitted payment for any of these items, please send remittance advice to ' +
       accounts +
       ' so we can allocate it promptly.',
@@ -176,7 +186,9 @@ export function buildStatementEmailTemplate(
     'Kind regards,',
     'Accounts',
     company,
-  ].join('\n');
+  );
+
+  const body = bodyParts.join('\n');
 
   const subject = `Account statement — ${statement.customerName} — ${statement.asAtDate}`;
 
