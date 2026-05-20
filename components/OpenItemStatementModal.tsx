@@ -20,6 +20,7 @@ export interface OpenItemStatementModalProps {
   onClose: () => void;
   customerName: string;
   customerId: string;
+  customerAddressLines?: string[];
   qbInvoices: OpenItemInvoice[];
   defaultEmail?: string;
   isDark: boolean;
@@ -34,6 +35,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   onClose,
   customerName,
   customerId,
+  customerAddressLines = [],
   qbInvoices,
   defaultEmail = '',
   isDark,
@@ -65,8 +67,14 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
 
   const statement = useMemo(() => {
     if (!isOpen) return null;
-    return buildOpenItemStatement(customerName, customerId, matchedInvoices);
-  }, [isOpen, customerName, customerId, matchedInvoices]);
+    return buildOpenItemStatement(
+      customerName,
+      customerId,
+      matchedInvoices,
+      new Date(),
+      customerAddressLines,
+    );
+  }, [isOpen, customerName, customerId, matchedInvoices, customerAddressLines]);
 
   const pdfFilename = useMemo(
     () => (statement ? statementPdfFilename(statement.customerName) : ''),

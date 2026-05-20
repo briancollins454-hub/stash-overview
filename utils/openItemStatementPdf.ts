@@ -1,23 +1,29 @@
-// ─── Open-item statement PDF (client-side, lazy-loaded jspdf) ─────────────
-// Produces a proper A4 PDF file for email attachment — not browser print.
+// ─── Open-item statement PDF — QuickBooks / MCB print layout ─────────────
+// Matches Marx Corporate account print (company block, aging bar, payment,
+// DATE | DESCRIPTION | AMOUNT | OPEN AMOUNT, page footers).
 
-import type { OpenItemStatement } from './openItemStatement';
+import type { AgingSummary, OpenItemStatement } from './openItemStatement';
+import {
+  STATEMENT_COMPANY,
+  STATEMENT_PAYMENT,
+} from '../constants/statementBranding';
 
 export interface StatementPdfOptions {
   companyName?: string;
-  companyAddress?: string;
+  companyAddressLines?: string[];
   accountsEmail?: string;
-  /** Optional remittance / bank details line on the footer */
-  paymentNote?: string;
+  website?: string;
+  payment?: typeof STATEMENT_PAYMENT;
 }
 
-const DEFAULT_COMPANY = 'Marx Corporate';
-const DEFAULT_ACCOUNTS = 'accounts@marxcorporate.com';
+const MARGIN = 14;
+const PAGE_W = 210;
+const PAGE_H = 297;
+const FOOTER_Y = PAGE_H - 10;
 
-const formatMoney = (v: number) =>
-  '£' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const formatAmount = (v: number) =>
+  v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-/** Safe filename: `Statement - Acme Ltd - 2026-05-20.pdf` */
 export function statementPdfFilename(customerName: string, asAt = new Date()): string {
   const date = asAt.toISOString().slice(0, 10);
   const safe = customerName
@@ -35,10 +41,7 @@ let pdfLibs: Promise<{ jsPDF: JsPDFModule['jsPDF']; autoTable: AutoTableModule['
 
 function loadPdfLibs() {
   if (!pdfLibs) {
-    pdfLibs = Promise.all([
-      import('jspdf'),
-      import('jspdf-autotable'),
-    ]).then(([jspdf, autotable]) => ({
+    pdfLibs = Promise.all([import('jspdf'), import('jspdf-autotable')]).then(([jspdf, autotable]) => ({
       jsPDF: jspdf.jsPDF,
       autoTable: autotable.default,
     }));
@@ -46,146 +49,232 @@ function loadPdfLibs() {
   return pdfLibs;
 }
 
-/**
- * Build an A4 portrait PDF and trigger a file download in the browser.
- */
+function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: AgingSummary): number {
+  const tableW = PAGE_W - MARGIN * 2;
+  const colW = tableW / 6;
+  const x0 = MARGIN;
+  const headers: { line1: string; line2: string }[] = [
+    { line1: 'Current', line2: 'Due' },
+    { line1: '1-30 Days', line2: 'Past Due' },
+    { line1: '31-60 Days', line2: 'Past Due' },
+    { line1: '61-90 Days', line2: 'Past Due' },
+    { line1: '90+ Days', line2: 'Past Due' },
+    { line1: 'Amount', line2: 'Due' },
+  ];
+  const values = [
+    aging.current,
+    aging.pastDue1_30,
+    aging.pastDue31_60,
+    aging.pastDue61_90,
+    aging.pastDue90Plus,
+    aging.total,
+  ];
+
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.2);
+  doc.rect(x0, y, tableW, 14);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(0, 0, 0);
+
+  headers.forEach((h, i) => {
+    const cx = x0 + colW * i + colW / 2;
+    doc.text(h.line1, cx, y + 4, { align: 'center' });
+    doc.text(h.line2, cx, y + 7.5, { align: 'center' });
+    if (i < 5) doc.line(x0 + colW * (i + 1), y, x0 + colW * (i + 1), y + 14);
+  });
+
+  doc.line(x0, y + 9, x0 + tableW, y + 9);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  values.forEach((v, i) => {
+    const cx = x0 + colW * i + colW / 2;
+    const label = i === 5 ? `GBP ${formatAmount(v)}` : formatAmount(v);
+    doc.text(label, cx, y + 12.5, { align: 'center' });
+  });
+
+  return y + 16;
+}
+
+function drawPaymentBlock(doc: import('jspdf').jsPDF, y: number, payment: typeof STATEMENT_PAYMENT): number {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(0, 0, 0);
+
+  const lines = [
+    payment.cardIntro,
+    payment.stripeGbp,
+    payment.stripeEuro,
+    payment.bankIntro,
+    `Account Name: ${payment.accountName}`,
+    `Sort Code: ${payment.sortCode}`,
+    `Account No: ${payment.accountNo}`,
+  ];
+
+  let cy = y;
+  lines.forEach(line => {
+    doc.text(line, MARGIN, cy);
+    cy += 4;
+  });
+  return cy + 2;
+}
+
+function drawLetterhead(
+  doc: import('jspdf').jsPDF,
+  y: number,
+  statement: OpenItemStatement,
+  company: typeof STATEMENT_COMPANY,
+  accountsEmail: string,
+  website: string,
+): number {
+  const leftX = MARGIN;
+  const toX = 72;
+  const rightX = PAGE_W - MARGIN;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(company.name, leftX, y);
+  doc.text(company.name, leftX, y + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  let ly = y + 10;
+  company.addressLines.forEach(line => {
+    doc.text(line, leftX, ly);
+    ly += 4;
+  });
+  doc.text(accountsEmail, leftX, ly);
+  ly += 4;
+  doc.text(website, leftX, ly);
+  ly += 6;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('Statement', leftX, ly);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('TO', toX, y);
+
+  doc.setFont('helvetica', 'normal');
+  let ty = y + 5;
+  statement.customerAddressLines.forEach(line => {
+    doc.text(line, toX, ty);
+    ty += 4;
+  });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  let ry = y;
+  const metaRows: [string, string][] = [
+    ['STATEMENT NO.', statement.statementNumber],
+    ['DATE', statement.asAtDateShort],
+    ['TOTAL DUE GBP', formatAmount(statement.totalOutstanding)],
+  ];
+  metaRows.forEach(([label, value]) => {
+    doc.text(label, rightX, ry, { align: 'right' });
+    ry += 4;
+    doc.setFont('helvetica', 'normal');
+    doc.text(value, rightX, ry, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    ry += 6;
+  });
+
+  const blockBottom = Math.max(ly, ty, ry) + 4;
+  return blockBottom;
+}
+
+function drawPageFooter(doc: import('jspdf').jsPDF, pageNum: number, totalPages: number) {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(80, 80, 80);
+  doc.text(`-- ${pageNum} of ${totalPages} --`, PAGE_W / 2, FOOTER_Y, { align: 'center' });
+}
+
+function chunkLines<T>(items: T[], firstSize: number, restSize: number): T[][] {
+  if (items.length === 0) return [[]];
+  const pages: T[][] = [];
+  pages.push(items.slice(0, firstSize));
+  let i = firstSize;
+  while (i < items.length) {
+    pages.push(items.slice(i, i + restSize));
+    i += restSize;
+  }
+  return pages;
+}
+
 export async function downloadOpenItemStatementPdf(
   statement: OpenItemStatement,
   opts: StatementPdfOptions = {},
 ): Promise<void> {
   const { jsPDF, autoTable } = await loadPdfLibs();
-  const company = opts.companyName || DEFAULT_COMPANY;
-  const accounts = opts.accountsEmail || DEFAULT_ACCOUNTS;
-  const address = opts.companyAddress || '';
-  const paymentNote =
-    opts.paymentNote ||
-    'Please remit payment quoting invoice number(s). If you have already paid, send remittance advice so we can allocate your payment.';
+
+  const company = {
+    name: opts.companyName || STATEMENT_COMPANY.name,
+    addressLines: opts.companyAddressLines || [...STATEMENT_COMPANY.addressLines],
+  };
+  const accountsEmail = opts.accountsEmail || STATEMENT_COMPANY.email;
+  const website = opts.website || STATEMENT_COMPANY.website;
+  const payment = opts.payment || STATEMENT_PAYMENT;
+
+  const FIRST_PAGE_LINES = 14;
+  const NEXT_PAGE_LINES = 22;
+  const pageChunks = chunkLines(statement.lines, FIRST_PAGE_LINES, NEXT_PAGE_LINES);
+  const totalPages = pageChunks.length;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const margin = 18;
-  let y = margin;
 
-  // ─── Header band ─────────────────────────────────────────────────────
-  doc.setFillColor(79, 70, 229); // indigo-600
-  doc.rect(0, 0, pageW, 32, 'F');
+  pageChunks.forEach((chunk, pageIndex) => {
+    if (pageIndex > 0) doc.addPage();
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text(company.toUpperCase(), margin, 12);
+    let y = MARGIN;
+    y = drawAgingBar(doc, y, statement.aging);
+    y = drawPaymentBlock(doc, y, payment);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text('OPEN ITEM STATEMENT', margin, 19);
+    if (pageIndex === 0) {
+      y = drawLetterhead(doc, y, statement, company, accountsEmail, website);
+    }
 
-  doc.setFontSize(8);
-  const generated = new Date().toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    const tableBody = chunk.map(l => [
+      l.txnDateShort,
+      l.description,
+      formatAmount(l.amountDue),
+      formatAmount(l.amountDue),
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: MARGIN, right: MARGIN, bottom: 16 },
+      head: [['DATE', 'DESCRIPTION', 'AMOUNT', 'OPEN AMOUNT']],
+      body: tableBody,
+      theme: 'plain',
+      styles: {
+        fontSize: 8,
+        textColor: [0, 0, 0],
+        cellPadding: 1.5,
+        lineWidth: 0,
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fontStyle: 'bold',
+        fillColor: [255, 255, 255],
+        textColor: [0, 0, 0],
+        lineWidth: { bottom: 0.2 },
+        lineColor: [0, 0, 0],
+      },
+      columnStyles: {
+        0: { cellWidth: 22 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 24, halign: 'right' },
+        3: { cellWidth: 28, halign: 'right' },
+      },
+      didDrawPage: () => {
+        drawPageFooter(doc, pageIndex + 1, totalPages);
+      },
+    });
   });
-  doc.text(`Generated ${generated}`, pageW - margin, 12, { align: 'right' });
-  if (address) {
-    doc.text(address, pageW - margin, 19, { align: 'right' });
-  }
-
-  y = 42;
-  doc.setTextColor(31, 41, 55);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text(statement.customerName, margin, y);
-  y += 8;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(75, 85, 99);
-  doc.text(`Statement date: ${statement.asAtDate}`, margin, y);
-  y += 5;
-  doc.text(`Account reference: ${statement.customerId || '—'}`, margin, y);
-  y += 5;
-  doc.text(
-    `${statement.lines.length} open invoice${statement.lines.length === 1 ? '' : 's'}`,
-    margin,
-    y,
-  );
-  y += 10;
-
-  // ─── Line items table ──────────────────────────────────────────────────
-  const body = statement.lines.map(l => [
-    l.docNumber,
-    l.txnDate,
-    l.dueDate,
-    String(l.daysOutstanding),
-    formatMoney(l.amountDue),
-  ]);
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: margin, right: margin },
-    head: [['Invoice no.', 'Invoice date', 'Due date', 'Days', 'Amount due']],
-    body,
-    foot: [[
-      { content: 'Total outstanding', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } },
-      { content: formatMoney(statement.totalOutstanding), styles: { fontStyle: 'bold', halign: 'right' } },
-    ]],
-    theme: 'striped',
-    headStyles: {
-      fillColor: [79, 70, 229],
-      textColor: 255,
-      fontStyle: 'bold',
-      fontSize: 9,
-    },
-    bodyStyles: { fontSize: 9, textColor: [31, 41, 55] },
-    footStyles: { fillColor: [238, 242, 255], textColor: [67, 56, 202], fontSize: 10 },
-    alternateRowStyles: { fillColor: [249, 250, 251] },
-    columnStyles: {
-      0: { cellWidth: 32, fontStyle: 'bold' },
-      1: { cellWidth: 28 },
-      2: { cellWidth: 28 },
-      3: { cellWidth: 16, halign: 'right' },
-      4: { cellWidth: 32, halign: 'right' },
-    },
-    didDrawPage: (data) => {
-      const pageH = doc.internal.pageSize.getHeight();
-      doc.setFontSize(8);
-      doc.setTextColor(156, 163, 175);
-      doc.text(
-        `${company} · Open item statement · Page ${data.pageNumber}`,
-        pageW / 2,
-        pageH - 8,
-        { align: 'center' },
-      );
-    },
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const finalY = (doc as any).lastAutoTable?.finalY ?? y + 40;
-
-  // ─── Footer notes ────────────────────────────────────────────────────
-  let noteY = finalY + 12;
-  if (noteY > 250) {
-    doc.addPage();
-    noteY = margin;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(31, 41, 55);
-  doc.text('Payment & enquiries', margin, noteY);
-  noteY += 6;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(75, 85, 99);
-  const wrapped = doc.splitTextToSize(paymentNote, pageW - margin * 2);
-  doc.text(wrapped, margin, noteY);
-  noteY += wrapped.length * 4.5 + 4;
-
-  doc.text(`Accounts: ${accounts}`, margin, noteY);
 
   doc.save(statementPdfFilename(statement.customerName));
 }

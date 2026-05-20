@@ -72,6 +72,7 @@ interface QBCustomerDirectoryEntry {
   id: string;
   name: string;
   email: string | null;
+  addressLines: string[];
   balance: number;
 }
 
@@ -366,6 +367,18 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const resolveQbEmail = useCallback((customerName: string) => {
     return qbEmailByCustomerName.get(normCustomerName(customerName)) || '';
   }, [qbEmailByCustomerName]);
+
+  const qbAddressByCustomerName = useMemo(() => {
+    const map = new Map<string, string[]>();
+    qbCustomerDirectory.forEach(c => {
+      if (c.addressLines?.length) map.set(normCustomerName(c.name), c.addressLines);
+    });
+    return map;
+  }, [qbCustomerDirectory]);
+
+  const resolveQbAddress = useCallback((customerName: string): string[] => {
+    return qbAddressByCustomerName.get(normCustomerName(customerName)) || [customerName];
+  }, [qbAddressByCustomerName]);
 
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
@@ -1928,6 +1941,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         onClose={() => setStatementCustomer(null)}
         customerName={statementCustomer?.name || ''}
         customerId={statementCustomer?.customerId || ''}
+        customerAddressLines={statementCustomer ? resolveQbAddress(statementCustomer.name) : []}
         qbInvoices={qbInvoices}
         defaultEmail={statementCustomer ? resolveQbEmail(statementCustomer.name) : ''}
         isDark={isDark}

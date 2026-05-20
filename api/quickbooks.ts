@@ -275,18 +275,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Customer display names + primary email (for open-item statement chase emails)
     if (action === 'customer-directory') {
-      const result = await runQuery('SELECT Id, DisplayName, PrimaryEmailAddr, Balance FROM Customer MAXRESULTS 1000');
+      const result = await runQuery(
+        'SELECT Id, DisplayName, PrimaryEmailAddr, BillAddr, Balance FROM Customer MAXRESULTS 1000',
+      );
       if (!result.ok) return res.status(result.status).json({ error: `QBO customer directory failed (${result.status})`, detail: result.text.slice(0, 500) });
 
       const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
 
+      const billAddrLines = (c: Record<string, unknown>): string[] => {
+        const addr = c.BillAddr as Record<string, unknown> | undefined;
+        if (!addr) return [];
+        const lines: string[] = [];
+        const line1 = typeof addr.Line1 === 'string' ? addr.Line1.trim() : '';
+        const line2 = typeof addr.Line2 === 'string' ? addr.Line2.trim() : '';
+        const line3 = typeof addr.Line3 === 'string' ? addr.Line3.trim() : '';
+        const city = typeof addr.City === 'string' ? addr.City.trim() : '';
+        const county = typeof addr.CountrySubDivisionCode === 'string'
+          ? addr.CountrySubDivisionCode.trim()
+          : '';
+        const postal = typeof addr.PostalCode === 'string' ? addr.PostalCode.trim() : '';
+        if (line1) lines.push(line1);
+        if (line2) lines.push(line2);
+        if (line3) lines.push(line3);
+        if (city) lines.push(city);
+        if (county) lines.push(county);
+        if (postal) lines.push(postal);
+        return lines;
+      };
+
       const results = customers.map(c => {
         const emailObj = c.PrimaryEmailAddr as { Address?: string } | undefined;
         const email = typeof emailObj?.Address === 'string' ? emailObj.Address.trim() : '';
+        const name = typeof c.DisplayName === 'string' ? c.DisplayName : '';
+        const addressLines = billAddrLines(c);
         return {
           id: String(c.Id ?? ''),
-          name: typeof c.DisplayName === 'string' ? c.DisplayName : '',
+          name,
           email: email || null,
+          addressLines: addressLines.length > 0 ? addressLines : [name],
           balance: typeof c.Balance === 'number' ? c.Balance : Number(c.Balance) || 0,
         };
       });
