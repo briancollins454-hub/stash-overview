@@ -55,9 +55,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid replyTo address' });
   }
 
-  const fromAddress = kind === 'statement'
-    ? (process.env.STATEMENT_FROM_EMAIL || process.env.DIGEST_FROM_EMAIL || 'Marx Accounts <accounts@marxcorporate.com>')
-    : (process.env.DIGEST_FROM_EMAIL || 'Stash Overview <digest@stashoverview.co.uk>');
+  // Resend requires a verified sending domain. marxcorporate.com is reply-to only unless
+  // you verify it at https://resend.com/domains (then set DIGEST_FROM_EMAIL in Vercel).
+  const resolveFrom = (): string => {
+    const candidates = [
+      process.env.DIGEST_FROM_EMAIL,
+      process.env.STATEMENT_FROM_EMAIL,
+      'Marx Accounts <accounts@stashoverview.co.uk>',
+      'Stash Overview <digest@stashoverview.co.uk>',
+    ];
+    for (const raw of candidates) {
+      const v = raw?.trim();
+      if (!v) continue;
+      if (!/@marxcorporate\.com\s*>?$/i.test(v) && !/<[^>]*@marxcorporate\.com>/i.test(v)) {
+        return v;
+      }
+    }
+    return 'Marx Accounts <accounts@stashoverview.co.uk>';
+  };
+
+  const fromAddress = resolveFrom();
+  const statementReplyTo =
+    replyTo
+    || (kind === 'statement'
+      ? (process.env.STATEMENT_REPLY_TO?.trim() || 'accounts@marxcorporate.com')
+      : undefined);
 
   type ResendAttachment = { filename: string; content: string };
   const attachments: ResendAttachment[] = [];
@@ -84,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subject,
       html,
       ...(text ? { text } : {}),
-      ...(replyTo ? { replyTo } : {}),
+      ...(statementReplyTo && EMAIL_RE.test(statementReplyTo) ? { replyTo: statementReplyTo } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
     if (error) return res.status(500).json({ error: error.message });
