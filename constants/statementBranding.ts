@@ -9,7 +9,7 @@ export const STATEMENT_COLORS = {
 } as const;
 
 /** Same-origin asset (reliable in PDF) — see public/statement-brand-trio.png */
-export const BRAND_TRIO_LOGO_PATH = '/statement-brand-trio.png';
+export const BRAND_TRIO_LOGO_PATH = '/statement-brand-trio.png?v=2';
 
 /** Shopify CDN fallback if the bundled file is missing */
 export const BRAND_TRIO_LOGO_CDN =
