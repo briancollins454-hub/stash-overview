@@ -192,18 +192,76 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
-/** Shrink embedded bitmaps so emailed PDFs stay under Vercel request limits. */
-async function compressImageForPdf(
-  loaded: LoadedImage,
-  maxPx = 520,
-  quality = 0.82,
-): Promise<LoadedImage> {
-  if (typeof window === 'undefined' || loaded.dataUrl.length < 60_000) {
-    return loaded;
-  }
+function pixelIsLogoBg(r: number, g: number, b: number, a: number): boolean {
+  return a < 20 || (r <= 32 && g <= 32 && b <= 32);
+}
+
+/** Crop empty black / transparent padding from the square Shopify asset. */
+async function trimLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
+  if (typeof window === 'undefined') return loaded;
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        resolve(loaded);
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let minX = width;
+      let minY = height;
+      let maxX = 0;
+      let maxY = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = (y * width + x) * 4;
+          if (!pixelIsLogoBg(data[i], data[i + 1], data[i + 2], data[i + 3])) {
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+          }
+        }
+      }
+      if (maxX <= minX || maxY <= minY) {
+        resolve(loaded);
+        return;
+      }
+      const padPx = 4;
+      minX = Math.max(0, minX - padPx);
+      minY = Math.max(0, minY - padPx);
+      maxX = Math.min(width - 1, maxX + padPx);
+      maxY = Math.min(height - 1, maxY + padPx);
+      const cw = maxX - minX + 1;
+      const ch = maxY - minY + 1;
+      const out = document.createElement('canvas');
+      out.width = cw;
+      out.height = ch;
+      const octx = out.getContext('2d');
+      if (!octx) {
+        resolve(loaded);
+        return;
+      }
+      octx.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
+      resolve({ dataUrl: out.toDataURL('image/png'), width: cw, height: ch });
+    };
+    img.onerror = () => resolve(loaded);
+    img.src = loaded.dataUrl;
+  });
+}
+
+/** Logo for PDF — trim padding, white backdrop, PNG (avoids black JPEG fringing). */
+async function prepareLogoForPdf(loaded: LoadedImage): Promise<LoadedImage> {
+  const trimmed = await trimLogoPadding(loaded);
+  if (typeof window === 'undefined') return trimmed;
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const maxPx = 640;
       const scale = Math.min(1, maxPx / img.naturalWidth, maxPx / img.naturalHeight);
       const w = Math.max(1, Math.round(img.naturalWidth * scale));
       const h = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -212,14 +270,16 @@ async function compressImageForPdf(
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        resolve(loaded);
+        resolve(trimmed);
         return;
       }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
-      resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), width: w, height: h });
+      resolve({ dataUrl: canvas.toDataURL('image/png'), width: w, height: h });
     };
-    img.onerror = () => resolve(loaded);
-    img.src = loaded.dataUrl;
+    img.onerror = () => resolve(trimmed);
+    img.src = trimmed.dataUrl;
   });
 }
 
@@ -234,7 +294,7 @@ async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage 
 
   for (const raw of candidates) {
     const loaded = await loadImageWithDimensions(raw);
-    if (loaded) return compressImageForPdf(loaded);
+    if (loaded) return prepareLogoForPdf(loaded);
   }
   return null;
 }
@@ -262,8 +322,8 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 68;
-  const maxH = 30;
+  const maxW = 72;
+  const maxH = 22;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
@@ -418,12 +478,15 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
   return y + 15;
 }
 
-/** Green “Pay Now” JPEG buttons (generated in-browser, small footprint in PDF). */
+/** Canvas aspect — must match drawPayNowButtons placement (do not stretch to full column width). */
+const PAY_NOW_BTN_ASPECT = 52 / 14;
+
+/** Green “Pay Now” button bitmap (generated in-browser). */
 function renderPayNowButtonImage(currencyLabel: string): string {
   if (typeof document === 'undefined') return '';
   const canvas = document.createElement('canvas');
-  canvas.width = 400;
-  canvas.height = 96;
+  canvas.width = 520;
+  canvas.height = 140;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
@@ -449,12 +512,12 @@ function renderPayNowButtonImage(currencyLabel: string): string {
 
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
-  ctx.font = 'bold 28px Helvetica, Arial, sans-serif';
-  ctx.fillText('PAY NOW', w / 2, 40);
-  ctx.font = '600 18px Helvetica, Arial, sans-serif';
-  ctx.fillText(currencyLabel, w / 2, 72);
+  ctx.font = 'bold 36px Helvetica, Arial, sans-serif';
+  ctx.fillText('PAY NOW', w / 2, 58);
+  ctx.font = '600 22px Helvetica, Arial, sans-serif';
+  ctx.fillText(currencyLabel, w / 2, 102);
 
-  return canvas.toDataURL('image/jpeg', 0.88);
+  return canvas.toDataURL('image/png');
 }
 
 function buildPayNowButtonImages(links: StripePayLink[]): string[] {
@@ -489,19 +552,19 @@ function drawPayNowButtons(
   links: StripePayLink[],
   buttonImages: string[],
 ): number {
-  const boxW = PAGE_W - MARGIN * 2;
-  const pad = 3;
-  const gap = 6;
-  const btnW = (boxW - pad * 2 - gap) / 2;
-  const btnH = 16;
+  const btnH = 14;
+  const btnW = btnH * PAY_NOW_BTN_ASPECT;
+  const gap = 10;
+  const rowW = links.length * btnW + Math.max(0, links.length - 1) * gap;
+  const startX = MARGIN + (PAGE_W - MARGIN * 2 - rowW) / 2;
   const btnY = y;
 
   links.forEach((link, i) => {
-    const bx = MARGIN + pad + i * (btnW + gap);
+    const bx = startX + i * (btnW + gap);
     const img = buttonImages[i];
     if (img) {
       try {
-        doc.addImage(img, 'JPEG', bx, btnY, btnW, btnH);
+        doc.addImage(img, imageFormat(img), bx, btnY, btnW, btnH);
       } catch {
         drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
       }
@@ -560,7 +623,7 @@ function drawCardPaymentSection(
   const boxW = PAGE_W - MARGIN * 2;
   const startY = y;
   const pad = 3;
-  const boxH = 40;
+  const boxH = 36;
   const innerTop = startY + 5;
 
   doc.setFillColor(248, 252, 240);
