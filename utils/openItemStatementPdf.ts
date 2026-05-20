@@ -2,7 +2,6 @@
 
 import type { OpenItemLine, OpenItemStatement } from './openItemStatement';
 import {
-  BRAND_TRIO_LOGO_CDN,
   BRAND_TRIO_LOGO_PATH,
   STATEMENT_COLORS,
   STATEMENT_COMPANY,
@@ -192,132 +191,11 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
-/** Pure black / transparent — used only to strip empty margins, not logo pixels. */
-function pixelIsEmptyMargin(r: number, g: number, b: number, a: number): boolean {
-  return a < 20 || (r <= 10 && g <= 10 && b <= 10);
-}
-
-/** Strip only fully empty rows/columns (keeps full horizontal brand trio). */
-async function trimEmptyMargins(loaded: LoadedImage): Promise<LoadedImage> {
-  if (typeof window === 'undefined') return loaded;
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) {
-        resolve(loaded);
-        return;
-      }
-      ctx.drawImage(img, 0, 0);
-      const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      let minX = width;
-      let minY = height;
-      let maxX = 0;
-      let maxY = 0;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const i = (y * width + x) * 4;
-          if (!pixelIsEmptyMargin(data[i], data[i + 1], data[i + 2], data[i + 3])) {
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-          }
-        }
-      }
-      if (maxX <= minX || maxY <= minY) {
-        resolve(loaded);
-        return;
-      }
-      const padPx = 4;
-      minX = Math.max(0, minX - padPx);
-      minY = Math.max(0, minY - padPx);
-      maxX = Math.min(width - 1, maxX + padPx);
-      maxY = Math.min(height - 1, maxY + padPx);
-      const cw = maxX - minX + 1;
-      const ch = maxY - minY + 1;
-      const out = document.createElement('canvas');
-      out.width = cw;
-      out.height = ch;
-      const octx = out.getContext('2d');
-      if (!octx) {
-        resolve(loaded);
-        return;
-      }
-      octx.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
-      resolve({ dataUrl: out.toDataURL('image/png'), width: cw, height: ch });
-    };
-    img.onerror = () => resolve(loaded);
-    img.src = loaded.dataUrl;
-  });
-}
-
-/** Replace black matte with white so Corporate + Recruitment + Events all show on the PDF. */
-async function flattenLogoOnWhite(loaded: LoadedImage): Promise<LoadedImage> {
-  if (typeof window === 'undefined') return loaded;
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      const maxPx = 900;
-      const scale = Math.min(1, maxPx / img.naturalWidth, maxPx / img.naturalHeight);
-      const w = Math.max(1, Math.round(img.naturalWidth * scale));
-      const h = Math.max(1, Math.round(img.naturalHeight * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) {
-        resolve(loaded);
-        return;
-      }
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0, w, h);
-      const id = ctx.getImageData(0, 0, w, h);
-      const d = id.data;
-      for (let i = 0; i < d.length; i += 4) {
-        const r = d[i];
-        const g = d[i + 1];
-        const b = d[i + 2];
-        const a = d[i + 3];
-        if (pixelIsEmptyMargin(r, g, b, a)) {
-          d[i] = 255;
-          d[i + 1] = 255;
-          d[i + 2] = 255;
-          d[i + 3] = 255;
-        }
-      }
-      ctx.putImageData(id, 0, 0);
-      resolve({ dataUrl: canvas.toDataURL('image/png'), width: w, height: h });
-    };
-    img.onerror = () => resolve(loaded);
-    img.src = loaded.dataUrl;
-  });
-}
-
-/** Logo for PDF — trim square padding, flatten black to white, keep full trio width. */
-async function prepareLogoForPdf(loaded: LoadedImage): Promise<LoadedImage> {
-  const trimmed = await trimEmptyMargins(loaded);
-  return flattenLogoOnWhite(trimmed);
-}
-
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-
-  const candidates = [
-    opts.brandLogoUrl,
-    BRAND_TRIO_LOGO_PATH,
-    BRAND_TRIO_LOGO_CDN,
-  ].filter((u): u is string => Boolean(u?.trim()));
-
-  for (const raw of candidates) {
-    const loaded = await loadImageWithDimensions(raw);
-    if (loaded) return prepareLogoForPdf(loaded);
-  }
-  return null;
+  // Pre-cropped wide PNG in public/ — embed as-is (no runtime resize/crop/flatten).
+  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_PATH;
+  return loadImageWithDimensions(url);
 }
 
 /** Fit image in box preserving aspect ratio (mm). */
@@ -343,9 +221,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Wide brand trio (~2.4:1) — Corporate, Recruitment, Events in one row
-  const maxW = 86;
-  const maxH = 34;
+  // Wide brand trio (~2.4:1) — Corporate, Recruitment, Events; use full width, keep aspect
+  const maxW = PAGE_W - MARGIN - 52;
+  const maxH = 32;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
