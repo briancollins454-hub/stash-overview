@@ -276,7 +276,6 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const handleQbApiAuthFailure = useCallback((data: Record<string, unknown>): boolean => {
     const msg = String(data.error || '');
     if (data.needsReconnect || /not connected|session expired/i.test(msg)) {
-      setQbServerConfigured(false);
       setQbError(msg || 'QuickBooks session expired. Click Connect to QuickBooks.');
       return true;
     }
@@ -297,12 +296,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         if (status.needsRefresh) {
           const ok = await refreshServerQbSession();
           if (!ok) {
-            setQbServerConfigured(false);
             setQbError('QuickBooks session expired. Click Connect to QuickBooks.');
             return;
           }
         } else if (!status.connected) {
-          setQbServerConfigured(false);
           setQbError('QuickBooks not connected. Click Connect to QuickBooks.');
           return;
         }
@@ -385,10 +382,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
             setQbServerConfigured(true);
             return;
           }
+          setQbServerConfigured(true);
           setQbError(refData.error || 'QuickBooks session expired. Click Connect to QuickBooks.');
           return;
         }
-        setQbServerConfigured(true);
+        if (data.connected) setQbServerConfigured(true);
       })
       .catch(() => { /* aborted or network error — ignore */ });
     return () => ctrl.abort();
@@ -1308,9 +1306,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
 
       </div>
 
-      {/* QB Cross-Check Row */}
-      {(qbConfigured || qbBills.length > 0) && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+      {/* QB Cross-Check Row — always visible so Connect / Sync is never hidden */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {/* QB A/R Balance */}
           <div className={`${card} p-4 border-l-4 border-l-indigo-500`}>
             <div className={headerText}><Scale className="w-3 h-3 inline-block mr-1 -mt-0.5" />QB A/R Balance</div>
@@ -1358,10 +1355,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
               {!qbConfigured ? 'Connect QuickBooks' : qbLoading ? 'Syncing QB...' : 'Sync QuickBooks'}
             </button>
             {qbLastSynced && <div className="text-[9px] text-gray-400 mt-1">Last: {new Date(qbLastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>}
-            {qbError && <div className="text-[9px] text-red-400 mt-1 truncate max-w-[200px]">{qbError}</div>}
+            {qbError && <div className="text-[9px] text-red-400 mt-1 max-w-[220px] leading-tight">{qbError}</div>}
+            {!qbConfigured && !qbError && (
+              <div className="text-[9px] text-gray-400 mt-1 text-center">Link QuickBooks for A/R, A/P &amp; statements</div>
+            )}
           </div>
         </div>
-      )}
 
       {/* Second row: Pipeline + Aging */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
