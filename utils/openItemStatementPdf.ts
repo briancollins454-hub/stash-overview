@@ -146,45 +146,46 @@ async function loadImageWithDimensions(url: string): Promise<LoadedImage | null>
     }
   }
 
+  const isRemote = resolved.startsWith('http://') || resolved.startsWith('https://');
+
+  if (isRemote) {
+    try {
+      const res = await fetch(resolved, { mode: 'cors' });
+      if (res.ok) {
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        const dims = await new Promise<{ width: number; height: number } | null>(resolve => {
+          const img = new Image();
+          img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+          img.onerror = () => resolve(null);
+          img.src = dataUrl;
+        });
+
+        if (dims && dims.width > 0 && dims.height > 0) {
+          const loaded: LoadedImage = { dataUrl, width: dims.width, height: dims.height };
+          imageCache.set(cacheKey, JSON.stringify(loaded));
+          return loaded;
+        }
+      }
+    } catch {
+      /* canvas fallback */
+    }
+  }
+
   const viaCanvas = await loadImageViaCanvas(resolved);
   if (viaCanvas) {
     imageCache.set(cacheKey, JSON.stringify(viaCanvas));
     return viaCanvas;
   }
 
-  try {
-    const res = await fetch(resolved, { mode: 'cors' });
-    if (!res.ok) {
-      imageCache.set(cacheKey, null);
-      return null;
-    }
-    const blob = await res.blob();
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-
-    const dims = await new Promise<{ width: number; height: number } | null>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      img.onerror = () => resolve(null);
-      img.src = dataUrl;
-    });
-
-    if (!dims || dims.width < 1 || dims.height < 1) {
-      imageCache.set(cacheKey, null);
-      return null;
-    }
-
-    const loaded: LoadedImage = { dataUrl, width: dims.width, height: dims.height };
-    imageCache.set(cacheKey, JSON.stringify(loaded));
-    return loaded;
-  } catch {
-    imageCache.set(cacheKey, null);
-    return null;
-  }
+  imageCache.set(cacheKey, null);
+  return null;
 }
 
 function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
@@ -230,6 +231,10 @@ function flattenLogoPixels(ctx: CanvasRenderingContext2D, w: number, h: number):
   ctx.putImageData(id, 0, 0);
 }
 
+function isPrecroppedTrio(w: number, h: number): boolean {
+  return h > 0 && w / h >= 4 && h <= 150 && w <= 900;
+}
+
 /** Crop trio row, white background, JPEG — keeps PDF attachments under Vercel size limits. */
 async function trimAndCompressBrandLogo(loaded: LoadedImage): Promise<LoadedImage | null> {
   if (typeof document === 'undefined') return loaded;
@@ -238,10 +243,15 @@ async function trimAndCompressBrandLogo(loaded: LoadedImage): Promise<LoadedImag
     const img = new Image();
     img.onload = () => {
       try {
-        const { x0, y0, sw, sh } = trioCropRect(
-          img.naturalWidth || loaded.width,
-          img.naturalHeight || loaded.height,
-        );
+        const srcW = img.naturalWidth || loaded.width;
+        const srcH = img.naturalHeight || loaded.height;
+        const precropped = isPrecroppedTrio(srcW, srcH);
+
+        const crop = precropped
+          ? { x0: 0, y0: 0, sw: srcW, sh: srcH }
+          : trioCropRect(srcW, srcH);
+
+        const { x0, y0, sw, sh } = crop;
         if (sw < 8 || sh < 8) {
           resolve(null);
           return;
@@ -265,7 +275,13 @@ async function trimAndCompressBrandLogo(loaded: LoadedImage): Promise<LoadedImag
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, outW, outH);
         ctx.drawImage(img, x0, y0, sw, sh, 0, 0, outW, outH);
-        flattenLogoPixels(ctx, outW, outH);
+        if (!precropped) {
+          try {
+            flattenLogoPixels(ctx, outW, outH);
+          } catch {
+            /* tainted canvas */
+          }
+        }
 
         resolve({
           dataUrl: canvas.toDataURL('image/jpeg', LOGO_JPEG_QUALITY),
@@ -286,8 +302,8 @@ async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage 
 
   const candidates = [
     opts.brandLogoUrl,
-    BRAND_TRIO_LOGO_URL,
     BRAND_TRIO_LOGO_FALLBACK,
+    BRAND_TRIO_LOGO_URL,
   ].filter((u): u is string => Boolean(u));
 
   for (const url of candidates) {
@@ -330,9 +346,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Wide trio ~2.4:1 — all three marks must stay visible (do not use a square box)
-  const maxW = 118;
-  const maxH = 28;
+  // Wide trio ~7:1 — keep compact so metadata fits underneath on the right
+  const maxW = 68;
+  const maxH = 12;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
@@ -415,7 +431,8 @@ function drawFirstPageLetterhead(
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  let ry = afterTitleY;
+  // Right-column meta sits below the logo, not level with the left "Statement" title
+  let ry = Math.max(logoBottom + 1, topY + 14);
   const meta: [string, string][] = [
     ['STATEMENT NO.', statement.statementNumber],
     ['DATE', statement.asAtDateShort],
