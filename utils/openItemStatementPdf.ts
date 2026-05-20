@@ -192,12 +192,13 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
-function pixelIsLogoBg(r: number, g: number, b: number, a: number): boolean {
-  return a < 20 || (r <= 32 && g <= 32 && b <= 32);
+/** Pure black / transparent — used only to strip empty margins, not logo pixels. */
+function pixelIsEmptyMargin(r: number, g: number, b: number, a: number): boolean {
+  return a < 20 || (r <= 10 && g <= 10 && b <= 10);
 }
 
-/** Crop empty black / transparent padding from the square Shopify asset. */
-async function trimLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
+/** Strip only fully empty rows/columns (keeps full horizontal brand trio). */
+async function trimEmptyMargins(loaded: LoadedImage): Promise<LoadedImage> {
   if (typeof window === 'undefined') return loaded;
   return new Promise(resolve => {
     const img = new Image();
@@ -219,7 +220,7 @@ async function trimLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const i = (y * width + x) * 4;
-          if (!pixelIsLogoBg(data[i], data[i + 1], data[i + 2], data[i + 3])) {
+          if (!pixelIsEmptyMargin(data[i], data[i + 1], data[i + 2], data[i + 3])) {
             minX = Math.min(minX, x);
             maxX = Math.max(maxX, x);
             minY = Math.min(minY, y);
@@ -254,33 +255,53 @@ async function trimLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
   });
 }
 
-/** Logo for PDF — trim padding, white backdrop, PNG (avoids black JPEG fringing). */
-async function prepareLogoForPdf(loaded: LoadedImage): Promise<LoadedImage> {
-  const trimmed = await trimLogoPadding(loaded);
-  if (typeof window === 'undefined') return trimmed;
+/** Replace black matte with white so Corporate + Recruitment + Events all show on the PDF. */
+async function flattenLogoOnWhite(loaded: LoadedImage): Promise<LoadedImage> {
+  if (typeof window === 'undefined') return loaded;
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
-      const maxPx = 640;
+      const maxPx = 900;
       const scale = Math.min(1, maxPx / img.naturalWidth, maxPx / img.naturalHeight);
       const w = Math.max(1, Math.round(img.naturalWidth * scale));
       const h = Math.max(1, Math.round(img.naturalHeight * scale));
       const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) {
-        resolve(trimmed);
+        resolve(loaded);
         return;
       }
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
+      const id = ctx.getImageData(0, 0, w, h);
+      const d = id.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i];
+        const g = d[i + 1];
+        const b = d[i + 2];
+        const a = d[i + 3];
+        if (pixelIsEmptyMargin(r, g, b, a)) {
+          d[i] = 255;
+          d[i + 1] = 255;
+          d[i + 2] = 255;
+          d[i + 3] = 255;
+        }
+      }
+      ctx.putImageData(id, 0, 0);
       resolve({ dataUrl: canvas.toDataURL('image/png'), width: w, height: h });
     };
-    img.onerror = () => resolve(trimmed);
-    img.src = trimmed.dataUrl;
+    img.onerror = () => resolve(loaded);
+    img.src = loaded.dataUrl;
   });
+}
+
+/** Logo for PDF — trim square padding, flatten black to white, keep full trio width. */
+async function prepareLogoForPdf(loaded: LoadedImage): Promise<LoadedImage> {
+  const trimmed = await trimEmptyMargins(loaded);
+  return flattenLogoOnWhite(trimmed);
 }
 
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
@@ -322,8 +343,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 72;
-  const maxH = 22;
+  // Wide brand trio (~2.4:1) — Corporate, Recruitment, Events in one row
+  const maxW = 86;
+  const maxH = 34;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
