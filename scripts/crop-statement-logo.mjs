@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * Download brand trio from Shopify CDN, crop the middle row, write a small
- * same-origin fallback at public/statement-brand-trio.png.
+ * Download Shopify brand_trio_image.png and crop the three-logo row for statements.
  */
 import fs from 'fs';
 import path from 'path';
@@ -11,32 +10,43 @@ import { PNG } from 'pngjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const out = path.join(root, 'public/statement-brand-trio.png');
+const sourceOut = path.join(root, 'public/statement-brand-trio-source.png');
 
 const SHOPIFY_URL =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
+
+/** Three-logo row on the 1000×1000 Shopify file (not the large mark at the top). */
+const CROP_1000 = { x0: 118, x1: 818, y0: 205, y1: 265 };
 
 function isInk(r, g, b, a) {
   return a >= 20 && !(r <= 12 && g <= 12 && b <= 12);
 }
 
-function boundsForSource(width) {
-  if (width <= 600) return { x0: 59, x1: 411, y0: 95, y1: 155 };
-  return { x0: 118, x1: 822, y0: 100, y1: 200 };
+function scaleBounds(width, height, bounds) {
+  const sx = width / 1000;
+  const sy = height / 1000;
+  return {
+    x0: Math.round(bounds.x0 * sx),
+    x1: Math.round(bounds.x1 * sx),
+    y0: Math.round(bounds.y0 * sy),
+    y1: Math.round(bounds.y1 * sy),
+  };
 }
 
 async function loadSource() {
-  const local = path.join(root, 'public/statement-brand-trio-source.png');
-  if (fs.existsSync(local)) {
-    return { buf: fs.readFileSync(local), from: 'statement-brand-trio-source.png' };
-  }
   const res = await fetch(SHOPIFY_URL);
   if (!res.ok) throw new Error(`Shopify fetch failed: ${res.status}`);
-  return { buf: Buffer.from(await res.arrayBuffer()), from: 'Shopify CDN' };
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(sourceOut, buf);
+  return buf;
 }
 
-const { buf, from } = await loadSource();
+const buf = fs.existsSync(sourceOut)
+  ? fs.readFileSync(sourceOut)
+  : await loadSource();
+
 const input = PNG.sync.read(buf);
-const { x0, x1, y0, y1 } = boundsForSource(input.width);
+const { x0, x1, y0, y1 } = scaleBounds(input.width, input.height, CROP_1000);
 const cw = x1 - x0 + 1;
 const ch = y1 - y0 + 1;
 const output = new PNG({ width: cw, height: ch });
@@ -64,4 +74,6 @@ for (let y = 0; y < ch; y++) {
 }
 
 fs.writeFileSync(out, PNG.sync.write(output));
-console.log(`OK ${cw}×${ch} from ${from} → ${out} (${fs.statSync(out).size} bytes)`);
+console.log(
+  `OK ${cw}×${ch} (crop y ${y0}-${y1}) → ${out} (${fs.statSync(out).size} bytes)`,
+);

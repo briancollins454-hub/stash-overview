@@ -2,7 +2,6 @@
 
 import type { OpenItemLine, OpenItemStatement } from './openItemStatement';
 import {
-  BRAND_TRIO_LOGO_FALLBACK,
   BRAND_TRIO_LOGO_SIZE,
   BRAND_TRIO_LOGO_URL,
   STATEMENT_COLORS,
@@ -194,133 +193,17 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
-/** Crop bounds for the three-logo row on the 1000×1000 Shopify asset (not the large top mark). */
-function trioCropRect(naturalW: number, naturalH: number): { x0: number; y0: number; sw: number; sh: number } {
-  const refW = 1000;
-  const refH = 1000;
-  const sx = naturalW / refW;
-  const sy = naturalH / refH;
-  const x0 = Math.round(118 * sx);
-  const y0 = Math.round(100 * sy);
-  const sw = Math.round(705 * sx);
-  const sh = Math.round(101 * sy);
-  return { x0, y0, sw, sh };
-}
-
-const MAX_LOGO_EMBED_PX = 600;
-const LOGO_JPEG_QUALITY = 0.82;
-
-function flattenLogoPixels(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const id = ctx.getImageData(0, 0, w, h);
-  const d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i];
-    const g = d[i + 1];
-    const b = d[i + 2];
-    const a = d[i + 3];
-    const ink = a >= 20 && !(r <= 12 && g <= 12 && b <= 12);
-    if (!ink) {
-      d[i] = 255;
-      d[i + 1] = 255;
-      d[i + 2] = 255;
-      d[i + 3] = 255;
-    } else {
-      d[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(id, 0, 0);
-}
-
-function isPrecroppedTrio(w: number, h: number): boolean {
-  return h > 0 && w / h >= 4 && h <= 150 && w <= 900;
-}
-
-/** Crop trio row, white background, JPEG — keeps PDF attachments under Vercel size limits. */
-async function trimAndCompressBrandLogo(loaded: LoadedImage): Promise<LoadedImage | null> {
-  if (typeof document === 'undefined') return loaded;
-
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const srcW = img.naturalWidth || loaded.width;
-        const srcH = img.naturalHeight || loaded.height;
-        const precropped = isPrecroppedTrio(srcW, srcH);
-
-        const crop = precropped
-          ? { x0: 0, y0: 0, sw: srcW, sh: srcH }
-          : trioCropRect(srcW, srcH);
-
-        const { x0, y0, sw, sh } = crop;
-        if (sw < 8 || sh < 8) {
-          resolve(null);
-          return;
-        }
-
-        let outW = sw;
-        let outH = sh;
-        if (outW > MAX_LOGO_EMBED_PX) {
-          outH = Math.max(1, Math.round(outH * (MAX_LOGO_EMBED_PX / outW)));
-          outW = MAX_LOGO_EMBED_PX;
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = outW;
-        canvas.height = outH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(null);
-          return;
-        }
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, outW, outH);
-        ctx.drawImage(img, x0, y0, sw, sh, 0, 0, outW, outH);
-        if (!precropped) {
-          try {
-            flattenLogoPixels(ctx, outW, outH);
-          } catch {
-            /* tainted canvas */
-          }
-        }
-
-        resolve({
-          dataUrl: canvas.toDataURL('image/jpeg', LOGO_JPEG_QUALITY),
-          width: outW,
-          height: outH,
-        });
-      } catch {
-        resolve(null);
-      }
-    };
-    img.onerror = () => resolve(null);
-    img.src = loaded.dataUrl;
-  });
-}
-
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-
-  const candidates = [
-    opts.brandLogoUrl,
-    BRAND_TRIO_LOGO_FALLBACK,
-    BRAND_TRIO_LOGO_URL,
-  ].filter((u): u is string => Boolean(u));
-
-  for (const url of candidates) {
-    imageCache.delete(`dim:${resolveAssetUrl(url)}`);
-    const loaded = await loadImageWithDimensions(url);
-    if (!loaded) continue;
-
-    const trimmed = await trimAndCompressBrandLogo(loaded);
-    const final = trimmed || loaded;
-    return {
-      ...final,
-      width: final.width > 1 ? final.width : BRAND_TRIO_LOGO_SIZE.width,
-      height: final.height > 1 ? final.height : BRAND_TRIO_LOGO_SIZE.height,
-    };
-  }
-
-  return null;
+  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
+  imageCache.delete(`dim:${resolveAssetUrl(url)}`);
+  const loaded = await loadImageWithDimensions(url);
+  if (!loaded) return null;
+  return {
+    dataUrl: loaded.dataUrl,
+    width: BRAND_TRIO_LOGO_SIZE.width,
+    height: BRAND_TRIO_LOGO_SIZE.height,
+  };
 }
 
 /** Fit image in box preserving aspect ratio (mm). */
@@ -346,9 +229,8 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Wide trio ~7:1 — keep compact so metadata fits underneath on the right
-  const maxW = 68;
-  const maxH = 12;
+  const maxW = 72;
+  const maxH = 10;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
