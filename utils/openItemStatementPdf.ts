@@ -2,7 +2,8 @@
 
 import type { OpenItemLine, OpenItemStatement } from './openItemStatement';
 import {
-  BRAND_TRIO_LOGO_URL,
+  BRAND_TRIO_LOGO_CDN,
+  BRAND_TRIO_LOGO_PATH,
   STATEMENT_COLORS,
   STATEMENT_COMPANY,
   STATEMENT_PAYMENT,
@@ -16,7 +17,7 @@ export interface StatementPdfOptions {
   website?: string;
   payment?: typeof STATEMENT_PAYMENT;
   brandLogoUrl?: string;
-  /** Serverless email — skip CDN logo (avoids multi‑MB PDFs on Vercel). */
+  /** Emergency only — omit logo if attachment still exceeds size limits after compression. */
   skipBrandLogo?: boolean;
 }
 
@@ -80,12 +81,60 @@ async function loadImageServer(url: string): Promise<LoadedImage | null> {
   }
 }
 
+function resolveAssetUrl(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  if (typeof window !== 'undefined') {
+    const path = url.startsWith('/') ? url : `/${url}`;
+    return `${window.location.origin}${path}`;
+  }
+  return url;
+}
+
+/** Browser — draw to canvas (works for same-origin; avoids brittle fetch+CORS). */
+async function loadImageViaCanvas(url: string): Promise<LoadedImage | null> {
+  if (typeof window === 'undefined') return null;
+  const src = resolveAssetUrl(url);
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (img.naturalWidth < 1 || img.naturalHeight < 1) {
+        resolve(null);
+        return;
+      }
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        resolve({
+          dataUrl: canvas.toDataURL('image/png'),
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
 async function loadImageWithDimensions(url: string): Promise<LoadedImage | null> {
+  const resolved = resolveAssetUrl(url);
   if (typeof window === 'undefined') {
-    return loadImageServer(url);
+    return loadImageServer(resolved);
   }
 
-  const cacheKey = `dim:${url}`;
+  const cacheKey = `dim:${resolved}`;
   const cached = imageCache.get(cacheKey);
   if (cached === null) return null;
   if (cached && cached.startsWith('{')) {
@@ -96,8 +145,14 @@ async function loadImageWithDimensions(url: string): Promise<LoadedImage | null>
     }
   }
 
+  const viaCanvas = await loadImageViaCanvas(resolved);
+  if (viaCanvas) {
+    imageCache.set(cacheKey, JSON.stringify(viaCanvas));
+    return viaCanvas;
+  }
+
   try {
-    const res = await fetch(url, { mode: 'cors' });
+    const res = await fetch(resolved, { mode: 'cors' });
     if (!res.ok) {
       imageCache.set(cacheKey, null);
       return null;
@@ -137,6 +192,53 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
+/** Shrink embedded bitmaps so emailed PDFs stay under Vercel request limits. */
+async function compressImageForPdf(
+  loaded: LoadedImage,
+  maxPx = 520,
+  quality = 0.82,
+): Promise<LoadedImage> {
+  if (typeof window === 'undefined' || loaded.dataUrl.length < 60_000) {
+    return loaded;
+  }
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / img.naturalWidth, maxPx / img.naturalHeight);
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(loaded);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), width: w, height: h });
+    };
+    img.onerror = () => resolve(loaded);
+    img.src = loaded.dataUrl;
+  });
+}
+
+async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
+  if (opts.skipBrandLogo) return null;
+
+  const candidates = [
+    opts.brandLogoUrl,
+    BRAND_TRIO_LOGO_PATH,
+    BRAND_TRIO_LOGO_CDN,
+  ].filter((u): u is string => Boolean(u?.trim()));
+
+  for (const raw of candidates) {
+    const loaded = await loadImageWithDimensions(raw);
+    if (loaded) return compressImageForPdf(loaded);
+  }
+  return null;
+}
+
 /** Fit image in box preserving aspect ratio (mm). */
 function fitImageMm(
   naturalW: number,
@@ -160,8 +262,8 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 52;
-  const maxH = 26;
+  const maxW = 68;
+  const maxH = 30;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
@@ -316,6 +418,49 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
   return y + 15;
 }
 
+/** Green “Pay Now” JPEG buttons (generated in-browser, small footprint in PDF). */
+function renderPayNowButtonImage(currencyLabel: string): string {
+  if (typeof document === 'undefined') return '';
+  const canvas = document.createElement('canvas');
+  canvas.width = 400;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  const r = 14;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w - r, 0);
+  ctx.quadraticCurveTo(w, 0, w, r);
+  ctx.lineTo(w, h - r);
+  ctx.quadraticCurveTo(w, h, w - r, h);
+  ctx.lineTo(r, h);
+  ctx.quadraticCurveTo(0, h, 0, h - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#b5dc6a');
+  grad.addColorStop(1, '#6a9e32');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 28px Helvetica, Arial, sans-serif';
+  ctx.fillText('PAY NOW', w / 2, 40);
+  ctx.font = '600 18px Helvetica, Arial, sans-serif';
+  ctx.fillText(currencyLabel, w / 2, 72);
+
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
+function buildPayNowButtonImages(links: StripePayLink[]): string[] {
+  return links.map(l => renderPayNowButtonImage(l.currency));
+}
+
 function drawPayNowButton(
   doc: import('jspdf').jsPDF,
   x: number,
@@ -342,15 +487,28 @@ function drawPayNowButtons(
   doc: import('jspdf').jsPDF,
   y: number,
   links: StripePayLink[],
+  buttonImages: string[],
 ): number {
-  const btnW = 44;
-  const btnH = 14;
-  const gap = 8;
+  const boxW = PAGE_W - MARGIN * 2;
+  const pad = 3;
+  const gap = 6;
+  const btnW = (boxW - pad * 2 - gap) / 2;
+  const btnH = 16;
   const btnY = y;
 
   links.forEach((link, i) => {
-    const bx = MARGIN + 3 + i * (btnW + gap);
-    drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
+    const bx = MARGIN + pad + i * (btnW + gap);
+    const img = buttonImages[i];
+    if (img) {
+      try {
+        doc.addImage(img, 'JPEG', bx, btnY, btnW, btnH);
+      } catch {
+        drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
+      }
+    } else {
+      drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
+    }
+    doc.link(bx, btnY, btnW, btnH, { url: link.url });
   });
 
   return btnY + btnH + 4;
@@ -397,11 +555,12 @@ function drawCardPaymentSection(
   doc: import('jspdf').jsPDF,
   y: number,
   payment: typeof STATEMENT_PAYMENT,
+  buttonImages: string[],
 ): number {
   const boxW = PAGE_W - MARGIN * 2;
   const startY = y;
   const pad = 3;
-  const boxH = 34;
+  const boxH = 40;
   const innerTop = startY + 5;
 
   doc.setFillColor(248, 252, 240);
@@ -419,7 +578,7 @@ function drawCardPaymentSection(
   doc.setTextColor(50, 50, 50);
   doc.text(payment.cardIntro, MARGIN + pad, innerTop + 5);
 
-  drawPayNowButtons(doc, innerTop + 11, payment.stripeLinks);
+  drawPayNowButtons(doc, innerTop + 11, payment.stripeLinks, buttonImages);
 
   return startY + boxH + 4;
 }
@@ -428,8 +587,9 @@ function drawPaymentSection(
   doc: import('jspdf').jsPDF,
   y: number,
   payment: typeof STATEMENT_PAYMENT,
+  buttonImages: string[],
 ): number {
-  let cy = drawCardPaymentSection(doc, y, payment);
+  let cy = drawCardPaymentSection(doc, y, payment, buttonImages);
   cy = drawBankTransferBox(doc, cy + 2, payment);
   return cy;
 }
@@ -439,6 +599,7 @@ function drawStatementFooter(
   startY: number,
   statement: OpenItemStatement,
   payment: typeof STATEMENT_PAYMENT,
+  buttonImages: string[],
 ): number {
   let y = startY;
   doc.setFont('helvetica', 'bold');
@@ -447,7 +608,7 @@ function drawStatementFooter(
   doc.text('Aging summary', MARGIN, y);
   y += 4;
   y = drawAgingBar(doc, y, statement.aging);
-  y = drawPaymentSection(doc, y + 2, payment);
+  y = drawPaymentSection(doc, y + 2, payment, buttonImages);
   return y;
 }
 
@@ -540,16 +701,16 @@ function redrawAllFooters(doc: import('jspdf').jsPDF) {
   }
 }
 
-const FOOTER_SECTION_HEIGHT = 78;
+const FOOTER_SECTION_HEIGHT = 84;
 
 async function renderOpenItemStatementPdf(
   statement: OpenItemStatement,
   opts: StatementPdfOptions = {},
 ): Promise<import('jspdf').jsPDF> {
   const { jsPDF, autoTable } = await loadPdfLibs();
-  const brandLogo = opts.skipBrandLogo
-    ? null
-    : await loadImageWithDimensions(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
+  const payment = opts.payment || STATEMENT_PAYMENT;
+  const brandLogo = await prepareBrandLogo(opts);
+  const buttonImages = buildPayNowButtonImages(payment.stripeLinks);
 
   const company = {
     name: opts.companyName || STATEMENT_COMPANY.name,
@@ -557,7 +718,6 @@ async function renderOpenItemStatementPdf(
   };
   const accountsEmail = opts.accountsEmail || STATEMENT_COMPANY.email;
   const website = opts.website || STATEMENT_COMPANY.website;
-  const payment = opts.payment || STATEMENT_PAYMENT;
 
   const FIRST_PAGE_LINES = 14;
   const CONT_PAGE_LINES = 24;
@@ -585,7 +745,7 @@ async function renderOpenItemStatementPdf(
     footerY = MARGIN;
   }
 
-  drawStatementFooter(doc, footerY, statement, payment);
+  drawStatementFooter(doc, footerY, statement, payment, buttonImages);
   redrawAllFooters(doc);
   return doc;
 }

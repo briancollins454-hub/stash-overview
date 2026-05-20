@@ -257,7 +257,6 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
         const { base64 } = await generateOpenItemStatementPdfBase64(statement, {
           companyName,
           accountsEmail,
-          skipBrandLogo: true,
         });
         if (base64 && base64.length <= MAX_ATTACH_BASE64) {
           attachments = [{ filename: attachName, content: base64 }];

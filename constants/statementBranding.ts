@@ -8,8 +8,14 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-export const BRAND_TRIO_LOGO_URL =
+/** Same-origin asset (reliable in PDF) — see public/statement-brand-trio.png */
+export const BRAND_TRIO_LOGO_PATH = '/statement-brand-trio.png';
+
+/** Shopify CDN fallback if the bundled file is missing */
+export const BRAND_TRIO_LOGO_CDN =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
+
+export const BRAND_TRIO_LOGO_URL = BRAND_TRIO_LOGO_PATH;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
