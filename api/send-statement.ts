@@ -1,16 +1,42 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
-import {
-  buildStatementEmailHtml,
-  buildStatementEmailTemplate,
-  type OpenItemStatement,
-} from '../utils/openItemStatement';
-import {
-  generateOpenItemStatementPdfBase64,
-  statementPdfFilename,
-} from '../utils/openItemStatementPdf';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Minimal shape sent from the client (avoids static imports from ../utils at cold start). */
+interface StatementPayload {
+  customerName: string;
+  customerId: string;
+  customer: {
+    accountId: string;
+    displayName: string;
+    email: string | null;
+    phone: string | null;
+    addressLines: string[];
+  };
+  asAtDate: string;
+  asAtDateShort: string;
+  statementNumber: string;
+  customerAddressLines: string[];
+  lines: Array<{
+    invoiceId: string;
+    docNumber: string;
+    txnDateShort: string;
+    dueDateShort: string;
+    isOverdue: boolean;
+    daysPastDue: number;
+    amountDue: number;
+  }>;
+  totalOutstanding: number;
+  aging: {
+    current: number;
+    pastDue1_30: number;
+    pastDue31_60: number;
+    pastDue61_90: number;
+    pastDue90Plus: number;
+    total: number;
+  };
+}
 
 function cors(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
@@ -26,9 +52,9 @@ function cors(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
 }
 
-function isOpenItemStatement(v: unknown): v is OpenItemStatement {
+function isStatementPayload(v: unknown): v is StatementPayload {
   if (!v || typeof v !== 'object') return false;
-  const s = v as OpenItemStatement;
+  const s = v as StatementPayload;
   return (
     typeof s.customerName === 'string'
     && Array.isArray(s.lines)
@@ -36,6 +62,16 @@ function isOpenItemStatement(v: unknown): v is OpenItemStatement {
     && s.customer
     && typeof s.customer.displayName === 'string'
   );
+}
+
+function statementPdfFilename(customerName: string): string {
+  const date = new Date().toISOString().slice(0, 10);
+  const safe = customerName
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60) || 'Customer';
+  return `Statement_${safe}_${date}.pdf`;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -56,24 +92,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!to || !EMAIL_RE.test(to)) {
     return res.status(400).json({ error: 'Valid recipient email required' });
   }
-  if (!isOpenItemStatement(statement)) {
+  if (!isStatementPayload(statement)) {
     return res.status(400).json({ error: 'Invalid statement payload' });
   }
 
-  const emailOpts = { companyName, accountsEmail, contactName, attachPdf: true as const };
-  const template = buildStatementEmailTemplate(statement, to, emailOpts);
-  const html = buildStatementEmailHtml(statement, emailOpts);
-  const filename = statementPdfFilename(statement.customerName)
-    .replace(/[^\w.\- ]+/g, '_')
-    .replace(/\s+/g, '_');
-
   try {
-    const { base64 } = await generateOpenItemStatementPdfBase64(statement, {
+    const emailMod = await import('../utils/openItemStatement.js');
+    const pdfMod = await import('../utils/openItemStatementPdf.js');
+
+    const emailOpts = {
       companyName,
       accountsEmail,
+      contactName,
+      attachPdf: true as const,
+      pdfFilename: statementPdfFilename(statement.customerName),
+    };
+    const template = emailMod.buildStatementEmailTemplate(statement, to, emailOpts);
+    const html = emailMod.buildStatementEmailHtml(statement, emailOpts);
+    const filename = statementPdfFilename(statement.customerName);
+
+    const { base64 } = await pdfMod.generateOpenItemStatementPdfBase64(statement, {
+      companyName,
+      accountsEmail,
+      skipBrandLogo: true,
     });
     if (!base64) {
       return res.status(500).json({ error: 'Failed to generate statement PDF' });
+    }
+
+    const approxKb = Math.round((base64.length * 3) / 4 / 1024);
+    if (approxKb > 3500) {
+      return res.status(500).json({
+        error: `Statement PDF too large to email (${approxKb} KB). Download the PDF and send from Outlook.`,
+      });
     }
 
     const fromAddress = process.env.STATEMENT_FROM_EMAIL
@@ -95,6 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true, id: data?.id });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to send statement';
+    console.error('[send-statement]', message, err);
     return res.status(500).json({ error: message });
   }
 }

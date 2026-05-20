@@ -4,7 +4,8 @@
     "api/inventory.ts": { "maxDuration": 60 },
     "api/stock.ts": { "maxDuration": 60 },
     "api/shopify.ts": { "maxDuration": 60 },
-    "api/cron/refresh-finance.ts": { "maxDuration": 60 }
+    "api/cron/refresh-finance.ts": { "maxDuration": 60 },
+    "api/send-statement.ts": { "maxDuration": 60, "memory": 1024 }
   },
   "crons": [
     {

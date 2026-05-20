@@ -16,6 +16,8 @@ export interface StatementPdfOptions {
   website?: string;
   payment?: typeof STATEMENT_PAYMENT;
   brandLogoUrl?: string;
+  /** Serverless email — skip CDN logo (avoids multi‑MB PDFs on Vercel). */
+  skipBrandLogo?: boolean;
 }
 
 const MARGIN = 14;
@@ -545,7 +547,9 @@ async function renderOpenItemStatementPdf(
   opts: StatementPdfOptions = {},
 ): Promise<import('jspdf').jsPDF> {
   const { jsPDF, autoTable } = await loadPdfLibs();
-  const brandLogo = await loadImageWithDimensions(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
+  const brandLogo = opts.skipBrandLogo
+    ? null
+    : await loadImageWithDimensions(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
 
   const company = {
     name: opts.companyName || STATEMENT_COMPANY.name,
@@ -559,7 +563,7 @@ async function renderOpenItemStatementPdf(
   const CONT_PAGE_LINES = 24;
   const pageChunks = chunkLines(statement.lines, FIRST_PAGE_LINES, CONT_PAGE_LINES);
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
 
   pageChunks.forEach((chunk, pageIndex) => {
     if (pageIndex > 0) doc.addPage();
@@ -593,8 +597,16 @@ export async function generateOpenItemStatementPdfBase64(
 ): Promise<{ filename: string; base64: string }> {
   const doc = await renderOpenItemStatementPdf(statement, opts);
   const filename = statementPdfFilename(statement.customerName);
-  const dataUri = doc.output('datauristring');
-  const base64 = dataUri.split(',')[1] || '';
+  const bytes = doc.output('arraybuffer') as ArrayBuffer;
+  let base64: string;
+  if (typeof Buffer !== 'undefined') {
+    base64 = Buffer.from(bytes).toString('base64');
+  } else {
+    const u8 = new Uint8Array(bytes);
+    let binary = '';
+    for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+    base64 = btoa(binary);
+  }
   if (!base64) throw new Error('Failed to generate PDF');
   return { filename, base64 };
 }
