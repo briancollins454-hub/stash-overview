@@ -203,7 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // If this is a browser redirect (GET with code), redirect to the app
       if (req.method === 'GET') {
-        res.setHeader('Location', '/?qbo=connected');
+        res.setHeader('Location', 'https://stashoverview.co.uk/?tab=finance&qbo=connected');
         return res.status(302).end();
       }
 

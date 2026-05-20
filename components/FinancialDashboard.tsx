@@ -398,7 +398,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     const params = new URLSearchParams(window.location.search);
     if (params.get('qbo') === 'connected') {
       setQbServerConfigured(true);
-      window.history.replaceState({}, '', window.location.pathname);
+      setQbError(null);
+      window.history.replaceState({}, '', '/?tab=finance');
     }
   }, []);
 

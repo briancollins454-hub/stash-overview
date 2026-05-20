@@ -5,7 +5,9 @@
     "api/stock.ts": { "maxDuration": 60 },
     "api/shopify.ts": { "maxDuration": 60 },
     "api/cron/refresh-finance.ts": { "maxDuration": 60 },
-    "api/send-statement.ts": { "maxDuration": 60, "memory": 1024 }
+    "api/send-statement.ts": { "maxDuration": 60, "memory": 1024 },
+    "api/qbo/callback.ts": { "maxDuration": 60 },
+    "api/qbo-auth/index.ts": { "maxDuration": 60 }
   },
   "crons": [
     {
