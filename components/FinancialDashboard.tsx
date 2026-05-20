@@ -4,8 +4,9 @@ import {
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
   ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
-  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign
+  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail
 } from 'lucide-react';
+import OpenItemStatementModal from './OpenItemStatementModal';
 // exceljs is ~800 KB and only used inside exportDetailedCSV. Import
 // it dynamically so it isn't part of this chunk's initial payload —
 // that drops the FinancialDashboard chunk from ~1 MB to the ~220 KB
@@ -65,6 +66,13 @@ interface QBCustomerCredit {
   name: string;
   balance: number;
   creditAmount: number;
+}
+
+interface QBCustomerDirectoryEntry {
+  id: string;
+  name: string;
+  email: string | null;
+  balance: number;
 }
 
 interface APVendorSummary {
@@ -226,6 +234,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const [qbBills, setQbBills] = useState<QBBill[]>([]);
   const [qbInvoices, setQbInvoices] = useState<QBInvoice[]>([]);
   const [qbCredits, setQbCredits] = useState<QBCustomerCredit[]>([]);
+  const [qbCustomerDirectory, setQbCustomerDirectory] = useState<QBCustomerDirectoryEntry[]>([]);
+  const [statementCustomer, setStatementCustomer] = useState<{ customerId: string; name: string } | null>(null);
   const [paymentRequested, setPaymentRequested] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('stash_payment_requested') || '{}'); } catch { return {}; }
   });
@@ -243,16 +253,18 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     if (settings.qboAccessToken) body.accessToken = settings.qboAccessToken;
     if (settings.qboBaseUrl) body.baseUrl = settings.qboBaseUrl;
     try {
-      const [apRes, arRes, credRes] = await Promise.all([
+      const [apRes, arRes, credRes, dirRes] = await Promise.all([
         fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ap-aging' }) }),
         fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ar-balance' }) }),
         fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'customer-credits' }) }),
+        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'customer-directory' }) }),
       ]);
-      const [apData, arData, credData] = await Promise.all([apRes.json(), arRes.json(), credRes.json()]);
+      const [apData, arData, credData, dirData] = await Promise.all([apRes.json(), arRes.json(), credRes.json(), dirRes.json()]);
       if (apData.ok) setQbBills(apData.bills || []);
       else setQbError(apData.error || 'A/P query failed');
       if (arData.ok) setQbInvoices(arData.invoices || []);
       if (credData.ok) setQbCredits(credData.customers || []);
+      if (dirData.ok) setQbCustomerDirectory(dirData.customers || []);
       setQbLastSynced(new Date().toISOString());
     } catch (e: any) {
       setQbError(e.message || 'Failed to fetch QuickBooks data');
@@ -340,6 +352,20 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   // --- QB A/R total for cross-check ---
   const qbARTotal = useMemo(() => qbInvoices.reduce((s, inv) => s + inv.balance, 0), [qbInvoices]);
   const qbCreditTotal = useMemo(() => qbCredits.reduce((s, c) => s + c.creditAmount, 0), [qbCredits]);
+
+  const normCustomerName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+
+  const qbEmailByCustomerName = useMemo(() => {
+    const map = new Map<string, string>();
+    qbCustomerDirectory.forEach(c => {
+      if (c.email) map.set(normCustomerName(c.name), c.email);
+    });
+    return map;
+  }, [qbCustomerDirectory]);
+
+  const resolveQbEmail = useCallback((customerName: string) => {
+    return qbEmailByCustomerName.get(normCustomerName(customerName)) || '';
+  }, [qbEmailByCustomerName]);
 
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
@@ -1381,6 +1407,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                   {account.outstandingJobCount > 0 ? <span className="text-red-500 font-bold">{account.outstandingJobCount}</span> : ''}{account.outstandingJobCount > 0 ? '/' : ''}{account.jobCount}
                 </div>
                 <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                  {qbConfigured && (
+                    <button
+                      onClick={() => setStatementCustomer({ customerId: account.customerId, name: account.name })}
+                      className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600 text-teal-400' : 'hover:bg-teal-50 text-teal-600'}`}
+                      title="Open-item statement + email template (QuickBooks)"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button onClick={() => { setEditingNote(account.customerId); setNoteInput(priorityNotes[account.customerId] || ''); }}
                     className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600 text-gray-400' : 'hover:bg-gray-200 text-gray-400'}`} title="Add/edit note">
                     <FileText className="w-3.5 h-3.5" />
@@ -1408,6 +1443,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                 <div className={`px-4 py-3 border-b ${isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-gray-50/80 border-gray-100'}`}>
                   {/* Customer summary bar */}
                   <div className="flex flex-wrap gap-4 mb-3">
+                    {resolveQbEmail(account.name) && (
+                      <div className="text-[10px]">
+                        <span className={isDark ? 'text-gray-500' : 'text-gray-400'}>QBO email:</span>{' '}
+                        <span className="font-bold text-teal-600 dark:text-teal-400">{resolveQbEmail(account.name)}</span>
+                      </div>
+                    )}
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Total Billed:</span> <span className="font-bold">{formatCurrency(account.totalBillable)}</span></div>
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Paid:</span> <span className="font-bold text-green-600">{formatCurrency(account.totalPaid)}</span></div>
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Outstanding:</span> <span className="font-bold text-red-600">{formatCurrency(account.totalOutstanding)}</span></div>
@@ -1881,6 +1922,16 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       <div className={`text-center text-[10px] ${isDark ? 'text-gray-600' : 'text-gray-400'}`}>
         {allJobs.length.toLocaleString()} Deco orders loaded · {customerAccounts.length} unique customers · {hasLoaded ? 'Full history from 2020' : 'Showing cached data (loading full history...)'}
       </div>
+
+      <OpenItemStatementModal
+        isOpen={!!statementCustomer}
+        onClose={() => setStatementCustomer(null)}
+        customerName={statementCustomer?.name || ''}
+        customerId={statementCustomer?.customerId || ''}
+        qbInvoices={qbInvoices}
+        defaultEmail={statementCustomer ? resolveQbEmail(statementCustomer.name) : ''}
+        isDark={isDark}
+      />
     </div>
   );
 };

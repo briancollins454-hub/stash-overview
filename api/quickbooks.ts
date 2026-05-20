@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
  *
  * POST /api/quickbooks
- * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'test-connection' | 'diagnose' }
+ * Body: { action: 'ap-aging' | 'ar-balance' | 'customer-credits' | 'customer-directory' | 'test-connection' | 'diagnose' }
  *
  * Credentials are resolved in order (production):
  *   1. Stored OAuth tokens in Supabase (from /api/qbo-auth flow)
@@ -273,7 +273,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ ok: true, customers: results, count: results.length, totalCredit });
     }
 
-    return res.status(400).json({ error: `Unknown action: ${action}. Use 'ap-aging', 'ar-balance', 'customer-credits', or 'test-connection'.` });
+    // Customer display names + primary email (for open-item statement chase emails)
+    if (action === 'customer-directory') {
+      const result = await runQuery('SELECT Id, DisplayName, PrimaryEmailAddr, Balance FROM Customer MAXRESULTS 1000');
+      if (!result.ok) return res.status(result.status).json({ error: `QBO customer directory failed (${result.status})`, detail: result.text.slice(0, 500) });
+
+      const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
+
+      const results = customers.map(c => {
+        const emailObj = c.PrimaryEmailAddr as { Address?: string } | undefined;
+        const email = typeof emailObj?.Address === 'string' ? emailObj.Address.trim() : '';
+        return {
+          id: String(c.Id ?? ''),
+          name: typeof c.DisplayName === 'string' ? c.DisplayName : '',
+          email: email || null,
+          balance: typeof c.Balance === 'number' ? c.Balance : Number(c.Balance) || 0,
+        };
+      });
+
+      return res.json({ ok: true, customers: results, count: results.length });
+    }
+
+    return res.status(400).json({ error: `Unknown action: ${action}. Use 'ap-aging', 'ar-balance', 'customer-credits', 'customer-directory', or 'test-connection'.` });
 
   } catch (err: any) {
     return res.status(500).json({ error: err.message || 'QuickBooks API call failed' });
