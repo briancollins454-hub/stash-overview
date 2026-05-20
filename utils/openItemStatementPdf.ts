@@ -2,7 +2,8 @@
 
 import type { OpenItemLine, OpenItemStatement } from './openItemStatement';
 import {
-  BRAND_TRIO_LOGO_PATH,
+  BRAND_TRIO_LOGO_SIZE,
+  BRAND_TRIO_LOGO_URL,
   STATEMENT_COLORS,
   STATEMENT_COMPANY,
   STATEMENT_PAYMENT,
@@ -193,9 +194,15 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
 
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-  // Pre-cropped wide PNG in public/ — embed as-is (no runtime resize/crop/flatten).
-  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_PATH;
-  return loadImageWithDimensions(url);
+  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
+  imageCache.delete(`dim:${resolveAssetUrl(url)}`);
+  const loaded = await loadImageWithDimensions(url);
+  if (!loaded) return null;
+  return {
+    ...loaded,
+    width: loaded.width > 1 ? loaded.width : BRAND_TRIO_LOGO_SIZE.width,
+    height: loaded.height > 1 ? loaded.height : BRAND_TRIO_LOGO_SIZE.height,
+  };
 }
 
 /** Fit image in box preserving aspect ratio (mm). */
@@ -221,9 +228,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Wide brand trio (~2.4:1) — Corporate, Recruitment, Events; use full width, keep aspect
-  const maxW = PAGE_W - MARGIN - 52;
-  const maxH = 32;
+  // Wide trio ~2.4:1 — all three marks must stay visible (do not use a square box)
+  const maxW = 118;
+  const maxH = 28;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);

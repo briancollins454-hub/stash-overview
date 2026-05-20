@@ -8,10 +8,14 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-/** Same-origin asset (reliable in PDF) — see public/statement-brand-trio.png */
-export const BRAND_TRIO_LOGO_PATH = '/statement-brand-trio.png?v=4';
+/** Bundled wide trio: Corporate + Recruitment + Events (767×325). */
+export const BRAND_TRIO_LOGO_URL = new URL(
+  '../public/statement-brand-trio.png',
+  import.meta.url,
+).href;
 
-export const BRAND_TRIO_LOGO_URL = BRAND_TRIO_LOGO_PATH;
+/** Fallback dimensions if the browser omits naturalWidth (must match cropped PNG). */
+export const BRAND_TRIO_LOGO_SIZE = { width: 767, height: 325 } as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',

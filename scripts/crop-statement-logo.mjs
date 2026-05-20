@@ -8,13 +8,14 @@ import { PNG } from 'pngjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 
-const userAsset = path.join(
-  process.env.HOME,
-  '.cursor/projects/Users-briansinclair-stash-overview/assets/brand_trio_image__1_-f47375a3-fe6a-483e-bded-408dbf5e87c9.png',
-);
-const sources = [userAsset, path.join(root, 'public/statement-brand-trio.png')].filter(p =>
-  fs.existsSync(p),
-);
+const sources = [
+  path.join(root, 'public/statement-brand-trio-source.png'),
+  path.join(
+    process.env.HOME,
+    '.cursor/projects/Users-briansinclair-stash-overview/assets/brand_trio_image__1_-f47375a3-fe6a-483e-bded-408dbf5e87c9.png',
+  ),
+  path.join(root, 'public/statement-brand-trio.png'),
+].filter(p => fs.existsSync(p));
 
 const src = sources[0];
 const out = path.join(root, 'public/statement-brand-trio.png');
