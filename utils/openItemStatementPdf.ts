@@ -305,11 +305,11 @@ function drawPayNowButton(
   doc.roundedRect(x, y, w, h, 2.5, 2.5, 'FD');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.text('PAY NOW', x + w / 2, y + h / 2 - 0.5, { align: 'center', baseline: 'middle' });
-  doc.setFontSize(9);
+  doc.setFontSize(11);
+  doc.text('PAY NOW', x + w / 2, y + 5.5, { align: 'center' });
   doc.setFont('helvetica', 'normal');
-  doc.text(link.currency, x + w / 2, y + h - 3.5, { align: 'center' });
+  doc.setFontSize(9);
+  doc.text(link.currency, x + w / 2, y + 11, { align: 'center' });
   doc.link(x, y, w, h, { url: link.url });
 }
 
@@ -318,23 +318,17 @@ function drawPayNowButtons(
   y: number,
   links: StripePayLink[],
 ): number {
-  const textX = MARGIN + 3;
   const btnW = 44;
-  const btnH = 12;
+  const btnH = 14;
   const gap = 8;
+  const btnY = y;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...greenText);
-  doc.text('Pay by card', textX, y + 4);
-
-  const btnY = y + 7;
   links.forEach((link, i) => {
     const bx = MARGIN + 3 + i * (btnW + gap);
     drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
   });
 
-  return btnY + btnH + 5;
+  return btnY + btnH + 4;
 }
 
 function drawBankTransferBlock(
@@ -371,21 +365,28 @@ function drawPaymentSection(
   const boxW = PAGE_W - MARGIN * 2;
   const startY = y;
   const pad = 3;
+  const boxH = 50;
 
   doc.setFillColor(248, 252, 240);
   doc.setDrawColor(...green);
   doc.setLineWidth(0.3);
-  doc.rect(MARGIN, startY, boxW, 46, 'FD');
+  doc.rect(MARGIN, startY, boxW, boxH, 'FD');
+
+  const innerTop = startY + 5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...greenText);
+  doc.text('Pay by card', MARGIN + pad, innerTop);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(50, 50, 50);
-  doc.text(payment.cardIntro, MARGIN + pad, startY + 5);
+  doc.text(payment.cardIntro, MARGIN + pad, innerTop + 5);
 
-  let cy = drawPayNowButtons(doc, startY, payment.stripeLinks);
-  cy = drawBankTransferBlock(doc, cy + 2, payment);
+  let cy = drawPayNowButtons(doc, innerTop + 11, payment.stripeLinks);
+  cy = drawBankTransferBlock(doc, cy + 4, payment);
 
-  return cy + 4;
+  return startY + boxH + 4;
 }
 
 function drawStatementFooter(

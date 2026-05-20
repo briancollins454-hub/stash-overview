@@ -29,7 +29,7 @@ export interface StripePayLink {
 }
 
 export const STATEMENT_PAYMENT = {
-  cardIntro: 'Pay securely by card — choose your currency:',
+  cardIntro: 'Choose your currency and click Pay Now:',
   stripeLinks: [
     {
       label: 'Pay Now',
