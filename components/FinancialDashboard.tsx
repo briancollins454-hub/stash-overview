@@ -399,17 +399,47 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     return map;
   }, [qbCustomerDirectory]);
 
-  const resolveQbCustomerInfo = useCallback((customerName: string) => {
-    const qb = qbCustomerByName.get(normCustomerName(customerName));
-    const accountId = qb?.id || '';
+  const qbCustomerById = useMemo(() => {
+    const map = new Map<string, QBCustomerDirectoryEntry>();
+    qbCustomerDirectory.forEach(c => {
+      if (c.id) map.set(c.id, c);
+    });
+    return map;
+  }, [qbCustomerDirectory]);
+
+  const resolveQbCustomerInfo = useCallback((customerName: string, hintQbCustomerId?: string) => {
+    const target = normCustomerName(customerName);
+    let qb: QBCustomerDirectoryEntry | undefined;
+
+    if (hintQbCustomerId) qb = qbCustomerById.get(hintQbCustomerId);
+    if (!qb) qb = qbCustomerByName.get(target);
+    if (!qb) {
+      const inv = qbInvoices.find(i => normCustomerName(i.customerName) === target);
+      if (inv?.customerId) qb = qbCustomerById.get(inv.customerId);
+    }
+    if (!qb) {
+      qb = qbCustomerDirectory.find(c => {
+        const n = normCustomerName(c.name);
+        return n === target || n.includes(target) || target.includes(n);
+      });
+    }
+
+    const displayName = qb?.name || customerName;
+    const street = (qb?.addressLines ?? []).filter(l => {
+      const t = l.trim();
+      return t && normCustomerName(t) !== normCustomerName(displayName);
+    });
+
+    const addressLines: string[] = [displayName, displayName, ...street];
+
     return {
-      accountId,
-      displayName: customerName,
+      accountId: qb?.id || hintQbCustomerId || '',
+      displayName,
       email: qb?.email ?? null,
       phone: qb?.phone ?? null,
-      addressLines: qb?.addressLines?.length ? qb.addressLines : [customerName],
+      addressLines,
     };
-  }, [qbCustomerByName]);
+  }, [qbCustomerById, qbCustomerByName, qbCustomerDirectory, qbInvoices]);
 
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
@@ -1976,8 +2006,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         customerName={statementCustomer?.name || ''}
         customerId={statementCustomer?.customerId || ''}
         customerInfo={statementCustomer ? (() => {
-          const info = resolveQbCustomerInfo(statementCustomer.name);
-          const qbId = resolveQbCustomerId(statementCustomer.name);
+          const inv = qbInvoices.find(
+            i => normCustomerName(i.customerName) === normCustomerName(statementCustomer.name),
+          );
+          const qbId = inv?.customerId || resolveQbCustomerId(statementCustomer.name);
+          const info = resolveQbCustomerInfo(statementCustomer.name, qbId);
           return {
             ...info,
             accountId: qbId || info.accountId,

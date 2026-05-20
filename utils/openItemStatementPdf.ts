@@ -53,12 +53,28 @@ function loadPdfLibs() {
   return pdfLibs;
 }
 
-async function loadImageDataUrl(url: string): Promise<string | null> {
-  if (imageCache.has(url)) return imageCache.get(url) ?? null;
+interface LoadedImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+async function loadImageWithDimensions(url: string): Promise<LoadedImage | null> {
+  const cacheKey = `dim:${url}`;
+  const cached = imageCache.get(cacheKey);
+  if (cached === null) return null;
+  if (cached && cached.startsWith('{')) {
+    try {
+      return JSON.parse(cached) as LoadedImage;
+    } catch {
+      /* reload */
+    }
+  }
+
   try {
     const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) {
-      imageCache.set(url, null);
+      imageCache.set(cacheKey, null);
       return null;
     }
     const blob = await res.blob();
@@ -68,10 +84,24 @@ async function loadImageDataUrl(url: string): Promise<string | null> {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-    imageCache.set(url, dataUrl);
-    return dataUrl;
+
+    const dims = await new Promise<{ width: number; height: number } | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+
+    if (!dims || dims.width < 1 || dims.height < 1) {
+      imageCache.set(cacheKey, null);
+      return null;
+    }
+
+    const loaded: LoadedImage = { dataUrl, width: dims.width, height: dims.height };
+    imageCache.set(cacheKey, JSON.stringify(loaded));
+    return loaded;
   } catch {
-    imageCache.set(url, null);
+    imageCache.set(cacheKey, null);
     return null;
   }
 }
@@ -82,19 +112,37 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
+/** Fit image in box preserving aspect ratio (mm). */
+function fitImageMm(
+  naturalW: number,
+  naturalH: number,
+  maxW: number,
+  maxH: number,
+): { w: number; h: number } {
+  const ratio = naturalW / naturalH;
+  let w = maxW;
+  let h = w / ratio;
+  if (h > maxH) {
+    h = maxH;
+    w = h * ratio;
+  }
+  return { w, h };
+}
+
 function drawBrandLogo(
   doc: import('jspdf').jsPDF,
-  dataUrl: string | null,
+  image: LoadedImage | null,
   rightX: number,
   topY: number,
-) {
-  const logoW = 58;
-  const logoH = 14;
-  const x = rightX - logoW;
-  if (dataUrl) {
+): number {
+  const maxW = 52;
+  const maxH = 26;
+  if (image) {
     try {
-      doc.addImage(dataUrl, imageFormat(dataUrl), x, topY, logoW, logoH);
-      return;
+      const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
+      const x = rightX - w;
+      doc.addImage(image.dataUrl, imageFormat(image.dataUrl), x, topY, w, h);
+      return topY + h + 2;
     } catch {
       /* text fallback */
     }
@@ -102,7 +150,8 @@ function drawBrandLogo(
   doc.setFont('helvetica', 'bolditalic');
   doc.setFontSize(12);
   doc.setTextColor(...greenText);
-  doc.text('MARX CORPORATE', x, topY + 8);
+  doc.text('MARX CORPORATE', rightX - maxW, topY + 8);
+  return topY + 12;
 }
 
 function drawFirstPageLetterhead(
@@ -111,14 +160,14 @@ function drawFirstPageLetterhead(
   company: { name: string; addressLines: string[] },
   accountsEmail: string,
   website: string,
-  brandLogo: string | null,
+  brandLogo: LoadedImage | null,
 ): number {
   const leftX = MARGIN;
   const rightX = PAGE_W - MARGIN;
   const topY = MARGIN;
   const c = statement.customer;
 
-  drawBrandLogo(doc, brandLogo, rightX, topY);
+  const logoBottom = drawBrandLogo(doc, brandLogo, rightX, topY);
 
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
@@ -152,10 +201,14 @@ function drawFirstPageLetterhead(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   let ty = afterTitleY + 9;
-  const customerLines: string[] = [
-    `Account: ${c.accountId || statement.customerId || '—'}`,
-    ...c.addressLines,
-  ];
+  const customerLines: string[] = [];
+  const acctId = c.accountId && /^\d+$/.test(c.accountId) ? c.accountId : null;
+  if (acctId) customerLines.push(`Account: ${acctId}`);
+  for (const line of c.addressLines) {
+    if (line.trim() && !customerLines.includes(line.trim())) {
+      customerLines.push(line.trim());
+    }
+  }
   if (c.email) customerLines.push(`Email: ${c.email}`);
   if (c.phone) customerLines.push(`Phone: ${c.phone}`);
 
@@ -186,7 +239,7 @@ function drawFirstPageLetterhead(
     }
   });
 
-  return Math.max(ty, ry) + 6;
+  return Math.max(ty, ry, logoBottom) + 6;
 }
 
 function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStatement['aging']): number {
@@ -238,80 +291,7 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
   return y + 15;
 }
 
-/** Render a green “Pay Now” button image for embedding in the PDF. */
-function renderPayNowButtonImage(currencyLabel: string): string {
-  const canvas = document.createElement('canvas');
-  canvas.width = 320;
-  canvas.height = 88;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-
-  const r = 14;
-  const w = canvas.width;
-  const h = canvas.height;
-  ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(w - r, 0);
-  ctx.quadraticCurveTo(w, 0, w, r);
-  ctx.lineTo(w, h - r);
-  ctx.quadraticCurveTo(w, h, w - r, h);
-  ctx.lineTo(r, h);
-  ctx.quadraticCurveTo(0, h, 0, h - r);
-  ctx.lineTo(0, r);
-  ctx.quadraticCurveTo(0, 0, r, 0);
-  ctx.closePath();
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#b5dc6a');
-  grad.addColorStop(1, '#6a9e32');
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 28px Helvetica, Arial, sans-serif';
-  ctx.fillText('PAY NOW', w / 2, 38);
-  ctx.font = '600 18px Helvetica, Arial, sans-serif';
-  ctx.fillText(currencyLabel, w / 2, 68);
-
-  return canvas.toDataURL('image/jpeg', 0.92);
-}
-
-function drawPayNowButtons(
-  doc: import('jspdf').jsPDF,
-  y: number,
-  links: StripePayLink[],
-  buttonImages: string[],
-): number {
-  const boxW = PAGE_W - MARGIN * 2;
-  const btnW = (boxW - 8) / 2;
-  const btnH = 16;
-  const textX = MARGIN + 3;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...greenText);
-  doc.text('Pay by card', textX, y + 4);
-
-  const btnY = y + 8;
-  links.forEach((link, i) => {
-    const bx = MARGIN + i * (btnW + 8);
-    const img = buttonImages[i];
-    if (img) {
-      try {
-        doc.addImage(img, 'JPEG', bx, btnY, btnW, btnH);
-      } catch {
-        drawPayNowButtonFallback(doc, bx, btnY, btnW, btnH, link);
-      }
-    } else {
-      drawPayNowButtonFallback(doc, bx, btnY, btnW, btnH, link);
-    }
-    doc.link(bx, btnY, btnW, btnH, { url: link.url });
-  });
-
-  return btnY + btnH + 6;
-}
-
-function drawPayNowButtonFallback(
+function drawPayNowButton(
   doc: import('jspdf').jsPDF,
   x: number,
   y: number,
@@ -320,13 +300,41 @@ function drawPayNowButtonFallback(
   link: StripePayLink,
 ) {
   doc.setFillColor(...green);
-  doc.roundedRect(x, y, w, h, 2, 2, 'F');
+  doc.setDrawColor(106, 158, 50);
+  doc.setLineWidth(0.25);
+  doc.roundedRect(x, y, w, h, 2.5, 2.5, 'FD');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('PAY NOW', x + w / 2, y + h / 2 - 1, { align: 'center' });
-  doc.setFontSize(8);
-  doc.text(link.currency, x + w / 2, y + h / 2 + 4, { align: 'center' });
+  doc.setFontSize(12);
+  doc.text('PAY NOW', x + w / 2, y + h / 2 - 0.5, { align: 'center', baseline: 'middle' });
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(link.currency, x + w / 2, y + h - 3.5, { align: 'center' });
+  doc.link(x, y, w, h, { url: link.url });
+}
+
+function drawPayNowButtons(
+  doc: import('jspdf').jsPDF,
+  y: number,
+  links: StripePayLink[],
+): number {
+  const textX = MARGIN + 3;
+  const btnW = 44;
+  const btnH = 12;
+  const gap = 8;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...greenText);
+  doc.text('Pay by card', textX, y + 4);
+
+  const btnY = y + 7;
+  links.forEach((link, i) => {
+    const bx = MARGIN + 3 + i * (btnW + gap);
+    drawPayNowButton(doc, bx, btnY, btnW, btnH, link);
+  });
+
+  return btnY + btnH + 5;
 }
 
 function drawBankTransferBlock(
@@ -359,24 +367,25 @@ function drawPaymentSection(
   doc: import('jspdf').jsPDF,
   y: number,
   payment: typeof STATEMENT_PAYMENT,
-  buttonImages: string[],
 ): number {
   const boxW = PAGE_W - MARGIN * 2;
-  const boxH = 52;
+  const startY = y;
+  const pad = 3;
+
   doc.setFillColor(248, 252, 240);
   doc.setDrawColor(...green);
   doc.setLineWidth(0.3);
-  doc.rect(MARGIN, y, boxW, boxH, 'FD');
+  doc.rect(MARGIN, startY, boxW, 46, 'FD');
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(50, 50, 50);
-  doc.text(payment.cardIntro, MARGIN + 3, y + 5);
+  doc.text(payment.cardIntro, MARGIN + pad, startY + 5);
 
-  let cy = drawPayNowButtons(doc, y + 2, payment.stripeLinks, buttonImages);
+  let cy = drawPayNowButtons(doc, startY, payment.stripeLinks);
   cy = drawBankTransferBlock(doc, cy + 2, payment);
 
-  return y + boxH + 4;
+  return cy + 4;
 }
 
 function drawStatementFooter(
@@ -384,7 +393,6 @@ function drawStatementFooter(
   startY: number,
   statement: OpenItemStatement,
   payment: typeof STATEMENT_PAYMENT,
-  buttonImages: string[],
 ): number {
   let y = startY;
   doc.setFont('helvetica', 'bold');
@@ -393,7 +401,7 @@ function drawStatementFooter(
   doc.text('Aging summary', MARGIN, y);
   y += 4;
   y = drawAgingBar(doc, y, statement.aging);
-  y = drawPaymentSection(doc, y + 2, payment, buttonImages);
+  y = drawPaymentSection(doc, y + 2, payment);
   return y;
 }
 
@@ -476,15 +484,14 @@ function redrawAllFooters(doc: import('jspdf').jsPDF) {
   }
 }
 
-const FOOTER_SECTION_HEIGHT = 78;
+const FOOTER_SECTION_HEIGHT = 72;
 
 export async function downloadOpenItemStatementPdf(
   statement: OpenItemStatement,
   opts: StatementPdfOptions = {},
 ): Promise<void> {
   const { jsPDF, autoTable } = await loadPdfLibs();
-  const brandLogo = await loadImageDataUrl(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
-  const buttonImages = STATEMENT_PAYMENT.stripeLinks.map(l => renderPayNowButtonImage(l.currency));
+  const brandLogo = await loadImageWithDimensions(opts.brandLogoUrl || BRAND_TRIO_LOGO_URL);
 
   const company = {
     name: opts.companyName || STATEMENT_COMPANY.name,
@@ -520,7 +527,7 @@ export async function downloadOpenItemStatementPdf(
     footerY = MARGIN;
   }
 
-  drawStatementFooter(doc, footerY, statement, payment, buttonImages);
+  drawStatementFooter(doc, footerY, statement, payment);
   redrawAllFooters(doc);
 
   doc.save(statementPdfFilename(statement.customerName));

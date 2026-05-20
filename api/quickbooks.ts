@@ -276,14 +276,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Customer display names + primary email (for open-item statement chase emails)
     if (action === 'customer-directory') {
       const result = await runQuery(
-        'SELECT Id, DisplayName, PrimaryEmailAddr, PrimaryPhone, BillAddr, Balance FROM Customer MAXRESULTS 1000',
+        'SELECT Id, DisplayName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer MAXRESULTS 1000',
       );
       if (!result.ok) return res.status(result.status).json({ error: `QBO customer directory failed (${result.status})`, detail: result.text.slice(0, 500) });
 
       const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
 
-      const billAddrLines = (c: Record<string, unknown>): string[] => {
-        const addr = c.BillAddr as Record<string, unknown> | undefined;
+      const qboAddrLines = (addr: Record<string, unknown> | undefined): string[] => {
         if (!addr) return [];
         const lines: string[] = [];
         const line1 = typeof addr.Line1 === 'string' ? addr.Line1.trim() : '';
@@ -303,13 +302,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return lines;
       };
 
+      const customerAddrLines = (c: Record<string, unknown>): string[] => {
+        const bill = qboAddrLines(c.BillAddr as Record<string, unknown> | undefined);
+        if (bill.length > 0) return bill;
+        return qboAddrLines(c.ShipAddr as Record<string, unknown> | undefined);
+      };
+
       const results = customers.map(c => {
         const emailObj = c.PrimaryEmailAddr as { Address?: string } | undefined;
         const email = typeof emailObj?.Address === 'string' ? emailObj.Address.trim() : '';
         const phoneObj = c.PrimaryPhone as { FreeFormNumber?: string } | undefined;
         const phone = typeof phoneObj?.FreeFormNumber === 'string' ? phoneObj.FreeFormNumber.trim() : '';
         const name = typeof c.DisplayName === 'string' ? c.DisplayName : '';
-        const addressLines = billAddrLines(c);
+        const addressLines = customerAddrLines(c);
         return {
           id: String(c.Id ?? ''),
           name,

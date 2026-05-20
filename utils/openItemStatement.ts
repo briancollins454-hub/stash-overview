@@ -86,11 +86,12 @@ export function formatDateSlash(iso: string | null): string {
 /** Days past due date (negative = not yet due → “current”) */
 export function daysPastDue(dueDate: string | null): number {
   if (!dueDate) return 0;
-  const due = new Date(dueDate);
-  const today = new Date();
-  if (Number.isNaN(due.getTime())) return 0;
-  due.setHours(12, 0, 0, 0);
-  today.setHours(12, 0, 0, 0);
+  const iso = dueDate.slice(0, 10);
+  const parts = iso.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(n => !Number.isFinite(n))) return 0;
+  const due = new Date(parts[0], parts[1] - 1, parts[2]);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.floor((today.getTime() - due.getTime()) / 86400000);
 }
 
@@ -158,15 +159,21 @@ export function buildStatementCustomerInfo(
   email: string | null = null,
   phone: string | null = null,
 ): StatementCustomerInfo {
-  const norm = (s: string) => s.trim().toLowerCase();
-  const raw = addressLines.length > 0 ? addressLines : [customerName];
-  const addrOnly = raw.filter(l => norm(l) !== norm(customerName));
+  const lines: string[] = [];
+  const push = (s: string) => {
+    const t = s.trim();
+    if (t && !lines.includes(t)) lines.push(t);
+  };
+  push(customerName);
+  push(customerName);
+  for (const l of addressLines) push(l);
+  if (lines.length < 2) push(customerName);
   return {
     accountId: customerId,
     displayName: customerName,
     email: email?.trim() || null,
     phone: phone?.trim() || null,
-    addressLines: [customerName, customerName, ...addrOnly],
+    addressLines: lines,
   };
 }
 
