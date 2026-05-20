@@ -74,6 +74,8 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   );
 
   const qbIdForFetch = useMemo(() => {
+    const fromMatchedRow = matchedInvoices.find(i => /^\d+$/.test(String(i.customerId || '')));
+    if (fromMatchedRow?.customerId) return fromMatchedRow.customerId;
     const fromInvoices = qbCustomerIdFromInvoices(matchedInvoices, customerName)
       || qbCustomerIdFromInvoices(qbInvoices, customerName);
     if (fromInvoices && /^\d+$/.test(fromInvoices)) return fromInvoices;
@@ -135,6 +137,18 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   }, [isOpen, qbIdForFetch, customerName, customerInfo, defaultEmail]);
 
   const effectiveCustomer = resolvedCustomer ?? customerInfo ?? null;
+
+  const billToLines = useMemo(() => {
+    if (!effectiveCustomer) return [];
+    return effectiveCustomer.addressLines.filter(l => l.trim());
+  }, [effectiveCustomer]);
+
+  const hasStreetAddress = useMemo(() => {
+    const norm = customerName.trim().toLowerCase();
+    return billToLines.some(
+      l => l.toLowerCase() !== norm && !/^\d+$/.test(l),
+    );
+  }, [billToLines, customerName]);
 
   const statement = useMemo(() => {
     if (!isOpen) return null;
@@ -255,16 +269,6 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                         Loading billing address from QuickBooks…
                       </p>
                     )}
-                    {!customerLoading && effectiveCustomer && (
-                      <div className={`text-xs mt-2 leading-relaxed ${isDark ? 'text-slate-300' : 'text-gray-700'}`}>
-                        <span className="font-bold">Bill to on PDF: </span>
-                        {effectiveCustomer.addressLines.join(' · ')}
-                        {effectiveCustomer.email ? ` · ${effectiveCustomer.email}` : ''}
-                      </div>
-                    )}
-                    {customerFetchError && (
-                      <p className="text-xs mt-2 text-amber-600 dark:text-amber-400">{customerFetchError}</p>
-                    )}
                   </div>
                   <button
                     type="button"
@@ -286,6 +290,48 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                 <p className={`text-[11px] mt-3 leading-relaxed ${muted}`}>
                   In Outlook: compose email → attach the downloaded PDF → paste the email text below (Copy email).
                 </p>
+              </div>
+
+              {/* Bill to — address for PDF TO block */}
+              <div className={`rounded-xl border p-4 space-y-2 ${isDark ? 'border-slate-600 bg-slate-800/50' : 'border-gray-200 bg-gray-50'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest">Bill to (on PDF)</span>
+                  {qbIdForFetch ? (
+                    <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400">
+                      QBO #{qbIdForFetch}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                      QBO not linked — sync QB &amp; check customer name
+                    </span>
+                  )}
+                </div>
+                {customerLoading && (
+                  <p className={`text-xs flex items-center gap-1.5 ${muted}`}>
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Loading from QuickBooks…
+                  </p>
+                )}
+                {!customerLoading && billToLines.length > 0 && (
+                  <div className={`text-sm leading-relaxed whitespace-pre-line ${isDark ? 'text-slate-200' : 'text-gray-800'}`}>
+                    {billToLines.join('\n')}
+                    {effectiveCustomer?.email ? `\n${effectiveCustomer.email}` : ''}
+                    {effectiveCustomer?.phone ? `\n${effectiveCustomer.phone}` : ''}
+                  </div>
+                )}
+                {!customerLoading && !hasStreetAddress && qbIdForFetch && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    QuickBooks has no billing address for this customer — add it in QBO (Billing address), then sync again.
+                  </p>
+                )}
+                {!customerLoading && !qbIdForFetch && matchedInvoices.length > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Invoices matched by name but no QBO customer id — refresh QuickBooks data on Finance.
+                  </p>
+                )}
+                {customerFetchError && (
+                  <p className="text-xs text-red-600 dark:text-red-400">{customerFetchError}</p>
+                )}
               </div>
 
               <div className="grid sm:grid-cols-2 gap-3">
@@ -331,10 +377,14 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                     {statement.lines.map(line => (
                       <tr key={line.invoiceId} className={`border-t ${isDark ? 'border-slate-700/50' : 'border-gray-100'}`}>
                         <td className="p-2 font-mono font-bold">{line.docNumber}</td>
-                        <td className="p-2">{line.txnDate}</td>
-                        <td className="p-2">{line.dueDate}</td>
-                        <td className="p-2 text-right tabular-nums">{line.daysOutstanding}</td>
-                        <td className="p-2 text-right font-bold tabular-nums text-red-600 dark:text-red-400">
+                        <td className="p-2 tabular-nums">{line.txnDateShort}</td>
+                        <td className={`p-2 tabular-nums ${line.isOverdue ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
+                          {line.dueDateShort}
+                        </td>
+                        <td className={`p-2 text-right tabular-nums ${line.isOverdue ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
+                          {line.daysPastDue > 0 ? line.daysPastDue : '—'}
+                        </td>
+                        <td className="p-2 text-right font-bold tabular-nums">
                           £{line.amountDue.toFixed(2)}
                         </td>
                       </tr>
