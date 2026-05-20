@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { mapQboCustomer } from './qboCustomerMap';
+import { mapQboCustomer } from '../utils/qboCustomerMap';
 /**
  * QuickBooks Online API proxy — pulls A/P Ageing Summary, A/R balance, and customer credits.
  *

@@ -331,20 +331,30 @@ function drawPayNowButtons(
   return btnY + btnH + 4;
 }
 
-function drawBankTransferBlock(
+function drawBankTransferBox(
   doc: import('jspdf').jsPDF,
   y: number,
   payment: typeof STATEMENT_PAYMENT,
 ): number {
-  const textX = MARGIN + 3;
+  const boxW = PAGE_W - MARGIN * 2;
+  const startY = y;
+  const pad = 3;
+  const boxH = 24;
+  const textX = MARGIN + pad;
+
+  doc.setFillColor(252, 252, 252);
+  doc.setDrawColor(160, 160, 160);
+  doc.setLineWidth(0.25);
+  doc.rect(MARGIN, startY, boxW, boxH, 'FD');
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(0, 0, 0);
-  doc.text(payment.bankIntro, textX, y);
+  doc.text(payment.bankIntro, textX, startY + 5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
-  let cy = y + 5;
+  let cy = startY + 10;
   const lines = [
     `Account Name: ${payment.accountName}`,
     `Sort Code: ${payment.sortCode}`,
@@ -354,10 +364,11 @@ function drawBankTransferBlock(
     doc.text(line, textX, cy);
     cy += 4;
   });
-  return cy + 2;
+
+  return startY + boxH + 4;
 }
 
-function drawPaymentSection(
+function drawCardPaymentSection(
   doc: import('jspdf').jsPDF,
   y: number,
   payment: typeof STATEMENT_PAYMENT,
@@ -365,14 +376,14 @@ function drawPaymentSection(
   const boxW = PAGE_W - MARGIN * 2;
   const startY = y;
   const pad = 3;
-  const boxH = 50;
+  const boxH = 34;
+  const innerTop = startY + 5;
 
   doc.setFillColor(248, 252, 240);
   doc.setDrawColor(...green);
   doc.setLineWidth(0.3);
   doc.rect(MARGIN, startY, boxW, boxH, 'FD');
 
-  const innerTop = startY + 5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...greenText);
@@ -383,10 +394,19 @@ function drawPaymentSection(
   doc.setTextColor(50, 50, 50);
   doc.text(payment.cardIntro, MARGIN + pad, innerTop + 5);
 
-  let cy = drawPayNowButtons(doc, innerTop + 11, payment.stripeLinks);
-  cy = drawBankTransferBlock(doc, cy + 4, payment);
+  drawPayNowButtons(doc, innerTop + 11, payment.stripeLinks);
 
   return startY + boxH + 4;
+}
+
+function drawPaymentSection(
+  doc: import('jspdf').jsPDF,
+  y: number,
+  payment: typeof STATEMENT_PAYMENT,
+): number {
+  let cy = drawCardPaymentSection(doc, y, payment);
+  cy = drawBankTransferBox(doc, cy + 2, payment);
+  return cy;
 }
 
 function drawStatementFooter(
@@ -485,7 +505,7 @@ function redrawAllFooters(doc: import('jspdf').jsPDF) {
   }
 }
 
-const FOOTER_SECTION_HEIGHT = 72;
+const FOOTER_SECTION_HEIGHT = 78;
 
 export async function downloadOpenItemStatementPdf(
   statement: OpenItemStatement,

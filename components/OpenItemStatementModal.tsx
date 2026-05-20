@@ -100,8 +100,14 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       body: JSON.stringify({ action: 'customer-by-id', customerId: qbIdForFetch }),
     })
       .then(async res => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Lookup failed (${res.status})`);
+        const text = await res.text();
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(text.slice(0, 120) || `Lookup failed (${res.status})`);
+        }
+        if (!res.ok) throw new Error(String(data.error || `Lookup failed (${res.status})`));
         return data;
       })
       .then(data => {

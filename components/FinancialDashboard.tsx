@@ -249,28 +249,54 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const [qbConnecting, setQbConnecting] = useState(false);
   const qbConfigured = !!(settings.qboRealmId && settings.qboAccessToken) || qbServerConfigured;
 
+  const parseQbJson = async (res: Response, label: string) => {
+    const text = await res.text();
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      const snippet = text.replace(/\s+/g, ' ').trim().slice(0, 160);
+      throw new Error(
+        snippet
+          ? `${label}: ${snippet}`
+          : `${label}: server returned non-JSON (${res.status})`,
+      );
+    }
+  };
+
   const fetchQBData = useCallback(async () => {
     setQbLoading(true); setQbError(null);
-    const body: any = {};
+    const body: Record<string, string> = {};
     if (settings.qboRealmId) body.realmId = settings.qboRealmId;
     if (settings.qboAccessToken) body.accessToken = settings.qboAccessToken;
     if (settings.qboBaseUrl) body.baseUrl = settings.qboBaseUrl;
+    const post = (action: string) =>
+      fetch('/api/quickbooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, action }),
+      });
+
     try {
       const [apRes, arRes, credRes, dirRes] = await Promise.all([
-        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ap-aging' }) }),
-        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'ar-balance' }) }),
-        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'customer-credits' }) }),
-        fetch('/api/quickbooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, action: 'customer-directory' }) }),
+        post('ap-aging'),
+        post('ar-balance'),
+        post('customer-credits'),
+        post('customer-directory'),
       ]);
-      const [apData, arData, credData, dirData] = await Promise.all([apRes.json(), arRes.json(), credRes.json(), dirRes.json()]);
-      if (apData.ok) setQbBills(apData.bills || []);
-      else setQbError(apData.error || 'A/P query failed');
-      if (arData.ok) setQbInvoices(arData.invoices || []);
-      if (credData.ok) setQbCredits(credData.customers || []);
-      if (dirData.ok) setQbCustomerDirectory(dirData.customers || []);
+      const [apData, arData, credData, dirData] = await Promise.all([
+        parseQbJson(apRes, 'A/P'),
+        parseQbJson(arRes, 'A/R'),
+        parseQbJson(credRes, 'Credits'),
+        parseQbJson(dirRes, 'Customers'),
+      ]);
+      if (apData.ok) setQbBills((apData.bills as typeof qbBills) || []);
+      else setQbError(String(apData.error || 'A/P query failed'));
+      if (arData.ok) setQbInvoices((arData.invoices as typeof qbInvoices) || []);
+      if (credData.ok) setQbCredits((credData.customers as typeof qbCredits) || []);
+      if (dirData.ok) setQbCustomerDirectory((dirData.customers as typeof qbCustomerDirectory) || []);
       setQbLastSynced(new Date().toISOString());
-    } catch (e: any) {
-      setQbError(e.message || 'Failed to fetch QuickBooks data');
+    } catch (e: unknown) {
+      setQbError(e instanceof Error ? e.message : 'Failed to fetch QuickBooks data');
     } finally {
       setQbLoading(false);
     }
