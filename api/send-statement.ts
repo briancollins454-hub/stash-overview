@@ -1,42 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
+import { buildStatementEmailHtml, buildStatementEmailTemplate } from './statement-email';
+import { generateOpenItemStatementPdfBase64 } from './statement-pdf';
+import type { OpenItemStatement } from './statement-types';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Minimal shape sent from the client (avoids static imports from ../utils at cold start). */
-interface StatementPayload {
-  customerName: string;
-  customerId: string;
-  customer: {
-    accountId: string;
-    displayName: string;
-    email: string | null;
-    phone: string | null;
-    addressLines: string[];
-  };
-  asAtDate: string;
-  asAtDateShort: string;
-  statementNumber: string;
-  customerAddressLines: string[];
-  lines: Array<{
-    invoiceId: string;
-    docNumber: string;
-    txnDateShort: string;
-    dueDateShort: string;
-    isOverdue: boolean;
-    daysPastDue: number;
-    amountDue: number;
-  }>;
-  totalOutstanding: number;
-  aging: {
-    current: number;
-    pastDue1_30: number;
-    pastDue31_60: number;
-    pastDue61_90: number;
-    pastDue90Plus: number;
-    total: number;
-  };
-}
 
 function cors(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
@@ -52,9 +20,9 @@ function cors(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Firebase-Id-Token');
 }
 
-function isStatementPayload(v: unknown): v is StatementPayload {
+function isOpenItemStatement(v: unknown): v is OpenItemStatement {
   if (!v || typeof v !== 'object') return false;
-  const s = v as StatementPayload;
+  const s = v as OpenItemStatement;
   return (
     typeof s.customerName === 'string'
     && Array.isArray(s.lines)
@@ -92,26 +60,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!to || !EMAIL_RE.test(to)) {
     return res.status(400).json({ error: 'Valid recipient email required' });
   }
-  if (!isStatementPayload(statement)) {
+  if (!isOpenItemStatement(statement)) {
     return res.status(400).json({ error: 'Invalid statement payload' });
   }
 
   try {
-    const emailMod = await import('../utils/openItemStatement.js');
-    const pdfMod = await import('../utils/openItemStatementPdf.js');
-
+    const filename = statementPdfFilename(statement.customerName);
     const emailOpts = {
       companyName,
       accountsEmail,
       contactName,
-      attachPdf: true as const,
-      pdfFilename: statementPdfFilename(statement.customerName),
+      pdfFilename: filename,
     };
-    const template = emailMod.buildStatementEmailTemplate(statement, to, emailOpts);
-    const html = emailMod.buildStatementEmailHtml(statement, emailOpts);
-    const filename = statementPdfFilename(statement.customerName);
+    const template = buildStatementEmailTemplate(statement, to, emailOpts);
+    const html = buildStatementEmailHtml(statement, emailOpts);
 
-    const { base64 } = await pdfMod.generateOpenItemStatementPdfBase64(statement, {
+    const { base64 } = await generateOpenItemStatementPdfBase64(statement, {
       companyName,
       accountsEmail,
       skipBrandLogo: true,
