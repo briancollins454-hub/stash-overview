@@ -2,6 +2,7 @@
 
 import type { OpenItemLine, OpenItemStatement } from './openItemStatement';
 import {
+  BRAND_TRIO_LOGO_FALLBACK,
   BRAND_TRIO_LOGO_SIZE,
   BRAND_TRIO_LOGO_URL,
   STATEMENT_COLORS,
@@ -75,7 +76,7 @@ async function loadImageServer(url: string): Promise<LoadedImage | null> {
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 8) return null;
     const dataUrl = `data:${ct};base64,${buf.toString('base64')}`;
-    return { dataUrl, width: 1075, height: 268 };
+    return { dataUrl, width: BRAND_TRIO_LOGO_SIZE.width, height: BRAND_TRIO_LOGO_SIZE.height };
   } catch {
     return null;
   }
@@ -192,17 +193,118 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
+/** Crop bounds for the three-logo row on the 1000×1000 Shopify asset (not the large top mark). */
+function trioCropRect(naturalW: number, naturalH: number): { x0: number; y0: number; sw: number; sh: number } {
+  const refW = 1000;
+  const refH = 1000;
+  const sx = naturalW / refW;
+  const sy = naturalH / refH;
+  const x0 = Math.round(118 * sx);
+  const y0 = Math.round(100 * sy);
+  const sw = Math.round(705 * sx);
+  const sh = Math.round(101 * sy);
+  return { x0, y0, sw, sh };
+}
+
+const MAX_LOGO_EMBED_PX = 600;
+const LOGO_JPEG_QUALITY = 0.82;
+
+function flattenLogoPixels(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    const a = d[i + 3];
+    const ink = a >= 20 && !(r <= 12 && g <= 12 && b <= 12);
+    if (!ink) {
+      d[i] = 255;
+      d[i + 1] = 255;
+      d[i + 2] = 255;
+      d[i + 3] = 255;
+    } else {
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+/** Crop trio row, white background, JPEG — keeps PDF attachments under Vercel size limits. */
+async function trimAndCompressBrandLogo(loaded: LoadedImage): Promise<LoadedImage | null> {
+  if (typeof document === 'undefined') return loaded;
+
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const { x0, y0, sw, sh } = trioCropRect(
+          img.naturalWidth || loaded.width,
+          img.naturalHeight || loaded.height,
+        );
+        if (sw < 8 || sh < 8) {
+          resolve(null);
+          return;
+        }
+
+        let outW = sw;
+        let outH = sh;
+        if (outW > MAX_LOGO_EMBED_PX) {
+          outH = Math.max(1, Math.round(outH * (MAX_LOGO_EMBED_PX / outW)));
+          outW = MAX_LOGO_EMBED_PX;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, outW, outH);
+        ctx.drawImage(img, x0, y0, sw, sh, 0, 0, outW, outH);
+        flattenLogoPixels(ctx, outW, outH);
+
+        resolve({
+          dataUrl: canvas.toDataURL('image/jpeg', LOGO_JPEG_QUALITY),
+          width: outW,
+          height: outH,
+        });
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = loaded.dataUrl;
+  });
+}
+
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
-  imageCache.delete(`dim:${resolveAssetUrl(url)}`);
-  const loaded = await loadImageWithDimensions(url);
-  if (!loaded) return null;
-  return {
-    ...loaded,
-    width: loaded.width > 1 ? loaded.width : BRAND_TRIO_LOGO_SIZE.width,
-    height: loaded.height > 1 ? loaded.height : BRAND_TRIO_LOGO_SIZE.height,
-  };
+
+  const candidates = [
+    opts.brandLogoUrl,
+    BRAND_TRIO_LOGO_URL,
+    BRAND_TRIO_LOGO_FALLBACK,
+  ].filter((u): u is string => Boolean(u));
+
+  for (const url of candidates) {
+    imageCache.delete(`dim:${resolveAssetUrl(url)}`);
+    const loaded = await loadImageWithDimensions(url);
+    if (!loaded) continue;
+
+    const trimmed = await trimAndCompressBrandLogo(loaded);
+    const final = trimmed || loaded;
+    return {
+      ...final,
+      width: final.width > 1 ? final.width : BRAND_TRIO_LOGO_SIZE.width,
+      height: final.height > 1 ? final.height : BRAND_TRIO_LOGO_SIZE.height,
+    };
+  }
+
+  return null;
 }
 
 /** Fit image in box preserving aspect ratio (mm). */

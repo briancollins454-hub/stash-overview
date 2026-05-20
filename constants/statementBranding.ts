@@ -8,14 +8,15 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-/** Bundled wide trio: Corporate + Recruitment + Events (767×325). */
-export const BRAND_TRIO_LOGO_URL = new URL(
-  '../public/statement-brand-trio.png',
-  import.meta.url,
-).href;
+/** Shopify CDN — middle trio row is cropped/compressed in PDF generation. */
+export const BRAND_TRIO_LOGO_URL =
+  'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
-/** Fallback dimensions if the browser omits naturalWidth (must match cropped PNG). */
-export const BRAND_TRIO_LOGO_SIZE = { width: 767, height: 325 } as const;
+/** Same-origin fallback if CDN fetch is blocked (run scripts/crop-statement-logo.mjs). */
+export const BRAND_TRIO_LOGO_FALLBACK = '/statement-brand-trio.png';
+
+/** Cropped trio bounds on the 1000×1000 Shopify asset (for layout fallback). */
+export const BRAND_TRIO_LOGO_SIZE = { width: 705, height: 101 } as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
