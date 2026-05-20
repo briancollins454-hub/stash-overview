@@ -5,6 +5,7 @@ import {
 import {
   buildOpenItemStatement,
   buildStatementEmailTemplate,
+  buildStatementEmailHtml,
   formatStatementText,
   invoicesForCustomer,
   mailtoLink,
@@ -16,8 +17,12 @@ import {
 } from '../utils/openItemStatement';
 import {
   downloadOpenItemStatementPdf,
+  generateOpenItemStatementPdfBase64,
   statementPdfFilename,
 } from '../utils/openItemStatementPdf';
+
+/** Stay under Vercel ~4.5MB request limit (base64 expands ~33%). */
+const MAX_ATTACH_BASE64 = 3_200_000;
 
 export interface OpenItemStatementModalProps {
   isOpen: boolean;
@@ -235,15 +240,43 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     setSendResult(null);
     setPdfError(null);
     try {
-      const resp = await fetch('/api/send-statement', {
+      const attachName = statementPdfFilename(statement.customerName)
+        .replace(/[^\w.\- ]+/g, '_')
+        .replace(/\s+/g, '_');
+      const emailOpts = {
+        companyName,
+        accountsEmail,
+        contactName,
+        pdfFilename: attachName,
+      };
+      const template = buildStatementEmailTemplate(statement, to, emailOpts);
+      const html = buildStatementEmailHtml(statement, emailOpts);
+
+      let attachments: { filename: string; content: string }[] | undefined;
+      try {
+        const { base64 } = await generateOpenItemStatementPdfBase64(statement, {
+          companyName,
+          accountsEmail,
+          skipBrandLogo: true,
+        });
+        if (base64 && base64.length <= MAX_ATTACH_BASE64) {
+          attachments = [{ filename: attachName, content: base64 }];
+        }
+      } catch {
+        /* send without attachment */
+      }
+
+      const resp = await fetch('/api/send-digest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to,
-          statement,
-          contactName,
-          companyName,
-          accountsEmail,
+          kind: 'statement',
+          to: [to],
+          subject: template.subject,
+          html,
+          text: template.body,
+          ...(accountsEmail?.includes('@') ? { replyTo: accountsEmail } : {}),
+          ...(attachments ? { attachments } : {}),
         }),
       });
       const raw = await resp.text();
@@ -254,7 +287,10 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
         throw new Error(raw.slice(0, 200) || `Send failed (${resp.status})`);
       }
       if (resp.ok && data.success) {
-        setSendResult({ ok: true, msg: `Statement emailed to ${to}` });
+        const attachNote = attachments
+          ? ''
+          : ' (email sent without PDF — use Download PDF if needed)';
+        setSendResult({ ok: true, msg: `Statement emailed to ${to}${attachNote}` });
       } else {
         setSendResult({ ok: false, msg: String(data.error || `Failed to send (${resp.status})`) });
       }
@@ -368,7 +404,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                   <p className="text-xs text-red-600 dark:text-red-400 mt-2">{pdfError}</p>
                 )}
                 <p className={`text-[11px] mt-3 leading-relaxed ${muted}`}>
-                  Send statement builds the PDF on the server and emails it via Resend (small upload — no size limit issues). Or download PDF for Outlook.
+                  Send statement builds the PDF in your browser and emails via Resend (same as Email Digest). Download PDF if you need the full branded copy for Outlook.
                 </p>
               </div>
 
