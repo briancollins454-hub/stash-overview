@@ -156,6 +156,35 @@ export function qbCustomerIdFromInvoices(
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
+const UK_POSTCODE_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+
+function normAddrKey(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** True when address lines include street, city, or postcode — not just the customer name. */
+export function customerHasPhysicalAddress(
+  addressLines: string[],
+  displayName: string,
+  companyName?: string | null,
+): boolean {
+  const skip = new Set<string>();
+  for (const n of [displayName, companyName]) {
+    if (n?.trim()) skip.add(normAddrKey(n));
+  }
+  const extra = addressLines
+    .map(l => l.trim())
+    .filter(t => t && !skip.has(normAddrKey(t)));
+  if (extra.length >= 2) return true;
+  return extra.some(t => {
+    if (UK_POSTCODE_RE.test(t)) return true;
+    if (/^\d+[a-zA-Z]?\s+\S/.test(t)) return true;
+    if (/\b(road|street|lane|avenue|drive|way|malone|belfast|antrim)\b/i.test(t)) return true;
+    if (t.includes(',') && UK_POSTCODE_RE.test(t)) return true;
+    return false;
+  });
+}
+
 /** TO block lines: name + full billing address from QuickBooks. */
 export function formatCustomerAddressLines(
   displayName: string,

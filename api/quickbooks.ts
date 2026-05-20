@@ -1,38 +1,94 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Inlined here — Vercel /api handlers cannot import from ../utils (FUNCTION_INVOCATION_FAILED).
+const UK_POSTCODE_RE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+
+function normAddrKey(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function coerceAddrPart(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' && !Number.isNaN(v)) return String(v);
+  return '';
+}
+
 function qboAddrLines(addr: Record<string, unknown> | undefined): string[] {
   if (!addr) return [];
   const lines: string[] = [];
   const push = (v: unknown) => {
-    if (typeof v === 'string' && v.trim()) lines.push(v.trim());
+    const t = coerceAddrPart(v);
+    if (t) lines.push(t);
   };
   push(addr.Line1);
   push(addr.Line2);
   push(addr.Line3);
   push(addr.Line4);
   push(addr.Line5);
-  const city = typeof addr.City === 'string' ? addr.City.trim() : '';
-  const county = typeof addr.CountrySubDivisionCode === 'string'
-    ? addr.CountrySubDivisionCode.trim()
-    : '';
-  const postal = typeof addr.PostalCode === 'string' ? addr.PostalCode.trim() : '';
-  const country = typeof addr.Country === 'string' ? addr.Country.trim() : '';
-  if (city && postal) lines.push(`${city}, ${postal}`);
-  else if (city) lines.push(city);
-  else if (postal) lines.push(postal);
-  if (county && !lines.some(l => l.includes(county))) lines.push(county);
-  if (country && country !== 'UK' && country !== 'GB') lines.push(country);
+  const city = coerceAddrPart(addr.City);
+  const county = coerceAddrPart(addr.CountrySubDivisionCode) || coerceAddrPart(addr.County);
+  const postal = coerceAddrPart(addr.PostalCode);
+  const country = coerceAddrPart(addr.Country);
+  if (city) lines.push(city);
+  if (postal && !lines.some(l => l.includes(postal))) lines.push(postal);
+  if (county && !lines.some(l => normAddrKey(l) === normAddrKey(county))) lines.push(county);
+  if (country && country !== 'UK' && country !== 'GB' && !lines.some(l => l.includes(country))) {
+    lines.push(country);
+  }
   return lines;
+}
+
+function mergeAddrLines(...groups: string[][]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const l of group) {
+      const t = l.trim();
+      const key = normAddrKey(t);
+      if (t && !seen.has(key)) {
+        seen.add(key);
+        out.push(t);
+      }
+    }
+  }
+  return out;
+}
+
+function customerHasPhysicalAddress(
+  addressLines: string[],
+  displayName: string,
+  companyName?: string | null,
+): boolean {
+  const skip = new Set<string>();
+  for (const n of [displayName, companyName]) {
+    if (n?.trim()) skip.add(normAddrKey(n));
+  }
+  const extra = addressLines
+    .map(l => l.trim())
+    .filter(t => t && !skip.has(normAddrKey(t)));
+  if (extra.length >= 2) return true;
+  return extra.some(t => {
+    if (UK_POSTCODE_RE.test(t)) return true;
+    if (/^\d+[a-zA-Z]?\s+\S/.test(t)) return true;
+    if (/\b(road|street|lane|avenue|drive|way|malone|belfast|antrim)\b/i.test(t)) return true;
+    if (t.includes(',') && UK_POSTCODE_RE.test(t)) return true;
+    return false;
+  });
 }
 
 function customerAddrLinesFromQbo(c: Record<string, unknown>): string[] {
   const bill = qboAddrLines(c.BillAddr as Record<string, unknown> | undefined);
-  if (bill.length > 0) return bill;
   const ship = qboAddrLines(c.ShipAddr as Record<string, unknown> | undefined);
-  if (ship.length > 0) return ship;
+  const merged = mergeAddrLines(bill, ship);
+  if (merged.length > 0) return merged;
   const company = typeof c.CompanyName === 'string' ? c.CompanyName.trim() : '';
   return company ? [company] : [];
+}
+
+function invoiceAddrLinesFromQbo(inv: Record<string, unknown>): string[] {
+  const bill = qboAddrLines(inv.BillAddr as Record<string, unknown> | undefined);
+  const ship = qboAddrLines(inv.ShipAddr as Record<string, unknown> | undefined);
+  return mergeAddrLines(bill, ship);
 }
 
 function mapQboCustomer(c: Record<string, unknown>) {
@@ -343,16 +399,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!customerId || !/^\d+$/.test(customerId)) {
         return res.status(400).json({ error: 'customerId required (numeric QuickBooks customer Id)' });
       }
-      const sql = `SELECT Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer WHERE Id = '${escapeQboString(customerId)}'`;
-      const result = await runQuery(sql);
-      if (!result.ok) return res.status(result.status).json({ error: `QBO customer lookup failed (${result.status})`, detail: result.text.slice(0, 500) });
 
-      const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
-      if (!customers.length) {
-        return res.status(404).json({ error: `No QuickBooks customer with Id ${customerId}` });
+      let rawCustomer: Record<string, unknown> | null = null;
+      const entityUrl = `${config.baseUrl}/v3/company/${encodeURIComponent(config.realmId)}/customer/${encodeURIComponent(customerId)}?minorversion=${encodeURIComponent(config.minorVersion)}`;
+      try {
+        const entityRes = await fetch(entityUrl, { method: 'GET', headers: authHeaders, signal: AbortSignal.timeout(30000) });
+        const entityText = await entityRes.text();
+        if (entityRes.ok) {
+          const entityData = JSON.parse(entityText) as { Customer?: Record<string, unknown> };
+          if (entityData.Customer) rawCustomer = entityData.Customer;
+        }
+      } catch {
+        /* fall back to query */
       }
 
-      return res.json({ ok: true, customer: mapQboCustomer(customers[0]) });
+      if (!rawCustomer) {
+        const sql = `SELECT Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr, ShipAddr, Balance FROM Customer WHERE Id = '${escapeQboString(customerId)}'`;
+        const result = await runQuery(sql);
+        if (!result.ok) {
+          return res.status(result.status).json({ error: `QBO customer lookup failed (${result.status})`, detail: result.text.slice(0, 500) });
+        }
+        const customers = (result.data?.QueryResponse?.Customer || []) as Record<string, unknown>[];
+        if (!customers.length) {
+          return res.status(404).json({ error: `No QuickBooks customer with Id ${customerId}` });
+        }
+        rawCustomer = customers[0];
+      }
+
+      let customer = mapQboCustomer(rawCustomer);
+      const displayName = typeof rawCustomer.DisplayName === 'string' ? rawCustomer.DisplayName : customer.name;
+      const companyName = typeof rawCustomer.CompanyName === 'string' ? rawCustomer.CompanyName : null;
+
+      if (!customerHasPhysicalAddress(customer.addressLines, displayName, companyName)) {
+        const invSql = `SELECT BillAddr, ShipAddr FROM Invoice WHERE CustomerRef = '${escapeQboString(customerId)}' AND Balance > '0' ORDERBY TxnDate DESC MAXRESULTS 5`;
+        const invResult = await runQuery(invSql);
+        if (invResult.ok) {
+          const invoices = (invResult.data?.QueryResponse?.Invoice || []) as Record<string, unknown>[];
+          for (const inv of invoices) {
+            const fromInv = invoiceAddrLinesFromQbo(inv);
+            if (customerHasPhysicalAddress(fromInv, displayName, companyName)) {
+              customer = { ...customer, addressLines: fromInv };
+              break;
+            }
+          }
+        }
+      }
+
+      return res.json({ ok: true, customer });
     }
 
     return res.status(400).json({ error: `Unknown action: ${action}. Use 'ap-aging', 'ar-balance', 'customer-credits', 'customer-directory', 'customer-by-id', or 'test-connection'.` });

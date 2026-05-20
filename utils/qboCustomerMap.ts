@@ -9,38 +9,71 @@ export interface QboCustomerRecord {
   balance: number;
 }
 
+function coerceAddrPart(v: unknown): string {
+  if (typeof v === 'string') return v.trim();
+  if (typeof v === 'number' && !Number.isNaN(v)) return String(v);
+  return '';
+}
+
 function qboAddrLines(addr: Record<string, unknown> | undefined): string[] {
   if (!addr) return [];
   const lines: string[] = [];
   const push = (v: unknown) => {
-    if (typeof v === 'string' && v.trim()) lines.push(v.trim());
+    const t = coerceAddrPart(v);
+    if (t) lines.push(t);
   };
   push(addr.Line1);
   push(addr.Line2);
   push(addr.Line3);
   push(addr.Line4);
   push(addr.Line5);
-  const city = typeof addr.City === 'string' ? addr.City.trim() : '';
-  const county = typeof addr.CountrySubDivisionCode === 'string'
-    ? addr.CountrySubDivisionCode.trim()
-    : '';
-  const postal = typeof addr.PostalCode === 'string' ? addr.PostalCode.trim() : '';
-  const country = typeof addr.Country === 'string' ? addr.Country.trim() : '';
-  if (city && postal) lines.push(`${city}, ${postal}`);
-  else if (city) lines.push(city);
-  else if (postal) lines.push(postal);
-  if (county && !lines.some(l => l.includes(county))) lines.push(county);
-  if (country && country !== 'UK' && country !== 'GB') lines.push(country);
+  const city = coerceAddrPart(addr.City);
+  const county = coerceAddrPart(addr.CountrySubDivisionCode) || coerceAddrPart(addr.County);
+  const postal = coerceAddrPart(addr.PostalCode);
+  const country = coerceAddrPart(addr.Country);
+  if (city) lines.push(city);
+  if (postal && !lines.some(l => l.includes(postal))) lines.push(postal);
+  if (county && !lines.some(l => normAddrKey(l) === normAddrKey(county))) lines.push(county);
+  if (country && country !== 'UK' && country !== 'GB' && !lines.some(l => l.includes(country))) {
+    lines.push(country);
+  }
   return lines;
+}
+
+function normAddrKey(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function mergeAddrLines(...groups: string[][]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const l of group) {
+      const t = l.trim();
+      const key = normAddrKey(t);
+      if (t && !seen.has(key)) {
+        seen.add(key);
+        out.push(t);
+      }
+    }
+  }
+  return out;
 }
 
 export function customerAddrLinesFromQbo(c: Record<string, unknown>): string[] {
   const bill = qboAddrLines(c.BillAddr as Record<string, unknown> | undefined);
-  if (bill.length > 0) return bill;
   const ship = qboAddrLines(c.ShipAddr as Record<string, unknown> | undefined);
-  if (ship.length > 0) return ship;
+  const merged = mergeAddrLines(bill, ship);
+  if (merged.length > 0) return merged;
   const company = typeof c.CompanyName === 'string' ? c.CompanyName.trim() : '';
   return company ? [company] : [];
+}
+
+/** Billing address from an open invoice when the Customer record has none in the API. */
+export function invoiceAddrLinesFromQbo(inv: Record<string, unknown>): string[] {
+  const bill = qboAddrLines(inv.BillAddr as Record<string, unknown> | undefined);
+  const ship = qboAddrLines(inv.ShipAddr as Record<string, unknown> | undefined);
+  return mergeAddrLines(bill, ship);
 }
 
 export function mapQboCustomer(c: Record<string, unknown>): QboCustomerRecord {

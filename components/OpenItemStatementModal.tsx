@@ -10,6 +10,7 @@ import {
   mailtoLink,
   qbCustomerIdFromInvoices,
   qboCustomerToStatementInfo,
+  customerHasPhysicalAddress,
   type OpenItemInvoice,
   type StatementCustomerInfo,
 } from '../utils/openItemStatement';
@@ -144,11 +145,16 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   }, [effectiveCustomer]);
 
   const hasStreetAddress = useMemo(() => {
-    const norm = customerName.trim().toLowerCase();
-    return billToLines.some(
-      l => l.toLowerCase() !== norm && !/^\d+$/.test(l),
+    if (!effectiveCustomer) return false;
+    const company = billToLines.find(
+      (l, i) => i > 0 && l !== effectiveCustomer.displayName,
     );
-  }, [billToLines, customerName]);
+    return customerHasPhysicalAddress(
+      billToLines,
+      effectiveCustomer.displayName,
+      company ?? null,
+    );
+  }, [billToLines, effectiveCustomer]);
 
   const statement = useMemo(() => {
     if (!isOpen) return null;
@@ -321,7 +327,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                 )}
                 {!customerLoading && !hasStreetAddress && qbIdForFetch && (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
-                    QuickBooks has no billing address for this customer — add it in QBO (Billing address), then sync again.
+                    Could not load a street address from QuickBooks for QBO #{qbIdForFetch}. Check Billing address on that customer (or on their open invoices), then sync again.
                   </p>
                 )}
                 {!customerLoading && !qbIdForFetch && matchedInvoices.length > 0 && (
