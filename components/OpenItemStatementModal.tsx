@@ -5,7 +5,6 @@ import {
 import {
   buildOpenItemStatement,
   buildStatementEmailTemplate,
-  buildStatementEmailHtml,
   formatStatementText,
   invoicesForCustomer,
   mailtoLink,
@@ -17,7 +16,6 @@ import {
 } from '../utils/openItemStatement';
 import {
   downloadOpenItemStatementPdf,
-  generateOpenItemStatementPdfBase64,
   statementPdfFilename,
 } from '../utils/openItemStatementPdf';
 
@@ -237,33 +235,15 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     setSendResult(null);
     setPdfError(null);
     try {
-      const { filename, base64 } = await generateOpenItemStatementPdfBase64(statement, {
-        companyName,
-        accountsEmail,
-      });
-      if (!base64) {
-        setSendResult({ ok: false, msg: 'Could not generate PDF attachment' });
-        return;
-      }
-      const attachName = filename.replace(/[^\w.\- ]+/g, '_').replace(/\s+/g, '_');
-      const html = buildStatementEmailHtml(statement, {
-        companyName,
-        accountsEmail,
-        contactName,
-        pdfFilename: attachName,
-      });
-
-      const resp = await fetch('/api/send-digest', {
+      const resp = await fetch('/api/send-statement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          kind: 'statement',
-          to: [to],
-          subject: emailTemplate.subject,
-          html,
-          text: emailTemplate.body,
-          ...(accountsEmail?.includes('@') ? { replyTo: accountsEmail } : {}),
-          attachments: [{ filename: attachName, content: base64 }],
+          to,
+          statement,
+          contactName,
+          companyName,
+          accountsEmail,
         }),
       });
       const raw = await resp.text();
@@ -388,7 +368,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                   <p className="text-xs text-red-600 dark:text-red-400 mt-2">{pdfError}</p>
                 )}
                 <p className={`text-[11px] mt-3 leading-relaxed ${muted}`}>
-                  Send statement emails the PDF via Resend (same as Email Digest). Or download PDF and use copy/paste below for Outlook.
+                  Send statement builds the PDF on the server and emails it via Resend (small upload — no size limit issues). Or download PDF for Outlook.
                 </p>
               </div>
 

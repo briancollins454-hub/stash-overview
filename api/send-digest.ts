@@ -76,10 +76,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  if (kind === 'statement' && attachments.length === 0) {
-    return res.status(400).json({ error: 'Statement PDF attachment missing or invalid' });
-  }
-
   try {
     const resend = new Resend(apiKey);
     const { data, error } = await resend.emails.send({

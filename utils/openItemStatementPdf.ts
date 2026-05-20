@@ -63,7 +63,26 @@ interface LoadedImage {
   height: number;
 }
 
+/** Node / Vercel — no Image or FileReader. */
+async function loadImageServer(url: string): Promise<LoadedImage | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    const ct = res.headers.get('content-type') || 'image/png';
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 8) return null;
+    const dataUrl = `data:${ct};base64,${buf.toString('base64')}`;
+    return { dataUrl, width: 1075, height: 268 };
+  } catch {
+    return null;
+  }
+}
+
 async function loadImageWithDimensions(url: string): Promise<LoadedImage | null> {
+  if (typeof window === 'undefined') {
+    return loadImageServer(url);
+  }
+
   const cacheKey = `dim:${url}`;
   const cached = imageCache.get(cacheKey);
   if (cached === null) return null;
