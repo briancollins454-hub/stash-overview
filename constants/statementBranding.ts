@@ -1,5 +1,12 @@
 // ─── Marx Corporate — open-item statement PDF branding ───────────────────
-// Matches QuickBooks “account print” / MCB statement layout used in finance.
+// Visual match for QuickBooks account print / MCB customer statements.
+
+export const STATEMENT_COLORS = {
+  /** Lime green — “Statement” title & table header */
+  green: [156, 198, 84] as const,
+  greenText: [90, 140, 40] as const,
+  headerText: [255, 255, 255] as const,
+} as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
@@ -11,6 +18,10 @@ export const STATEMENT_COMPANY = {
   email: 'accounts@marxcorporate.com',
   website: 'www.stashshop.co.uk',
 } as const;
+
+/** Stash wordmark (SVG on CDN — fetched when building PDF) */
+export const STASH_LOGO_URL =
+  'https://stashshop.co.uk/cdn/shop/files/stash_shop_text_only_2025_outline_1.svg?v=1753488880';
 
 export const STATEMENT_PAYMENT = {
   cardIntro: 'You can pay via card on the relevant link below:',

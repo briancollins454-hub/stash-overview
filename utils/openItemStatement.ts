@@ -114,10 +114,11 @@ export function buildAgingSummary(
   return summary;
 }
 
-export function statementNumberFor(customerId: string, asAt: Date = new Date()): string {
+/** QBO-style statement number (e.g. customer Id 527 → 1527). */
+export function statementNumberFor(customerId: string): string {
   const idNum = parseInt(String(customerId).replace(/\D/g, ''), 10);
-  const base = Number.isFinite(idNum) ? (idNum % 9000) + 1000 : 1000;
-  return String(base);
+  if (!Number.isFinite(idNum) || idNum <= 0) return '1000';
+  return String(1000 + (idNum % 8999));
 }
 
 export function invoiceDescription(docNumber: string, dueDateIso: string | null): string {
@@ -190,7 +191,7 @@ export function buildOpenItemStatement(
       const year = d.getFullYear();
       return `${day}/${month}/${year}`;
     })(),
-    statementNumber: statementNumberFor(customerId, asAt),
+    statementNumber: statementNumberFor(customerId),
     customerAddressLines: address,
     lines,
     totalOutstanding,

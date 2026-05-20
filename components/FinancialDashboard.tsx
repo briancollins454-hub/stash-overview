@@ -380,6 +380,18 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     return qbAddressByCustomerName.get(normCustomerName(customerName)) || [customerName];
   }, [qbAddressByCustomerName]);
 
+  const qbIdByCustomerName = useMemo(() => {
+    const map = new Map<string, string>();
+    qbCustomerDirectory.forEach(c => {
+      if (c.id) map.set(normCustomerName(c.name), c.id);
+    });
+    return map;
+  }, [qbCustomerDirectory]);
+
+  const resolveQbCustomerId = useCallback((customerName: string): string => {
+    return qbIdByCustomerName.get(normCustomerName(customerName)) || '';
+  }, [qbIdByCustomerName]);
+
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
   const CACHE_KEY = 'stash_finance_jobs';
@@ -1422,7 +1434,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                 <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                   {qbConfigured && (
                     <button
-                      onClick={() => setStatementCustomer({ customerId: account.customerId, name: account.name })}
+                      onClick={() => setStatementCustomer({
+                        customerId: resolveQbCustomerId(account.name) || account.customerId,
+                        name: account.name,
+                      })}
                       className={`p-1 rounded transition-colors ${isDark ? 'hover:bg-slate-600 text-teal-400' : 'hover:bg-teal-50 text-teal-600'}`}
                       title="Open-item statement + email template (QuickBooks)"
                     >
