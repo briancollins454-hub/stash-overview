@@ -21,6 +21,10 @@ export interface StatementPdfOptions {
 const MARGIN = 14;
 const PAGE_W = 210;
 const PAGE_H = 297;
+/** Invoice line table — centered with modest side inset (wider than letterhead text) */
+const TABLE_SIDE = 10;
+const STATEMENT_TABLE_W = PAGE_W - TABLE_SIDE * 2;
+const STATEMENT_TABLE_LEFT = TABLE_SIDE;
 const FOOTER_Y = PAGE_H - 10;
 const { green, greenText, headerText, overdueRed } = STATEMENT_COLORS;
 
@@ -458,33 +462,43 @@ function drawLineTable(
     formatAmount(l.amountDue),
   ]);
 
+  const colW = [
+    STATEMENT_TABLE_W * 0.14,
+    STATEMENT_TABLE_W * 0.20,
+    STATEMENT_TABLE_W * 0.18,
+    STATEMENT_TABLE_W * 0.24,
+    STATEMENT_TABLE_W * 0.24,
+  ];
+
   autoTable(doc, {
     startY,
-    margin: { left: MARGIN, right: MARGIN, bottom: 14 },
+    tableWidth: STATEMENT_TABLE_W,
+    margin: { left: STATEMENT_TABLE_LEFT, right: STATEMENT_TABLE_LEFT, bottom: 14 },
     head: [['DATE', 'INVOICE NO.', 'DUE DATE', 'AMOUNT', 'OPEN AMOUNT']],
     body,
     theme: 'plain',
     styles: {
-      fontSize: 8.5,
+      fontSize: 9,
       textColor: [40, 40, 40],
-      cellPadding: { top: 2.5, right: 2, bottom: 2.5, left: 2 },
+      cellPadding: { top: 2.8, right: 3, bottom: 2.8, left: 3 },
       lineWidth: 0,
       overflow: 'linebreak',
       valign: 'middle',
     },
     headStyles: {
       fontStyle: 'bold',
-      fontSize: 8.5,
+      fontSize: 9,
       fillColor: [...green],
       textColor: [...headerText],
-      cellPadding: { top: 3, right: 2, bottom: 3, left: 2 },
+      cellPadding: { top: 3.2, right: 3, bottom: 3.2, left: 3 },
+      halign: 'center',
     },
     columnStyles: {
-      0: { cellWidth: 22 },
-      1: { cellWidth: 28 },
-      2: { cellWidth: 24 },
-      3: { cellWidth: 24, halign: 'right' },
-      4: { cellWidth: 26, halign: 'right' },
+      0: { cellWidth: colW[0], halign: 'center' },
+      1: { cellWidth: colW[1], halign: 'center' },
+      2: { cellWidth: colW[2], halign: 'center' },
+      3: { cellWidth: colW[3], halign: 'right' },
+      4: { cellWidth: colW[4], halign: 'right' },
     },
     didParseCell: data => {
       if (data.section !== 'body' || data.column.index !== 2) return;
