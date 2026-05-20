@@ -61,19 +61,20 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   const [customerFetchError, setCustomerFetchError] = useState<string | null>(null);
 
   React.useEffect(() => {
-    if (isOpen) {
-      setToEmail(defaultEmail);
-      setContactName('');
-      setCopied(null);
-      setPdfBusy(false);
-      setPdfError(null);
-      setSendBusy(false);
-      setSendResult(null);
-      setShowTextFallback(false);
-      setResolvedCustomer(null);
-      setCustomerFetchError(null);
-    }
-  }, [isOpen, defaultEmail, customerName]);
+    if (!isOpen) return;
+    setToEmail(defaultEmail);
+    setContactName('');
+    setCopied(null);
+    setPdfBusy(false);
+    setPdfError(null);
+    setSendBusy(false);
+    setSendResult(null);
+    setShowTextFallback(false);
+    setResolvedCustomer(customerInfo ?? null);
+    setCustomerFetchError(null);
+    // Only reset when opening a different customer — not when parent re-renders email
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, customerName]);
 
   const matchedInvoices = useMemo(
     () => invoicesForCustomer(qbInvoices, customerName, customerId),
@@ -100,7 +101,8 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
     }
 
     let cancelled = false;
-    setCustomerLoading(true);
+    const seedHasAddress = (customerInfo?.addressLines?.length ?? 0) > 1;
+    if (!seedHasAddress) setCustomerLoading(true);
     setCustomerFetchError(null);
 
     fetch('/api/quickbooks', {
@@ -141,7 +143,9 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       });
 
     return () => { cancelled = true; };
-  }, [isOpen, qbIdForFetch, customerName, customerInfo, defaultEmail]);
+    // customerInfo intentionally omitted — new object each parent render caused address flicker
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, qbIdForFetch, customerName]);
 
   const effectiveCustomer = resolvedCustomer ?? customerInfo ?? null;
 
@@ -237,11 +241,16 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
         companyName,
         accountsEmail,
       });
+      if (!base64) {
+        setSendResult({ ok: false, msg: 'Could not generate PDF attachment' });
+        return;
+      }
+      const attachName = filename.replace(/[^\w.\- ]+/g, '_').replace(/\s+/g, '_');
       const html = buildStatementEmailHtml(statement, {
         companyName,
         accountsEmail,
         contactName,
-        pdfFilename: filename,
+        pdfFilename: attachName,
       });
 
       const resp = await fetch('/api/send-digest', {
@@ -253,15 +262,21 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
           subject: emailTemplate.subject,
           html,
           text: emailTemplate.body,
-          replyTo: accountsEmail || undefined,
-          attachments: [{ filename, content: base64 }],
+          ...(accountsEmail?.includes('@') ? { replyTo: accountsEmail } : {}),
+          attachments: [{ filename: attachName, content: base64 }],
         }),
       });
-      const data = await resp.json().catch(() => ({}));
+      const raw = await resp.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(raw.slice(0, 200) || `Send failed (${resp.status})`);
+      }
       if (resp.ok && data.success) {
         setSendResult({ ok: true, msg: `Statement emailed to ${to}` });
       } else {
-        setSendResult({ ok: false, msg: data.error || 'Failed to send email' });
+        setSendResult({ ok: false, msg: String(data.error || `Failed to send (${resp.status})`) });
       }
     } catch (e: unknown) {
       setSendResult({

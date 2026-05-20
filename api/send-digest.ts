@@ -69,11 +69,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const filename = typeof att.filename === 'string' ? att.filename.trim() : '';
       const content = typeof att.content === 'string' ? att.content : '';
       if (!filename || !content || content.length > 12_000_000) continue;
-      if (!/^[a-zA-Z0-9._ -]+\.pdf$/i.test(filename)) {
+      if (!/^[a-zA-Z0-9._-]+\.pdf$/i.test(filename)) {
         return res.status(400).json({ error: `Invalid attachment filename: ${filename}` });
       }
       attachments.push({ filename, content });
     }
+  }
+
+  if (kind === 'statement' && attachments.length === 0) {
+    return res.status(400).json({ error: 'Statement PDF attachment missing or invalid' });
   }
 
   try {
@@ -84,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       subject,
       html,
       ...(text ? { text } : {}),
-      ...(replyTo ? { reply_to: replyTo } : {}),
+      ...(replyTo ? { replyTo } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
     if (error) return res.status(500).json({ error: error.message });

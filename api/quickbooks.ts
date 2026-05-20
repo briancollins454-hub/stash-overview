@@ -135,10 +135,22 @@ function envFirst(...keys: string[]): string {
   return '';
 }
 
+/** Server-side Supabase key (service role preferred so token row isn't blocked by RLS). */
+function supabaseServerCreds(): { url: string; key: string } | null {
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = (
+    process.env.SUPABASE_SERVICE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_ANON_KEY
+  )?.trim();
+  if (!url || !key) return null;
+  return { url, key };
+}
+
 async function getStoredTokens(): Promise<{ realmId: string; accessToken: string; refreshToken: string; updatedAt: string; expiresIn: number } | null> {
-  const supabaseUrl = process.env.SUPABASE_URL?.trim();
-  const supabaseKey = process.env.SUPABASE_ANON_KEY?.trim();
-  if (!supabaseUrl || !supabaseKey) return null;
+  const creds = supabaseServerCreds();
+  if (!creds) return null;
+  const { url: supabaseUrl, key: supabaseKey } = creds;
 
   try {
     const res = await fetch(`${supabaseUrl}/rest/v1/stash_qbo_tokens?id=eq.${TOKEN_ROW_ID}&select=*`, {
@@ -181,10 +193,9 @@ async function refreshAccessToken(refreshToken: string): Promise<{ accessToken: 
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok || !data.access_token) return null;
 
-    // Update stored tokens
-    const supabaseUrl = process.env.SUPABASE_URL?.trim();
-    const supabaseKey = process.env.SUPABASE_ANON_KEY?.trim();
-    if (supabaseUrl && supabaseKey) {
+    const creds = supabaseServerCreds();
+    if (creds) {
+      const { url: supabaseUrl, key: supabaseKey } = creds;
       await fetch(`${supabaseUrl}/rest/v1/stash_qbo_tokens`, {
         method: 'POST',
         headers: {
@@ -236,10 +247,21 @@ async function resolveConfig(body: Record<string, unknown>) {
       if (refreshed) {
         return { realmId: stored.realmId, accessToken: refreshed.accessToken, baseUrl, minorVersion, source: 'oauth-refreshed' as const };
       }
+      return {
+        realmId: '',
+        accessToken: '',
+        baseUrl,
+        minorVersion,
+        source: 'expired' as const,
+      };
     }
 
     if (!isExpired) {
       return { realmId: stored.realmId, accessToken: stored.accessToken, baseUrl, minorVersion, source: 'oauth' as const };
+    }
+
+    if (!stored.refreshToken) {
+      return { realmId: '', accessToken: '', baseUrl, minorVersion, source: 'expired' as const };
     }
   }
 
@@ -289,8 +311,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const config = await resolveConfig(body);
 
   if (!config.realmId || !config.accessToken) {
+    const expired = config.source === 'expired';
     return res.status(400).json({
-      error: 'QuickBooks not connected. Use the "Connect to QuickBooks" button on the Financial Dashboard, or set QBO_REALM_ID and QBO_ACCESS_TOKEN as env vars.',
+      error: expired
+        ? 'QuickBooks session expired. Click "Connect to QuickBooks" on the Financial Dashboard to sign in again.'
+        : 'QuickBooks not connected. Use the "Connect to QuickBooks" button on the Financial Dashboard, or set QBO_REALM_ID and QBO_ACCESS_TOKEN as env vars.',
+      needsReconnect: expired,
       hasRealmId: !!config.realmId,
       hasAccessToken: !!config.accessToken,
       source: config.source,

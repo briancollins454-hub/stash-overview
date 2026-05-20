@@ -263,20 +263,58 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     }
   };
 
+  const refreshServerQbSession = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/qbo-auth?action=refresh');
+      const data = await res.json();
+      return res.ok && !!data.ok;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const handleQbApiAuthFailure = useCallback((data: Record<string, unknown>): boolean => {
+    const msg = String(data.error || '');
+    if (data.needsReconnect || /not connected|session expired/i.test(msg)) {
+      setQbServerConfigured(false);
+      setQbError(msg || 'QuickBooks session expired. Click Connect to QuickBooks.');
+      return true;
+    }
+    return false;
+  }, []);
+
   const fetchQBData = useCallback(async () => {
     setQbLoading(true); setQbError(null);
     const body: Record<string, string> = {};
     if (settings.qboRealmId) body.realmId = settings.qboRealmId;
     if (settings.qboAccessToken) body.accessToken = settings.qboAccessToken;
     if (settings.qboBaseUrl) body.baseUrl = settings.qboBaseUrl;
-    const post = (action: string) =>
-      fetch('/api/quickbooks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, action }),
-      });
 
     try {
+      if (qbServerConfigured && !settings.qboRealmId) {
+        const statusRes = await fetch('/api/qbo-auth?action=status');
+        const status = await statusRes.json();
+        if (status.needsRefresh) {
+          const ok = await refreshServerQbSession();
+          if (!ok) {
+            setQbServerConfigured(false);
+            setQbError('QuickBooks session expired. Click Connect to QuickBooks.');
+            return;
+          }
+        } else if (!status.connected) {
+          setQbServerConfigured(false);
+          setQbError('QuickBooks not connected. Click Connect to QuickBooks.');
+          return;
+        }
+      }
+
+      const post = (action: string) =>
+        fetch('/api/quickbooks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, action }),
+        });
+
       const [apRes, arRes, credRes, dirRes] = await Promise.all([
         post('ap-aging'),
         post('ar-balance'),
@@ -289,6 +327,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         parseQbJson(credRes, 'Credits'),
         parseQbJson(dirRes, 'Customers'),
       ]);
+
+      if (!apData.ok && handleQbApiAuthFailure(apData)) return;
+      if (!arData.ok && handleQbApiAuthFailure(arData)) return;
+
       if (apData.ok) setQbBills((apData.bills as typeof qbBills) || []);
       else setQbError(String(apData.error || 'A/P query failed'));
       if (arData.ok) setQbInvoices((arData.invoices as typeof qbInvoices) || []);
@@ -300,7 +342,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     } finally {
       setQbLoading(false);
     }
-  }, [settings.qboRealmId, settings.qboAccessToken, settings.qboBaseUrl]);
+  }, [
+    settings.qboRealmId,
+    settings.qboAccessToken,
+    settings.qboBaseUrl,
+    qbServerConfigured,
+    refreshServerQbSession,
+    handleQbApiAuthFailure,
+  ]);
 
   const connectToQuickBooks = useCallback(async () => {
     setQbConnecting(true);
@@ -327,7 +376,20 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     const ctrl = new AbortController();
     fetch('/api/qbo-auth?action=status', { signal: ctrl.signal })
       .then(r => r.json())
-      .then(data => { if (data.connected) setQbServerConfigured(true); })
+      .then(async data => {
+        if (!data.connected) return;
+        if (data.needsRefresh) {
+          const ref = await fetch('/api/qbo-auth?action=refresh', { signal: ctrl.signal });
+          const refData = await ref.json();
+          if (ref.ok && refData.ok) {
+            setQbServerConfigured(true);
+            return;
+          }
+          setQbError(refData.error || 'QuickBooks session expired. Click Connect to QuickBooks.');
+          return;
+        }
+        setQbServerConfigured(true);
+      })
       .catch(() => { /* aborted or network error — ignore */ });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -470,6 +532,25 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       addressLines: [customerName],
     };
   }, [qbCustomerById, qbCustomerByName, qbCustomerDirectory, qbInvoices]);
+
+  const openStatementCustomerInfo = useMemo(() => {
+    if (!statementCustomer) return undefined;
+    const inv = qbInvoices.find(
+      i => normCustomerName(i.customerName) === normCustomerName(statementCustomer.name),
+    );
+    const qbId = inv?.customerId || resolveQbCustomerId(statementCustomer.name);
+    const info = resolveQbCustomerInfo(statementCustomer.name, qbId);
+    return {
+      ...info,
+      accountId: qbId || info.accountId,
+      email: info.email || resolveQbEmail(statementCustomer.name) || null,
+    };
+  }, [statementCustomer, qbInvoices, resolveQbCustomerId, resolveQbCustomerInfo, resolveQbEmail]);
+
+  const openStatementDefaultEmail = useMemo(
+    () => (statementCustomer ? resolveQbEmail(statementCustomer.name) : ''),
+    [statementCustomer, resolveQbEmail],
+  );
 
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
@@ -2037,20 +2118,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         onClose={() => setStatementCustomer(null)}
         customerName={statementCustomer?.name || ''}
         customerId={statementCustomer?.customerId || ''}
-        customerInfo={statementCustomer ? (() => {
-          const inv = qbInvoices.find(
-            i => normCustomerName(i.customerName) === normCustomerName(statementCustomer.name),
-          );
-          const qbId = inv?.customerId || resolveQbCustomerId(statementCustomer.name);
-          const info = resolveQbCustomerInfo(statementCustomer.name, qbId);
-          return {
-            ...info,
-            accountId: qbId || info.accountId,
-            email: info.email || resolveQbEmail(statementCustomer.name) || null,
-          };
-        })() : undefined}
+        customerInfo={openStatementCustomerInfo}
         qbInvoices={qbInvoices}
-        defaultEmail={statementCustomer ? resolveQbEmail(statementCustomer.name) : ''}
+        defaultEmail={openStatementDefaultEmail}
         isDark={isDark}
       />
     </div>

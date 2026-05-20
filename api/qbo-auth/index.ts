@@ -55,7 +55,11 @@ function verifySignedState(state: string, secret: string): boolean {
 
 function getSupabase() {
   const url = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_ANON_KEY?.trim();
+  const key = (
+    process.env.SUPABASE_SERVICE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_ANON_KEY
+  )?.trim();
   if (!url || !key) throw new Error('Supabase not configured');
   return { url, key };
 }
@@ -259,17 +263,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'status') {
       const existing = await supabaseGet('stash_qbo_tokens', TOKEN_ROW_ID);
       if (!existing?.access_token) {
-        return res.json({ connected: false });
+        return res.json({ connected: false, reason: 'no_tokens' });
       }
 
       const updatedAt = new Date(existing.updated_at || existing.created_at).getTime();
       const expiresIn = (existing.expires_in || 3600) * 1000;
-      const isExpired = Date.now() > updatedAt + expiresIn;
+      const isExpired = Date.now() > updatedAt + expiresIn - 60000;
 
       return res.json({
-        connected: true,
+        connected: !isExpired || !!existing.refresh_token,
         realmId: existing.realm_id,
         isExpired,
+        needsRefresh: isExpired && !!existing.refresh_token,
         updatedAt: existing.updated_at || existing.created_at,
         expiresIn: existing.expires_in,
       });
