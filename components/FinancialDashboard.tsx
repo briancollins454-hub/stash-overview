@@ -72,6 +72,7 @@ interface QBCustomerDirectoryEntry {
   id: string;
   name: string;
   email: string | null;
+  phone: string | null;
   addressLines: string[];
   balance: number;
 }
@@ -391,6 +392,24 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const resolveQbCustomerId = useCallback((customerName: string): string => {
     return qbIdByCustomerName.get(normCustomerName(customerName)) || '';
   }, [qbIdByCustomerName]);
+
+  const qbCustomerByName = useMemo(() => {
+    const map = new Map<string, QBCustomerDirectoryEntry>();
+    qbCustomerDirectory.forEach(c => map.set(normCustomerName(c.name), c));
+    return map;
+  }, [qbCustomerDirectory]);
+
+  const resolveQbCustomerInfo = useCallback((customerName: string) => {
+    const qb = qbCustomerByName.get(normCustomerName(customerName));
+    const accountId = qb?.id || '';
+    return {
+      accountId,
+      displayName: customerName,
+      email: qb?.email ?? null,
+      phone: qb?.phone ?? null,
+      addressLines: qb?.addressLines?.length ? qb.addressLines : [customerName],
+    };
+  }, [qbCustomerByName]);
 
   // --- Customers with credit (negative outstanding from Deco) - will be computed below after customerAccounts ---
 
@@ -1956,7 +1975,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         onClose={() => setStatementCustomer(null)}
         customerName={statementCustomer?.name || ''}
         customerId={statementCustomer?.customerId || ''}
-        customerAddressLines={statementCustomer ? resolveQbAddress(statementCustomer.name) : []}
+        customerInfo={statementCustomer ? (() => {
+          const info = resolveQbCustomerInfo(statementCustomer.name);
+          const qbId = resolveQbCustomerId(statementCustomer.name);
+          return {
+            ...info,
+            accountId: qbId || info.accountId,
+            email: info.email || resolveQbEmail(statementCustomer.name) || null,
+          };
+        })() : undefined}
         qbInvoices={qbInvoices}
         defaultEmail={statementCustomer ? resolveQbEmail(statementCustomer.name) : ''}
         isDark={isDark}

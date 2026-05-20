@@ -276,7 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Customer display names + primary email (for open-item statement chase emails)
     if (action === 'customer-directory') {
       const result = await runQuery(
-        'SELECT Id, DisplayName, PrimaryEmailAddr, BillAddr, Balance FROM Customer MAXRESULTS 1000',
+        'SELECT Id, DisplayName, PrimaryEmailAddr, PrimaryPhone, BillAddr, Balance FROM Customer MAXRESULTS 1000',
       );
       if (!result.ok) return res.status(result.status).json({ error: `QBO customer directory failed (${result.status})`, detail: result.text.slice(0, 500) });
 
@@ -306,12 +306,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const results = customers.map(c => {
         const emailObj = c.PrimaryEmailAddr as { Address?: string } | undefined;
         const email = typeof emailObj?.Address === 'string' ? emailObj.Address.trim() : '';
+        const phoneObj = c.PrimaryPhone as { FreeFormNumber?: string } | undefined;
+        const phone = typeof phoneObj?.FreeFormNumber === 'string' ? phoneObj.FreeFormNumber.trim() : '';
         const name = typeof c.DisplayName === 'string' ? c.DisplayName : '';
         const addressLines = billAddrLines(c);
         return {
           id: String(c.Id ?? ''),
           name,
           email: email || null,
+          phone: phone || null,
           addressLines: addressLines.length > 0 ? addressLines : [name],
           balance: typeof c.Balance === 'number' ? c.Balance : Number(c.Balance) || 0,
         };

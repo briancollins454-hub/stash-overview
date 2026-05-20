@@ -24,14 +24,24 @@ export interface AgingSummary {
   total: number;
 }
 
+export interface StatementCustomerInfo {
+  accountId: string;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
+  addressLines: string[];
+}
+
 export interface OpenItemStatement {
   customerName: string;
   customerId: string;
+  customer: StatementCustomerInfo;
   /** Long form for email, e.g. "20 May 2026" */
   asAtDate: string;
   /** DD/MM/YYYY for PDF header */
   asAtDateShort: string;
   statementNumber: string;
+  /** @deprecated use customer.addressLines */
   customerAddressLines: string[];
   lines: OpenItemLine[];
   totalOutstanding: number;
@@ -41,11 +51,10 @@ export interface OpenItemStatement {
 export interface OpenItemLine {
   invoiceId: string;
   docNumber: string;
-  /** DD/MM/YYYY — transaction / invoice date column */
   txnDateShort: string;
   dueDateShort: string;
-  /** e.g. "Invoice No.218412: Due 06/04/2024." */
-  description: string;
+  /** Past due (due date before today) */
+  isOverdue: boolean;
   daysPastDue: number;
   amountDue: number;
 }
@@ -142,12 +151,31 @@ export function invoicesForCustomer(
   });
 }
 
+export function buildStatementCustomerInfo(
+  customerName: string,
+  customerId: string,
+  addressLines: string[] = [],
+  email: string | null = null,
+  phone: string | null = null,
+): StatementCustomerInfo {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const raw = addressLines.length > 0 ? addressLines : [customerName];
+  const addrOnly = raw.filter(l => norm(l) !== norm(customerName));
+  return {
+    accountId: customerId,
+    displayName: customerName,
+    email: email?.trim() || null,
+    phone: phone?.trim() || null,
+    addressLines: [customerName, customerName, ...addrOnly],
+  };
+}
+
 export function buildOpenItemStatement(
   customerName: string,
   customerId: string,
   invoices: OpenItemInvoice[],
   asAt: Date = new Date(),
-  customerAddressLines: string[] = [],
+  customerInfo?: StatementCustomerInfo,
 ): OpenItemStatement | null {
   const open = invoices
     .filter(inv => inv.balance > 0.005)
@@ -161,26 +189,25 @@ export function buildOpenItemStatement(
 
   const lines: OpenItemLine[] = open.map(inv => {
     const docNumber = inv.docNumber || inv.id;
+    const dpd = daysPastDue(inv.dueDate);
     return {
       invoiceId: inv.id,
       docNumber,
       txnDateShort: formatDateSlash(inv.txnDate),
       dueDateShort: formatDateSlash(inv.dueDate),
-      description: invoiceDescription(docNumber, inv.dueDate),
-      daysPastDue: daysPastDue(inv.dueDate),
+      isOverdue: dpd > 0,
+      daysPastDue: dpd,
       amountDue: inv.balance,
     };
   });
 
   const totalOutstanding = lines.reduce((s, l) => s + l.amountDue, 0);
-  const norm = (s: string) => s.trim().toLowerCase();
-  const rawAddr = customerAddressLines.length > 0 ? customerAddressLines : [customerName];
-  const addrOnly = rawAddr.filter(l => norm(l) !== norm(customerName));
-  const address = [customerName, customerName, ...addrOnly];
+  const customer = customerInfo ?? buildStatementCustomerInfo(customerName, customerId);
 
   return {
     customerName,
     customerId,
+    customer,
     asAtDate: asAt.toLocaleDateString('en-GB', {
       day: '2-digit',
       month: 'long',
@@ -194,7 +221,7 @@ export function buildOpenItemStatement(
       return `${day}/${month}/${year}`;
     })(),
     statementNumber: statementNumberFor(customerId),
-    customerAddressLines: address,
+    customerAddressLines: customer.addressLines,
     lines,
     totalOutstanding,
     aging: buildAgingSummary(open),
@@ -214,12 +241,15 @@ export function formatStatementText(
     `Customer: ${statement.customerName}`,
     `Statement no. ${statement.statementNumber} · ${statement.asAtDateShort}`,
     '',
-    pad('Date', 12) + pad('Description', 36) + 'Amount',
+    pad('Date', 10) + pad('Invoice', 12) + pad('Due', 12) + 'Amount',
     '-'.repeat(62),
   ];
 
   const rows = statement.lines.map(l =>
-    pad(l.txnDateShort, 12) + pad(l.description, 36) + formatMoneyPlain(l.amountDue),
+    pad(l.txnDateShort, 10)
+      + pad(l.docNumber, 12)
+      + pad(l.dueDateShort + (l.isOverdue ? ' *' : ''), 12)
+      + formatMoneyPlain(l.amountDue),
   );
 
   return [

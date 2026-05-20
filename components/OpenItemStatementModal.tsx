@@ -9,6 +9,7 @@ import {
   invoicesForCustomer,
   mailtoLink,
   type OpenItemInvoice,
+  type StatementCustomerInfo,
 } from '../utils/openItemStatement';
 import {
   downloadOpenItemStatementPdf,
@@ -35,7 +36,7 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
   onClose,
   customerName,
   customerId,
-  customerAddressLines = [],
+  customerInfo,
   qbInvoices,
   defaultEmail = '',
   isDark,
@@ -72,9 +73,9 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
       customerId,
       matchedInvoices,
       new Date(),
-      customerAddressLines,
+      customerInfo,
     );
-  }, [isOpen, customerName, customerId, matchedInvoices, customerAddressLines]);
+  }, [isOpen, customerName, customerId, matchedInvoices, customerInfo]);
 
   const pdfFilename = useMemo(
     () => (statement ? statementPdfFilename(statement.customerName) : ''),
