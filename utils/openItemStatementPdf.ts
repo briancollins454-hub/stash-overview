@@ -236,10 +236,25 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: AgingSummary
   return y + 15;
 }
 
+const PAYMENT_SECTION_HEIGHT = 42;
+const AGING_SECTION_HEIGHT = 16;
+
 function drawPaymentBlock(doc: import('jspdf').jsPDF, y: number, payment: typeof STATEMENT_PAYMENT): number {
+  const boxW = PAGE_W - MARGIN * 2;
+  const boxH = 34;
+  doc.setFillColor(248, 252, 240);
+  doc.setDrawColor(...green);
+  doc.setLineWidth(0.3);
+  doc.rect(MARGIN, y, boxW, boxH, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(...greenText);
+  doc.text('How to pay', MARGIN + 3, y + 5);
+
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(60, 60, 60);
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 30, 30);
   const lines = [
     payment.cardIntro,
     payment.stripeGbp,
@@ -249,12 +264,30 @@ function drawPaymentBlock(doc: import('jspdf').jsPDF, y: number, payment: typeof
     `Sort Code: ${payment.sortCode}`,
     `Account No: ${payment.accountNo}`,
   ];
-  let cy = y;
+  let cy = y + 10;
   lines.forEach(line => {
-    doc.text(line, MARGIN, cy);
-    cy += 3.5;
+    doc.text(line, MARGIN + 3, cy);
+    cy += 3.8;
   });
-  return cy + 2;
+  return y + boxH + 4;
+}
+
+/** Aging summary + payment — always shown at end of statement. */
+function drawStatementFooter(
+  doc: import('jspdf').jsPDF,
+  startY: number,
+  statement: OpenItemStatement,
+  payment: typeof STATEMENT_PAYMENT,
+): number {
+  let y = startY;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(0, 0, 0);
+  doc.text('Aging summary', MARGIN, y);
+  y += 4;
+  y = drawAgingBar(doc, y, statement.aging);
+  y = drawPaymentBlock(doc, y, payment);
+  return y;
 }
 
 function drawPageFooter(doc: import('jspdf').jsPDF, pageNum: number, totalPages: number) {
@@ -280,8 +313,6 @@ function drawLineTable(
   autoTable: AutoTableModule['default'],
   startY: number,
   chunk: OpenItemStatement['lines'],
-  pageIndex: number,
-  totalPages: number,
 ) {
   const body = chunk.map(l => [
     l.txnDateShort,
@@ -318,10 +349,15 @@ function drawLineTable(
       2: { cellWidth: 26, halign: 'right' },
       3: { cellWidth: 28, halign: 'right' },
     },
-    didDrawPage: () => {
-      drawPageFooter(doc, pageIndex + 1, totalPages);
-    },
   });
+}
+
+function redrawAllFooters(doc: import('jspdf').jsPDF) {
+  const total = doc.getNumberOfPages();
+  for (let p = 1; p <= total; p++) {
+    doc.setPage(p);
+    drawPageFooter(doc, p, total);
+  }
 }
 
 export async function downloadOpenItemStatementPdf(
@@ -340,34 +376,35 @@ export async function downloadOpenItemStatementPdf(
   const payment = opts.payment || STATEMENT_PAYMENT;
 
   const FIRST_PAGE_LINES = 18;
-  const CONT_PAGE_LINES = 24;
+  const CONT_PAGE_LINES = 26;
   const pageChunks = chunkLines(statement.lines, FIRST_PAGE_LINES, CONT_PAGE_LINES);
-  const totalPages = pageChunks.length;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   pageChunks.forEach((chunk, pageIndex) => {
     if (pageIndex > 0) doc.addPage();
 
-    let tableY: number;
-    if (pageIndex === 0) {
-      tableY = drawFirstPageLetterhead(
-        doc,
-        statement,
-        company,
-        accountsEmail,
-        website,
-        stashLogo,
-      );
-    } else {
-      let y = MARGIN;
-      y = drawAgingBar(doc, y, statement.aging);
-      y = drawPaymentBlock(doc, y, payment);
-      tableY = y + 2;
-    }
+    const tableY = pageIndex === 0
+      ? drawFirstPageLetterhead(doc, statement, company, accountsEmail, website, stashLogo)
+      : MARGIN;
 
-    drawLineTable(doc, autoTable, tableY, chunk, pageIndex, totalPages);
+    drawLineTable(doc, autoTable, tableY, chunk);
   });
+
+  // Always end with aging + payment (Stripe + bank) so customers can pay
+  const footerNeeded = AGING_SECTION_HEIGHT + PAYMENT_SECTION_HEIGHT + 8;
+  doc.setPage(doc.getNumberOfPages());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let footerY = ((doc as any).lastAutoTable?.finalY as number | undefined) ?? MARGIN + 40;
+  footerY += 6;
+
+  if (footerY + footerNeeded > FOOTER_Y - 4) {
+    doc.addPage();
+    footerY = MARGIN;
+  }
+
+  drawStatementFooter(doc, footerY, statement, payment);
+  redrawAllFooters(doc);
 
   doc.save(statementPdfFilename(statement.customerName));
 }

@@ -1,3 +1,5 @@
+import { formatPaymentInstructions } from '../constants/statementBranding';
+
 // ─── Open-item statement builder (QuickBooks AR → copy/paste + email) ─────
 // QBO has no “create statement PDF” API; we assemble open invoices into a
 // plain-text statement and a ready-to-paste email shell for accounts staff.
@@ -269,6 +271,8 @@ export function buildStatementEmailTemplate(
       '',
     );
   }
+
+  bodyParts.push(formatPaymentInstructions(), '');
 
   bodyParts.push(
     'If you have already remitted payment for any of these items, please send remittance advice to ' +

@@ -32,3 +32,21 @@ export const STATEMENT_PAYMENT = {
   sortCode: '93-80-17',
   accountNo: '71131074',
 } as const;
+
+/** Plain-text payment block for emails and copy-paste. */
+export function formatPaymentInstructions(
+  payment: typeof STATEMENT_PAYMENT = STATEMENT_PAYMENT,
+): string {
+  return [
+    'HOW TO PAY',
+    '',
+    payment.cardIntro,
+    payment.stripeGbp,
+    payment.stripeEuro,
+    '',
+    payment.bankIntro,
+    `Account Name: ${payment.accountName}`,
+    `Sort Code: ${payment.sortCode}`,
+    `Account No: ${payment.accountNo}`,
+  ].join('\n');
+}
