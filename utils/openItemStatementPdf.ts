@@ -236,12 +236,13 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: AgingSummary
   return y + 15;
 }
 
-const PAYMENT_SECTION_HEIGHT = 42;
+const PAYMENT_SECTION_HEIGHT = 44;
 const AGING_SECTION_HEIGHT = 16;
 
 function drawPaymentBlock(doc: import('jspdf').jsPDF, y: number, payment: typeof STATEMENT_PAYMENT): number {
   const boxW = PAGE_W - MARGIN * 2;
-  const boxH = 34;
+  const boxH = 36;
+  const textX = MARGIN + 3;
   doc.setFillColor(248, 252, 240);
   doc.setDrawColor(...green);
   doc.setLineWidth(0.3);
@@ -250,25 +251,31 @@ function drawPaymentBlock(doc: import('jspdf').jsPDF, y: number, payment: typeof
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...greenText);
-  doc.text('How to pay', MARGIN + 3, y + 5);
+  doc.text('How to pay', textX, y + 5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(30, 30, 30);
-  const lines = [
-    payment.cardIntro,
-    payment.stripeGbp,
-    payment.stripeEuro,
-    payment.bankIntro,
-    `Account Name: ${payment.accountName}`,
-    `Sort Code: ${payment.sortCode}`,
-    `Account No: ${payment.accountNo}`,
-  ];
   let cy = y + 10;
-  lines.forEach(line => {
-    doc.text(line, MARGIN + 3, cy);
-    cy += 3.8;
+  doc.text(payment.cardIntro, textX, cy);
+  cy += 4.5;
+
+  payment.stripeLinks.forEach(link => {
+    doc.setTextColor(0, 80, 160);
+    doc.textWithLink(link.label, textX, cy, { url: link.url });
+    cy += 4.5;
   });
+
+  doc.setTextColor(30, 30, 30);
+  cy += 1;
+  doc.text(payment.bankIntro, textX, cy);
+  cy += 4;
+  doc.text(`Account Name: ${payment.accountName}`, textX, cy);
+  cy += 3.8;
+  doc.text(`Sort Code: ${payment.sortCode}`, textX, cy);
+  cy += 3.8;
+  doc.text(`Account No: ${payment.accountNo}`, textX, cy);
+
   return y + boxH + 4;
 }
 
