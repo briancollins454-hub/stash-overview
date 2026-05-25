@@ -199,11 +199,9 @@ async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage 
   imageCache.delete(`dim:${resolveAssetUrl(url)}`);
   const loaded = await loadImageWithDimensions(url);
   if (!loaded) return null;
-  return {
-    dataUrl: loaded.dataUrl,
-    width: BRAND_TRIO_LOGO_SIZE.width,
-    height: BRAND_TRIO_LOGO_SIZE.height,
-  };
+  const w = loaded.width > 1 ? loaded.width : BRAND_TRIO_LOGO_SIZE.width;
+  const h = loaded.height > 1 ? loaded.height : BRAND_TRIO_LOGO_SIZE.height;
+  return { dataUrl: loaded.dataUrl, width: w, height: h };
 }
 
 /** Fit image in box preserving aspect ratio (mm). */
@@ -229,8 +227,8 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 72;
-  const maxH = 10;
+  const maxW = 78;
+  const maxH = 11;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);

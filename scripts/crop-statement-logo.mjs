@@ -16,7 +16,7 @@ const SHOPIFY_URL =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
 /** Three-logo row on the 1000×1000 Shopify file (not the large mark at the top). */
-const CROP_1000 = { x0: 118, x1: 818, y0: 205, y1: 265 };
+const CROP_1000 = { x0: 118, x1: 818, y0: 218, y1: 278 };
 
 function isInk(r, g, b, a) {
   return a >= 20 && !(r <= 12 && g <= 12 && b <= 12);
