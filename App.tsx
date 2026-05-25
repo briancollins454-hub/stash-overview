@@ -10,7 +10,12 @@ import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
 import { isShopifyLineItemActiveForOps } from './services/shopifyLineItems';
-import { isShopifyOrderClosedForCloud, isHiddenFromDefaultDashboard, reconcileShopifyOrderFinancialFulfillment } from './services/shopifyOrderStatus';
+import {
+  canTreatOrderAsFulfilledFromProduction,
+  isShopifyOrderClosedForCloud,
+  isHiddenFromDefaultDashboard,
+  reconcileShopifyOrderFinancialFulfillment,
+} from './services/shopifyOrderStatus';
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
 import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
@@ -1848,8 +1853,17 @@ const App: React.FC = () => {
           // Segregate fully produced Deco jobs out of the live queue, treating them as effectively fulfilled.
           const hasShippingTracking = shipStationData.has(order.orderNumber);
           const isRefunded = order.fulfillmentStatus === 'refunded';
-          const isPhysicallyShipped = !isRefunded && (currentStatus === 'Shipped' || currentStatus === 'Invoiced' || (currentStatus === 'Completed' && hasShippingTracking));
-          const effectiveFulfillmentStatus = isRefunded ? 'refunded' : isPhysicallyShipped ? 'fulfilled' : order.fulfillmentStatus;
+          const isPhysicallyShipped =
+            !isRefunded &&
+            canTreatOrderAsFulfilledFromProduction(order.fulfillmentStatus) &&
+            (currentStatus === 'Shipped' ||
+              currentStatus === 'Invoiced' ||
+              (currentStatus === 'Completed' && hasShippingTracking));
+          const effectiveFulfillmentStatus = isRefunded
+            ? 'refunded'
+            : isPhysicallyShipped
+              ? 'fulfilled'
+              : order.fulfillmentStatus;
           const effectiveClosedAt = isPhysicallyShipped && !order.closedAt ? (decoJob?.productionDueDate || order.date) : order.closedAt;
 
           return {

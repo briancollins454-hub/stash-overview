@@ -42,3 +42,14 @@ export function isHiddenFromDefaultDashboard(fulfillmentStatus: string | undefin
   const s = (fulfillmentStatus || '').toLowerCase();
   return s === 'fulfilled' || s === 'refunded';
 }
+
+/**
+ * ShipStation / Deco "completed" must not mark an order fulfilled when Shopify still has
+ * unfulfilled or partially fulfilled lines.
+ */
+export function canTreatOrderAsFulfilledFromProduction(
+  shopifyFulfillmentStatus: string | undefined,
+): boolean {
+  const s = (shopifyFulfillmentStatus || '').toLowerCase();
+  return s === 'fulfilled' || s === 'restocked';
+}

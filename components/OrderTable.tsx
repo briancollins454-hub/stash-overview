@@ -948,7 +948,9 @@ const OrderTable: React.FC<OrderTableProps> = ({
                         <td className="px-6 py-4 whitespace-nowrap">
                              <div className={`inline-flex px-2 py-1 text-[10px] font-bold rounded border capitalize uppercase tracking-widest ${shopifyStatusClass}`}>
                                 <span className={`inline-flex items-center gap-2 ${shopifyLink ? 'cursor-pointer' : ''}`} onClick={(e) => {e.stopPropagation(); if (shopifyLink) window.open(shopifyLink, '_blank')}}>
-                                    {order.shopify.fulfillmentStatus}
+                                    {order.shopify.fulfillmentStatus === 'partial'
+                                      ? 'partially fulfilled'
+                                      : order.shopify.fulfillmentStatus}
                                     {shopifyLink && <ExternalLink className="w-3 h-3 opacity-50" />}
                                 </span>
                              </div>
