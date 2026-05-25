@@ -66,6 +66,11 @@ interface LoadedImage {
   height: number;
 }
 
+function pngDimensionsFromBuffer(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 24 || buf[0] !== 0x89 || buf[1] !== 0x50) return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
 /** Node / Vercel — no Image or FileReader. */
 async function loadImageServer(url: string): Promise<LoadedImage | null> {
   try {
@@ -75,7 +80,12 @@ async function loadImageServer(url: string): Promise<LoadedImage | null> {
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 8) return null;
     const dataUrl = `data:${ct};base64,${buf.toString('base64')}`;
-    return { dataUrl, width: BRAND_TRIO_LOGO_SIZE.width, height: BRAND_TRIO_LOGO_SIZE.height };
+    const dims = pngDimensionsFromBuffer(buf);
+    return {
+      dataUrl,
+      width: dims?.width ?? BRAND_TRIO_LOGO_SIZE.width,
+      height: dims?.height ?? BRAND_TRIO_LOGO_SIZE.height,
+    };
   } catch {
     return null;
   }
@@ -227,9 +237,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Match legacy statement PDF: Marx Corporate + Stash Shop + Stash Inc stacked
-  const maxW = 58;
-  const maxH = 26;
+  // Legacy PDF: Marx Corporate, Stash Shop, Stash Inc stacked vertically
+  const maxW = 52;
+  const maxH = 34;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
