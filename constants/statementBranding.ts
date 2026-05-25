@@ -8,7 +8,11 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-/** Marx + Stash logos for statement header (white background). Regenerate: node scripts/crop-statement-logo.mjs */
+/** Source: Shopify brand_trio_image (1000×1000). Crop keeps rows 2–3 only (not the large top mark). */
+export const BRAND_TRIO_SHOPIFY_URL =
+  'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
+
+/** Cropped strip for PDF header (white bg). Regenerate: node scripts/crop-statement-logo.mjs */
 export const BRAND_TRIO_LOGO_URL = new URL(
   '../public/statement-brand-trio.png',
   import.meta.url,

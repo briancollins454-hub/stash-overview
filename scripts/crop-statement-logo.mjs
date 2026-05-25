@@ -14,6 +14,7 @@ const out = path.join(root, 'public/statement-brand-trio.png');
 const sourceOut = path.join(root, 'public/statement-brand-trio-source.png');
 
 const SHOPIFY_URL =
+  process.env.BRAND_TRIO_SHOPIFY_URL ||
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
 /** Marx trio + Stash / Stash Inc rows (excludes the large top-left mark). */
