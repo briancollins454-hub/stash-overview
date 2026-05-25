@@ -313,14 +313,14 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 80;
-  const maxH = 34;
+  const maxW = 88;
+  const maxH = 48;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
       const x = rightX - w;
       doc.addImage(image.dataUrl, imageFormat(image.dataUrl), x, topY, w, h);
-      return topY + h + 2;
+      return topY + h;
     } catch {
       /* text fallback */
     }
@@ -397,8 +397,8 @@ function drawFirstPageLetterhead(
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  // Right-column meta sits below the logo, not level with the left "Statement" title
-  let ry = Math.max(logoBottom + 1, topY + 14);
+  // Statement no. / date / total — always below logo (never overlap artwork)
+  let ry = logoBottom + 5;
   const meta: [string, string][] = [
     ['STATEMENT NO.', statement.statementNumber],
     ['DATE', statement.asAtDateShort],
