@@ -272,22 +272,38 @@ async function trimBrandLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
   });
 }
 
+/** Square CDN master → use trimmed artwork dimensions so jsPDF keeps aspect ratio. */
+function normalizeLogoDimensions(loaded: LoadedImage): LoadedImage {
+  const squareMaster =
+    loaded.width >= 900 &&
+    loaded.height >= 900 &&
+    Math.abs(loaded.width - loaded.height) < 80;
+  if (squareMaster) {
+    return {
+      dataUrl: loaded.dataUrl,
+      width: BRAND_TRIO_LOGO_SIZE.width,
+      height: BRAND_TRIO_LOGO_SIZE.height,
+    };
+  }
+  return loaded;
+}
+
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-  const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
-  imageCache.delete(`dim:${resolveAssetUrl(url)}`);
-  let loaded = await loadImageWithDimensions(url);
+  const trimmed = resolveAssetUrl('/statement-brand-trio.png?v=5');
+  const primary = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
+  imageCache.delete(`dim:${trimmed}`);
+  imageCache.delete(`dim:${resolveAssetUrl(primary)}`);
+
+  let loaded = await loadImageWithDimensions(trimmed);
   if (!loaded) {
-    const fallback = resolveAssetUrl('/statement-brand-trio.png');
-    loaded = await loadImageWithDimensions(fallback);
+    loaded = await loadImageWithDimensions(resolveAssetUrl(primary));
   }
   if (!loaded) return null;
   if (loaded.width >= 900 && loaded.height >= 900) {
     loaded = await trimBrandLogoPadding(loaded);
   }
-  const w = loaded.width > 1 ? loaded.width : BRAND_TRIO_LOGO_SIZE.width;
-  const h = loaded.height > 1 ? loaded.height : BRAND_TRIO_LOGO_SIZE.height;
-  return { dataUrl: loaded.dataUrl, width: w, height: h };
+  return normalizeLogoDimensions(loaded);
 }
 
 /** Fit image in box preserving aspect ratio (mm). */
@@ -307,20 +323,22 @@ function fitImageMm(
   return { w, h };
 }
 
+const LOGO_MAX_W_MM = 86;
+const LOGO_MAX_H_MM = 50;
+const META_BELOW_LOGO_MM = 10;
+
 function drawBrandLogo(
   doc: import('jspdf').jsPDF,
   image: LoadedImage | null,
   rightX: number,
   topY: number,
-): number {
-  const maxW = 88;
-  const maxH = 48;
+): { bottom: number; drawnH: number } {
   if (image) {
     try {
-      const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);
+      const { w, h } = fitImageMm(image.width, image.height, LOGO_MAX_W_MM, LOGO_MAX_H_MM);
       const x = rightX - w;
       doc.addImage(image.dataUrl, imageFormat(image.dataUrl), x, topY, w, h);
-      return topY + h;
+      return { bottom: topY + h, drawnH: h };
     } catch {
       /* text fallback */
     }
@@ -328,8 +346,39 @@ function drawBrandLogo(
   doc.setFont('helvetica', 'bolditalic');
   doc.setFontSize(12);
   doc.setTextColor(...greenText);
-  doc.text('MARX CORPORATE', rightX - maxW, topY + 8);
-  return topY + 12;
+  doc.text('MARX CORPORATE', rightX - LOGO_MAX_W_MM, topY + 8);
+  return { bottom: topY + 12, drawnH: 12 };
+}
+
+function drawStatementMeta(
+  doc: import('jspdf').jsPDF,
+  statement: OpenItemStatement,
+  rightX: number,
+  startY: number,
+): number {
+  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  let ry = startY;
+  const meta: [string, string][] = [
+    ['STATEMENT NO.', statement.statementNumber],
+    ['DATE', statement.asAtDateShort],
+    ['TOTAL DUE GBP', formatAmount(statement.totalOutstanding)],
+    ['ENCLOSED', ''],
+  ];
+  meta.forEach(([label, value]) => {
+    doc.text(label, rightX, ry, { align: 'right' });
+    ry += 4;
+    if (value) {
+      doc.setFont('helvetica', 'normal');
+      doc.text(value, rightX, ry, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      ry += 5;
+    } else {
+      ry += 3;
+    }
+  });
+  return ry;
 }
 
 function drawFirstPageLetterhead(
@@ -345,7 +394,9 @@ function drawFirstPageLetterhead(
   const topY = MARGIN;
   const c = statement.customer;
 
-  const logoBottom = drawBrandLogo(doc, brandLogo, rightX, topY);
+  const { bottom: logoBottom, drawnH: logoH } = drawBrandLogo(doc, brandLogo, rightX, topY);
+  const metaTopY = topY + logoH + META_BELOW_LOGO_MM;
+  const metaBottomY = drawStatementMeta(doc, statement, rightX, metaTopY);
 
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
@@ -395,30 +446,8 @@ function drawFirstPageLetterhead(
     ty += 4;
   });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  // Statement no. / date / total — always below logo (never overlap artwork)
-  let ry = logoBottom + 5;
-  const meta: [string, string][] = [
-    ['STATEMENT NO.', statement.statementNumber],
-    ['DATE', statement.asAtDateShort],
-    ['TOTAL DUE GBP', formatAmount(statement.totalOutstanding)],
-    ['ENCLOSED', ''],
-  ];
-  meta.forEach(([label, value]) => {
-    doc.text(label, rightX, ry, { align: 'right' });
-    ry += 4;
-    if (value) {
-      doc.setFont('helvetica', 'normal');
-      doc.text(value, rightX, ry, { align: 'right' });
-      doc.setFont('helvetica', 'bold');
-      ry += 5;
-    } else {
-      ry += 3;
-    }
-  });
-
-  return Math.max(ty, ry, logoBottom) + 6;
+  const minTableY = topY + 78;
+  return Math.max(ty, metaBottomY, logoBottom, minTableY) + 6;
 }
 
 function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStatement['aging']): number {
