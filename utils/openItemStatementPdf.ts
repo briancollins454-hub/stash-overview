@@ -203,12 +203,88 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
   return 'JPEG';
 }
 
+function lumPx(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+
+function isLogoPixel(r: number, g: number, b: number, a: number): boolean {
+  return a >= 20 && lumPx(r, g, b) > 24;
+}
+
+/** Shopify file is 1000×1000 black canvas — trim to logo artwork (white bg). */
+async function trimBrandLogoPadding(loaded: LoadedImage): Promise<LoadedImage> {
+  if (typeof document === 'undefined') return loaded;
+
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(loaded);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const { data, width, height } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let minX = width;
+        let maxX = 0;
+        let minY = height;
+        let maxY = 0;
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = (y * width + x) * 4;
+            if (isLogoPixel(data[i], data[i + 1], data[i + 2], data[i + 3])) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+        const pad = 6;
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(width - 1, maxX + pad);
+        maxY = Math.min(height - 1, maxY + pad);
+        const cw = maxX - minX + 1;
+        const ch = maxY - minY + 1;
+        const out = document.createElement('canvas');
+        out.width = cw;
+        out.height = ch;
+        const octx = out.getContext('2d');
+        if (!octx) {
+          resolve(loaded);
+          return;
+        }
+        octx.fillStyle = '#ffffff';
+        octx.fillRect(0, 0, cw, ch);
+        octx.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
+        resolve({ dataUrl: out.toDataURL('image/png'), width: cw, height: ch });
+      } catch {
+        resolve(loaded);
+      }
+    };
+    img.onerror = () => resolve(loaded);
+    img.src = loaded.dataUrl;
+  });
+}
+
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
   const url = opts.brandLogoUrl || BRAND_TRIO_LOGO_URL;
   imageCache.delete(`dim:${resolveAssetUrl(url)}`);
-  const loaded = await loadImageWithDimensions(url);
+  let loaded = await loadImageWithDimensions(url);
+  if (!loaded) {
+    const fallback = resolveAssetUrl('/statement-brand-trio.png');
+    loaded = await loadImageWithDimensions(fallback);
+  }
   if (!loaded) return null;
+  if (loaded.width >= 900 && loaded.height >= 900) {
+    loaded = await trimBrandLogoPadding(loaded);
+  }
   const w = loaded.width > 1 ? loaded.width : BRAND_TRIO_LOGO_SIZE.width;
   const h = loaded.height > 1 ? loaded.height : BRAND_TRIO_LOGO_SIZE.height;
   return { dataUrl: loaded.dataUrl, width: w, height: h };
@@ -237,8 +313,7 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  // Legacy PDF: Marx Corporate, Stash Shop, Stash Inc stacked vertically
-  const maxW = 52;
+  const maxW = 80;
   const maxH = 34;
   if (image) {
     try {
