@@ -227,8 +227,9 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 76;
-  const maxH = 24;
+  // Match legacy statement PDF: Marx Corporate + Stash Shop + Stash Inc stacked
+  const maxW = 58;
+  const maxH = 26;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);

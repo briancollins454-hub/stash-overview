@@ -18,7 +18,7 @@ export const BRAND_TRIO_LOGO_URL = new URL(
   import.meta.url,
 ).href;
 
-export const BRAND_TRIO_LOGO_SIZE = { width: 763, height: 236 } as const;
+export const BRAND_TRIO_LOGO_SIZE = { width: 710, height: 236 } as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
