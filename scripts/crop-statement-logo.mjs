@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Download Shopify brand_trio_image.png and crop the three-logo row for statements.
+ * Build statement-brand-trio.png from the Marx Corporate logo asset (white bg).
+ * Place source at assets/brand_trio_image__2_*.png or pass a path argument.
  */
 import fs from 'fs';
 import path from 'path';
@@ -10,50 +11,57 @@ import { PNG } from 'pngjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
 const out = path.join(root, 'public/statement-brand-trio.png');
-const sourceOut = path.join(root, 'public/statement-brand-trio-source.png');
 
-const SHOPIFY_URL =
-  'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
+const src =
+  process.argv[2] ||
+  [
+    path.join(
+      process.env.HOME,
+      '.cursor/projects/Users-briansinclair-stash-overview/assets/brand_trio_image__2_-d5186e6a-3ba5-4b6f-a844-02dc35e7a0dc.png',
+    ),
+    path.join(root, 'public/statement-brand-trio-source.png'),
+  ].find(p => fs.existsSync(p));
 
-/** Three-logo row on the 1000×1000 Shopify file (not the large mark at the top). */
-const CROP_1000 = { x0: 118, x1: 818, y0: 218, y1: 278 };
+if (!src) {
+  console.error('No source PNG found');
+  process.exit(1);
+}
 
 function isInk(r, g, b, a) {
   return a >= 20 && !(r <= 12 && g <= 12 && b <= 12);
 }
 
-function scaleBounds(width, height, bounds) {
-  const sx = width / 1000;
-  const sy = height / 1000;
-  return {
-    x0: Math.round(bounds.x0 * sx),
-    x1: Math.round(bounds.x1 * sx),
-    y0: Math.round(bounds.y0 * sy),
-    y1: Math.round(bounds.y1 * sy),
-  };
+const input = PNG.sync.read(fs.readFileSync(src));
+let minX = input.width;
+let maxX = 0;
+let minY = input.height;
+let maxY = 0;
+
+for (let y = 0; y < input.height; y++) {
+  for (let x = 0; x < input.width; x++) {
+    const i = (y * input.width + x) * 4;
+    if (isInk(input.data[i], input.data[i + 1], input.data[i + 2], input.data[i + 3])) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
 }
 
-async function loadSource() {
-  const res = await fetch(SHOPIFY_URL);
-  if (!res.ok) throw new Error(`Shopify fetch failed: ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  fs.writeFileSync(sourceOut, buf);
-  return buf;
-}
+const pad = 4;
+minX = Math.max(0, minX - pad);
+minY = Math.max(0, minY - pad);
+maxX = Math.min(input.width - 1, maxX + pad);
+maxY = Math.min(input.height - 1, maxY + pad);
 
-const buf = fs.existsSync(sourceOut)
-  ? fs.readFileSync(sourceOut)
-  : await loadSource();
-
-const input = PNG.sync.read(buf);
-const { x0, x1, y0, y1 } = scaleBounds(input.width, input.height, CROP_1000);
-const cw = x1 - x0 + 1;
-const ch = y1 - y0 + 1;
+const cw = maxX - minX + 1;
+const ch = maxY - minY + 1;
 const output = new PNG({ width: cw, height: ch });
 
 for (let y = 0; y < ch; y++) {
   for (let x = 0; x < cw; x++) {
-    const si = ((y0 + y) * input.width + (x0 + x)) * 4;
+    const si = ((minY + y) * input.width + (minX + x)) * 4;
     const di = (y * cw + x) * 4;
     const r = input.data[si];
     const g = input.data[si + 1];
@@ -74,6 +82,4 @@ for (let y = 0; y < ch; y++) {
 }
 
 fs.writeFileSync(out, PNG.sync.write(output));
-console.log(
-  `OK ${cw}×${ch} (crop y ${y0}-${y1}) → ${out} (${fs.statSync(out).size} bytes)`,
-);
+console.log(`OK ${cw}×${ch} from ${path.basename(src)} → ${out}`);

@@ -227,8 +227,8 @@ function drawBrandLogo(
   rightX: number,
   topY: number,
 ): number {
-  const maxW = 78;
-  const maxH = 11;
+  const maxW = 52;
+  const maxH = 22;
   if (image) {
     try {
       const { w, h } = fitImageMm(image.width, image.height, maxW, maxH);

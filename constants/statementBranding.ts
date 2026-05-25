@@ -8,13 +8,13 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-/** Pre-cropped trio (Corporate + Recruitment + Events). Regenerate: node scripts/crop-statement-logo.mjs */
+/** Marx Corporate logo for statement header (white background). */
 export const BRAND_TRIO_LOGO_URL = new URL(
   '../public/statement-brand-trio.png',
   import.meta.url,
 ).href;
 
-export const BRAND_TRIO_LOGO_SIZE = { width: 705, height: 61 } as const;
+export const BRAND_TRIO_LOGO_SIZE = { width: 389, height: 169 } as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
