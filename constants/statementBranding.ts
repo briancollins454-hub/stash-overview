@@ -8,13 +8,13 @@ export const STATEMENT_COLORS = {
   overdueRed: [192, 40, 40] as const,
 } as const;
 
-/** Marx Corporate logo for statement header (white background). */
+/** Marx + Stash logos for statement header (white background). Regenerate: node scripts/crop-statement-logo.mjs */
 export const BRAND_TRIO_LOGO_URL = new URL(
   '../public/statement-brand-trio.png',
   import.meta.url,
 ).href;
 
-export const BRAND_TRIO_LOGO_SIZE = { width: 389, height: 169 } as const;
+export const BRAND_TRIO_LOGO_SIZE = { width: 763, height: 236 } as const;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
