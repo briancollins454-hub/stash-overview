@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Optional: trim black padding from Shopify brand_trio_image → public copy.
- * PDF uses BRAND_TRIO_SHOPIFY_URL directly; this is only for same-origin fallback.
+ * Fetch Shopify brand_trio_image, trim to logo rows (skip large top mark),
+ * write public/statement-brand-trio.png + constants/statementLogoEmbed.ts
  */
 import fs from 'fs';
 import path from 'path';
@@ -15,6 +15,8 @@ const out = path.join(root, 'public/statement-brand-trio.png');
 const SHOPIFY_URL =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
+const REGION = { x0: 110, x1: 890, y0: 98, y1: 338 };
+
 function lum(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
@@ -27,13 +29,13 @@ const res = await fetch(SHOPIFY_URL);
 if (!res.ok) throw new Error(`fetch ${res.status}`);
 const input = PNG.sync.read(Buffer.from(await res.arrayBuffer()));
 
-let minX = input.width;
-let maxX = 0;
-let minY = input.height;
-let maxY = 0;
+let minX = REGION.x1;
+let maxX = REGION.x0;
+let minY = REGION.y1;
+let maxY = REGION.y0;
 
-for (let y = 0; y < input.height; y++) {
-  for (let x = 0; x < input.width; x++) {
+for (let y = REGION.y0; y <= REGION.y1; y++) {
+  for (let x = REGION.x0; x <= REGION.x1; x++) {
     const i = (y * input.width + x) * 4;
     if (isInk(input.data[i], input.data[i + 1], input.data[i + 2], input.data[i + 3])) {
       if (x < minX) minX = x;
@@ -44,11 +46,11 @@ for (let y = 0; y < input.height; y++) {
   }
 }
 
-const pad = 6;
-minX = Math.max(0, minX - pad);
-minY = Math.max(0, minY - pad);
-maxX = Math.min(input.width - 1, maxX + pad);
-maxY = Math.min(input.height - 1, maxY + pad);
+const pad = 4;
+minX = Math.max(REGION.x0, minX - pad);
+minY = Math.max(REGION.y0, minY - pad);
+maxX = Math.min(REGION.x1, maxX + pad);
+maxY = Math.min(REGION.y1, maxY + pad);
 
 const cw = maxX - minX + 1;
 const ch = maxY - minY + 1;
@@ -76,5 +78,6 @@ for (let y = 0; y < ch; y++) {
   }
 }
 
-fs.writeFileSync(out, PNG.sync.write(output));
-console.log(`OK ${cw}×${ch} → ${out}`);
+const pngBuf = PNG.sync.write(output);
+fs.writeFileSync(out, pngBuf);
+console.log(`OK ${cw}×${ch} → ${out} (update STATEMENT_LOGO_SIZE in statementBranding.ts if changed)`);

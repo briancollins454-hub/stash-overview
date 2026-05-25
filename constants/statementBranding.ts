@@ -12,14 +12,13 @@ export const STATEMENT_COLORS = {
 export const BRAND_TRIO_SHOPIFY_URL =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
-/** Pre-trimmed copy (775×333); avoids 1000×1000 square squash in jsPDF. */
-export const BRAND_TRIO_LOGO_URL =
-  typeof window !== 'undefined'
-    ? `${window.location.origin}/statement-brand-trio.png?v=5`
-    : new URL('../public/statement-brand-trio.png', import.meta.url).href;
+/** Trimmed brand strip from Shopify (regenerate: node scripts/crop-statement-logo.mjs) */
+export const STATEMENT_LOGO_SIZE = { width: 715, height: 241 } as const;
 
-/** Trimmed content bounds of brand_trio_image (white bg); used if CDN returns 1000×1000. */
-export const BRAND_TRIO_LOGO_SIZE = { width: 775, height: 333 } as const;
+export const STATEMENT_LOGO_URL = '/statement-brand-trio.png';
+
+export const BRAND_TRIO_LOGO_URL = STATEMENT_LOGO_URL;
+export const BRAND_TRIO_LOGO_SIZE = STATEMENT_LOGO_SIZE;
 
 export const STATEMENT_COMPANY = {
   name: 'Marx Corporate',
