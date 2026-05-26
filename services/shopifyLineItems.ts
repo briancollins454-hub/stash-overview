@@ -36,11 +36,25 @@ export function isShopifyLineItemActiveForOps(item: ShopifyLineItem): boolean {
   return shopifyLineRemainingQuantity(item) > 0;
 }
 
+export interface MapLineItemOptions {
+  /**
+   * When true, fully-fulfilled lines (`unfulfilledQuantity === 0`) are kept
+   * with `itemStatus: 'fulfilled'` instead of being dropped. Used by the
+   * printable order sheet so warehouse staff can see what's already shipped
+   * alongside what they still need to pick. All Stash "active" views go
+   * through `isShopifyLineItemActiveForOps`, which still skips these.
+   */
+  includeFulfilled?: boolean;
+}
+
 /**
  * Map one Shopify Admin GraphQL LineItem node → our persisted line shape.
  * Returns null when the line should not appear in Stash (removed / fully handled in Shopify).
  */
-export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
+export function mapGraphQLLineItemNode(
+  node: any,
+  opts: MapLineItemOptions = {},
+): ShopifyLineItem | null {
   if (!node) return null;
   const originalQty = toNum(node.quantity) ?? 0;
   const currentQtyParsed = toNum(node.currentQuantity);
@@ -56,9 +70,7 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
 
   const unfulfilledRaw = toNum(node.unfulfilledQuantity);
   const unfulfilled = unfulfilledRaw !== undefined ? unfulfilledRaw : currentQty;
-  if (unfulfilled <= 0) return null;
-
-  if (fulfillable !== undefined && fulfillable <= 0 && unfulfilled <= 0) return null;
+  if (unfulfilled <= 0 && !opts.includeFulfilled) return null;
 
   // Removed / exchange / allocation edge cases: Shopify can leave unfulfilledQuantity > 0 while
   // fulfillableQuantity is 0 — deprecated fulfillmentStatus may still read "unfulfilled".
@@ -66,7 +78,11 @@ export function mapGraphQLLineItemNode(node: any): ShopifyLineItem | null {
 
   const fulfilledQuantity = Math.max(0, currentQty - unfulfilled);
   const fsRaw = node.fulfillmentStatus ? String(node.fulfillmentStatus).toLowerCase() : 'unfulfilled';
-  const itemStatus = fsRaw === 'partially_fulfilled' ? 'unfulfilled' : fsRaw;
+  // Lines with nothing left to pick are surfaced as "fulfilled" regardless of
+  // the deprecated fulfillmentStatus value (Shopify can lag here).
+  const itemStatus = unfulfilled <= 0
+    ? 'fulfilled'
+    : fsRaw === 'partially_fulfilled' ? 'unfulfilled' : fsRaw;
   const productType = node.variant?.product?.productType || undefined;
 
   return {
@@ -105,14 +121,17 @@ export function nonFulfillableLineItemIdSetFromOrderNode(o: unknown): Set<string
 }
 
 /** Map `order.lineItems` to persisted items, dropping anything in `nonFulfillableLineItems`. */
-export function mapLineItemsFromOrderNode(o: unknown): ShopifyOrder['items'] {
+export function mapLineItemsFromOrderNode(
+  o: unknown,
+  opts: MapLineItemOptions = {},
+): ShopifyOrder['items'] {
   const skip = nonFulfillableLineItemIdSetFromOrderNode(o);
   const edges = (o as { lineItems?: { edges?: { node?: unknown }[] } })?.lineItems?.edges || [];
   return edges
     .map((edge: { node?: unknown }) => {
       const id = (edge?.node as { id?: string } | undefined)?.id;
       if (id && skip.has(id)) return null;
-      return mapGraphQLLineItemNode(edge?.node);
+      return mapGraphQLLineItemNode(edge?.node, opts);
     })
     .filter(Boolean) as ShopifyOrder['items'];
 }

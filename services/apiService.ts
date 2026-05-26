@@ -802,18 +802,22 @@ export const fetchBulkDecoJobs = async (
     return all;
 };
 
-export const fetchSingleShopifyOrder = async (settings: ApiSettings, orderId: string): Promise<ShopifyOrder | null> => {
+export const fetchSingleShopifyOrder = async (
+    settings: ApiSettings,
+    orderId: string,
+    opts: { includeFulfilled?: boolean } = {},
+): Promise<ShopifyOrder | null> => {
     if (!settings.useLiveData) return MOCK_SHOPIFY_ORDERS.find(o => o.id === orderId) || null;
-    
+
     const query = `query getOrder($id: ID!) { order(id: $id) { id name email createdAt updatedAt closedAt displayFinancialStatus displayFulfillmentStatus tags note billingAddress { firstName lastName } shippingAddress { firstName lastName address1 address2 city provinceCode zip country phone } totalPriceSet { shopMoney { amount } } subtotalPriceSet { shopMoney { amount } } totalTaxSet { shopMoney { amount } } totalShippingPriceSet { shopMoney { amount } } shippingLines(first: 5) { edges { node { title } } } lineItems(first: 50) { edges { node { id name quantity currentQuantity unfulfilledQuantity fulfillableQuantity nonFulfillableQuantity refundableQuantity sku vendor fulfillmentStatus image { url } customAttributes { key value } variant { id barcode image { url } product { productType } } originalUnitPriceSet { shopMoney { amount } } } } } nonFulfillableLineItems(first: 250) { edges { node { id } } } } }`;
-    
+
     try {
         const res = await fetchServerRoute('/api/shopify', { query, variables: { id: orderId } });
         const json = await res.json();
         const o = json.data?.order;
         if (!o) return null;
 
-        const mappedItems = mapLineItemsFromOrderNode(o);
+        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: opts.includeFulfilled });
 
         const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';

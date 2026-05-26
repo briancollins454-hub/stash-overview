@@ -11,6 +11,7 @@ import {
   ShipStationOrder, ShipStationLabelResult
 } from '../services/shipstationService';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
+import { enrichOrderForPrint } from '../utils/enrichOrderForPrint';
 import { ApiSettings } from './SettingsModal';
 import { isShopifyOrderClosedForCloud } from '../services/shopifyOrderStatus';
 
@@ -58,22 +59,14 @@ const BatchFulfillment: React.FC<Props> = ({ orders, settings, onFulfilled, onNa
   const [batchResults, setBatchResults] = useState<Array<{ orderNumber: string; success: boolean; trackingNumber?: string; error?: string; orderId?: string }>>([]);
   const [showBatchResults, setShowBatchResults] = useState(false);
 
-  // Enrich order with ShipStation address if Shopify address is missing
-  const enrichWithSSAddress = useCallback(async (o: UnifiedOrder): Promise<UnifiedOrder> => {
-    if (o.shopify.shippingAddress) return o;
-    try {
-      const ss = await fetchShipStationOrder(settings, o.shopify.orderNumber);
-      if (ss?.shipTo) {
-        return { ...o, shopify: { ...o.shopify, shippingAddress: {
-          name: ss.shipTo.name || '', address1: ss.shipTo.street1 || '',
-          address2: ss.shipTo.street2 || '', city: ss.shipTo.city || '',
-          province: ss.shipTo.state || '', zip: ss.shipTo.postalCode || '',
-          country: ss.shipTo.country || '', phone: ss.shipTo.phone || ''
-        }}};
-      }
-    } catch { /* fallback to original */ }
-    return o;
-  }, [settings]);
+  // Enrich an order for printing — pulls fresh Shopify data (incl. already
+  // shipped lines) and falls back to ShipStation when the shipping address
+  // is missing. Shared with the rest of the app so picking sheets always
+  // surface previously-shipped items, regardless of where they're triggered.
+  const enrichWithSSAddress = useCallback(
+    (o: UnifiedOrder): Promise<UnifiedOrder> => enrichOrderForPrint(o, settings),
+    [settings],
+  );
 
   // Address warnings — computed from order data, no API call needed for basic checks
   const getAddressWarnings = useCallback((o: UnifiedOrder): string[] => {

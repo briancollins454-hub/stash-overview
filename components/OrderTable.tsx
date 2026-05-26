@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { UnifiedOrder, DecoJob } from '../types';
 import { ApiSettings } from './SettingsModal';
-import { isEligibleForMapping, fetchSingleShopifyOrder } from '../services/apiService';
+import { isEligibleForMapping } from '../services/apiService';
 import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 import { isHiddenFromDefaultDashboard } from '../services/shopifyOrderStatus';
-import { getTrackingUrl, fetchShipStationOrder } from '../services/shipstationService';
+import { getTrackingUrl } from '../services/shipstationService';
 import { 
     AlertCircle, Truck, Clock, AlertTriangle, Package, CheckCircle2, 
     ChevronDown, ChevronUp, ShoppingBag, ArrowUpDown, ExternalLink, 
@@ -18,6 +18,7 @@ import {
 const OrderMappingModal = lazy(() => import('./OrderMappingModal'));
 import JobIdBadge from './JobIdBadge';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
+import { enrichOrderForPrint } from '../utils/enrichOrderForPrint';
 
 // --- Types ---
 
@@ -176,42 +177,13 @@ const OrderTable: React.FC<OrderTableProps> = ({
       productionStatuses: new Set()
   });
 
-  // Enrich order with fresh Shopify data before printing if image/address is missing
-  const enrichForPrint = useCallback(async (o: UnifiedOrder): Promise<UnifiedOrder> => {
-    const missingImages = o.shopify.items.some(i => !i.imageUrl);
-    const missingAddress = !o.shopify.shippingAddress;
-    if (!missingImages && !missingAddress) return o;
-    let enriched = o;
-    // Try fresh Shopify fetch for missing images or address
-    if (settings && (missingImages || missingAddress)) {
-      try {
-        const fresh = await fetchSingleShopifyOrder(settings, o.shopify.id);
-        if (fresh) {
-          const mergedItems = enriched.shopify.items.map(item => {
-            if (item.imageUrl) return item;
-            const freshItem = fresh.items.find(fi => fi.id === item.id);
-            return freshItem?.imageUrl ? { ...item, imageUrl: freshItem.imageUrl } : item;
-          });
-          enriched = { ...enriched, shopify: { ...enriched.shopify, items: mergedItems, shippingAddress: enriched.shopify.shippingAddress || fresh.shippingAddress } };
-        }
-      } catch { /* fall through */ }
-    }
-    // ShipStation fallback for address
-    if (!enriched.shopify.shippingAddress && settings) {
-      try {
-        const ss = await fetchShipStationOrder(settings, o.shopify.orderNumber);
-        if (ss?.shipTo) {
-          enriched = { ...enriched, shopify: { ...enriched.shopify, shippingAddress: {
-            name: ss.shipTo.name || '', address1: ss.shipTo.street1 || '',
-            address2: ss.shipTo.street2 || '', city: ss.shipTo.city || '',
-            province: ss.shipTo.state || '', zip: ss.shipTo.postalCode || '',
-            country: ss.shipTo.country || '', phone: ss.shipTo.phone || ''
-          }}};
-        }
-      } catch { /* fall through */ }
-    }
-    return enriched;
-  }, [settings]);
+  // Enrich order before printing — pulls a fresh Shopify snapshot that
+  // includes fully-fulfilled lines (so the picking sheet shows what's
+  // already shipped) and falls back to ShipStation for missing addresses.
+  const enrichForPrint = useCallback(
+    (o: UnifiedOrder): Promise<UnifiedOrder> => enrichOrderForPrint(o, settings),
+    [settings],
+  );
 
   const toggleExpand = (id: string) => setExpandedId(prev => prev === id ? null : id);
 

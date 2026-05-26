@@ -19,8 +19,14 @@ function renderItemRow(
     : '';
   const skuHtml = i.sku ? '<br><span style="color:#888;font-size:11px;">SKU: ' + escapeHtml(i.sku) + '</span>' : '';
   const eanHtml = i.ean && i.ean !== '-' ? '<br><span style="color:#888;font-size:11px;">EAN: ' + escapeHtml(i.ean) + '</span>' : '';
+  // Already-shipped rows are intentionally desaturated (greyscale image,
+  // dimmer typography) so the warehouse eye snaps to the unfulfilled rows
+  // they actually need to pick.
+  const imgStyle = mode === 'fulfilled'
+    ? 'width:80px;height:80px;object-fit:cover;border-radius:4px;filter:grayscale(1) opacity(0.55);'
+    : 'width:80px;height:80px;object-fit:cover;border-radius:4px;';
   const imgHtml = i.imageUrl
-    ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:80px;height:80px;object-fit:cover;border-radius:4px;" /><div style="display:none;width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>'
+    ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="' + imgStyle + '" /><div style="display:none;width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>'
     : '<div style="width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>';
 
   const unitPrice = i.price ? parseFloat(i.price) : 0;
@@ -36,15 +42,36 @@ function renderItemRow(
   const partialNote = isPartial
     ? '<br><span style="color:#dc2626;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;">' + fulfilledQty + ' of ' + originalQty + ' shipped</span>'
     : '';
-  const qtyHtml = qtyBase + partialNote;
+  const shippedBadge = mode === 'fulfilled'
+    ? '<br><span style="display:inline-block;margin-top:3px;padding:2px 6px;background:#16a34a;color:#fff;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.5px;border-radius:3px;">\u2713 SHIPPED</span>'
+    : '';
+  const qtyHtml = qtyBase + partialNote + shippedBadge;
 
-  return '<tr>' +
+  // Whole-row treatment for fulfilled lines: muted background + strikethrough
+  // typography so they read as "done, FYI only" at a glance.
+  const rowStyle = mode === 'fulfilled'
+    ? ' style="background:#f3f4f6;color:#6b7280;"'
+    : '';
+  const nameStyle = mode === 'fulfilled'
+    ? 'font-size:16px;font-weight:700;padding:6px;color:#6b7280;text-decoration:line-through;text-decoration-color:#9ca3af;'
+    : 'font-size:16px;font-weight:700;padding:6px;';
+  const numCellStyle = mode === 'fulfilled'
+    ? 'text-align:right;color:#9ca3af;text-decoration:line-through;'
+    : 'text-align:right;';
+  const qtyCellStyle = mode === 'fulfilled'
+    ? 'text-align:center;color:#6b7280;'
+    : 'text-align:center;';
+  const packedCellHtml = mode === 'fulfilled'
+    ? '<td style="width:60px;text-align:center;font-size:18px;color:#16a34a;font-weight:900;">\u2713</td>'
+    : '<td style="width:60px;"></td>';
+
+  return '<tr' + rowStyle + '>' +
     '<td style="width:85px;text-align:center;vertical-align:middle;padding:4px;">' + imgHtml + '</td>' +
-    '<td style="font-size:16px;font-weight:700;padding:6px;">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
-    '<td style="text-align:center;">' + qtyHtml + '</td>' +
-    '<td style="text-align:right;">\u00A3' + unitPrice.toFixed(2) + '</td>' +
-    '<td style="text-align:right;">\u00A3' + lineTotal.toFixed(2) + '</td>' +
-    '<td style="width:60px;"></td>' +
+    '<td style="' + nameStyle + '">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td style="' + qtyCellStyle + '">' + qtyHtml + '</td>' +
+    '<td style="' + numCellStyle + '">\u00A3' + unitPrice.toFixed(2) + '</td>' +
+    '<td style="' + numCellStyle + '">\u00A3' + lineTotal.toFixed(2) + '</td>' +
+    packedCellHtml +
     '</tr>';
 }
 
@@ -66,6 +93,10 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.items-table th, .items-table td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: middle; }',
     '.items-table th { background: #e5e5e5; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px; font-weight: bold; }',
     '.section-title { font-size: 10px; font-weight: bold; margin: 6px 0 2px 0; padding-bottom: 2px; border-bottom: 1.5px solid #111; text-transform: uppercase; }',
+    '.section-title.pick-title { background:#fef3c7; color:#92400e; border:1.5px solid #f59e0b; padding:4px 8px; font-size:11px; letter-spacing:1px; }',
+    '.section-title.shipped-title { background:#dcfce7; color:#166534; border:1.5px solid #16a34a; padding:4px 8px; font-size:11px; letter-spacing:1px; margin-top:10px; }',
+    '.items-table.shipped-table { opacity: 0.9; }',
+    '.items-table.shipped-table th { background:#e7f5ec; color:#166534; }',
     '.payment-table { margin-left: auto; width: 50%; margin-top: 4px; border-collapse: collapse; }',
     '.payment-table td { padding: 1px 6px; font-size: 10px; }',
     '.payment-table .total td { font-weight: bold; font-size: 11px; border-top: 2px solid #111; }',
@@ -80,7 +111,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '.sticker { width: 3.5in; height: 2.4in; border: none; padding: 16px 14px 12px 14px; overflow: hidden; font-size: 17px; line-height: 1.4; box-sizing: border-box; display: inline-block; word-wrap: break-word; overflow-wrap: break-word; position: relative; }',
     '.sticker p { margin: 0; }',
     '.sticker .note-text { font-size: 13px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
-    '@media print { .rush, .items-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
+    '@media print { .rush, .items-table th, .section-title.pick-title, .section-title.shipped-title, .items-table.shipped-table th, .items-table.shipped-table tr { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
   const orderDate = escapeHtml(new Date(order.shopify.date).toLocaleDateString('en-GB'));
@@ -152,17 +183,27 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   // Items table header
   const itemTableHead = '<thead><tr><th style="width:85px">Image</th><th>Item</th><th style="width:60px;text-align:center">Qty</th><th style="width:70px;text-align:right">Price</th><th style="width:70px;text-align:right">Total</th><th style="width:70px;text-align:center">Packed By</th></tr></thead>';
 
-  // Unfulfilled items section
+  // Unfulfilled items section — the things staff actually need to pick.
+  // We call this out with an amber banner so the eye lands on it first
+  // when a partially-shipped order is reprinted.
   let unfulfilledSection = '';
   if (unfulfilledItems.length > 0) {
-    unfulfilledSection = '<div class="section-title">Unfulfilled Items</div><table class="items-table">' +
+    const unfulfilledTotal = unfulfilledItems.reduce((s, i) => s + shopifyLineRemainingQuantity(i), 0);
+    const heading = fulfilledItems.length > 0
+      ? '<div class="section-title pick-title">\u25B6 To Pick &amp; Pack \u2014 ' + unfulfilledItems.length + ' line' + (unfulfilledItems.length === 1 ? '' : 's') + ', ' + unfulfilledTotal + ' unit' + (unfulfilledTotal === 1 ? '' : 's') + ' remaining</div>'
+      : '<div class="section-title">Unfulfilled Items</div>';
+    unfulfilledSection = heading + '<table class="items-table">' +
       itemTableHead + '<tbody>' + unfulfilledItems.map(i => renderItemRow(i, 'unfulfilled')).join('') + '</tbody></table>';
   }
 
-  // Fulfilled items section
+  // Already-shipped section — listed so warehouse staff can confirm at a
+  // glance which items have already gone out on a previous fulfillment,
+  // without bouncing to Shopify or Deco.
   let fulfilledSection = '';
   if (fulfilledItems.length > 0) {
-    fulfilledSection = '<div class="section-title">Fulfilled Items</div><table class="items-table">' +
+    const shippedUnits = fulfilledItems.reduce((s, i) => s + (Number(i.fulfilledQuantity) || i.quantity || 0), 0);
+    fulfilledSection = '<div class="section-title shipped-title">\u2713 Already Shipped \u2014 ' + fulfilledItems.length + ' line' + (fulfilledItems.length === 1 ? '' : 's') + ', ' + shippedUnits + ' unit' + (shippedUnits === 1 ? '' : 's') + ' (do not pick)</div>' +
+      '<table class="items-table shipped-table">' +
       itemTableHead + '<tbody>' + fulfilledItems.map(i => renderItemRow(i, 'fulfilled')).join('') + '</tbody></table>';
   }
 
