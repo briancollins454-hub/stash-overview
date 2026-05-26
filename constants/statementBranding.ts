@@ -12,8 +12,8 @@ export const STATEMENT_COLORS = {
 export const BRAND_TRIO_SHOPIFY_URL =
   'https://cdn.shopify.com/s/files/1/1075/6304/files/brand_trio_image.png?v=1779267381';
 
-/** Trimmed brand strip from Shopify (regenerate: node scripts/crop-statement-logo.mjs) */
-export const STATEMENT_LOGO_SIZE = { width: 715, height: 241 } as const;
+/** Trimmed brand stack from Shopify (regenerate: node scripts/crop-statement-logo.mjs) */
+export const STATEMENT_LOGO_SIZE = { width: 779, height: 955 } as const;
 
 export const STATEMENT_LOGO_URL = '/statement-brand-trio.png';
 

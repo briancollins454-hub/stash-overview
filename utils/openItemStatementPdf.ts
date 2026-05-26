@@ -205,7 +205,7 @@ function imageFormat(dataUrl: string): 'PNG' | 'JPEG' | 'WEBP' {
 
 async function prepareBrandLogo(opts: StatementPdfOptions): Promise<LoadedImage | null> {
   if (opts.skipBrandLogo) return null;
-  const url = resolveAssetUrl(opts.brandLogoUrl || `${STATEMENT_LOGO_URL}?v=6`);
+  const url = resolveAssetUrl(opts.brandLogoUrl || `${STATEMENT_LOGO_URL}?v=7`);
   imageCache.delete(`dim:${url}`);
   const loaded = await loadImageWithDimensions(url);
   if (!loaded) return null;
@@ -233,9 +233,10 @@ function fitImageMm(
   return { w, h };
 }
 
-const LOGO_MAX_W_MM = 88;
-const LOGO_MAX_H_MM = 40;
-const META_BELOW_LOGO_MM = 12;
+/** Vertical brand stack (Marx Corporate / Stash Shop / Stash Inc.) ~ 0.82 aspect ratio. */
+const LOGO_MAX_W_MM = 42;
+const LOGO_MAX_H_MM = 52;
+const META_BELOW_LOGO_MM = 6;
 
 function drawBrandLogo(
   doc: import('jspdf').jsPDF,
@@ -356,7 +357,7 @@ function drawFirstPageLetterhead(
     ty += 4;
   });
 
-  const minTableY = topY + 92;
+  const minTableY = topY + 94;
   return Math.max(ty, metaBottomY, logoBottom, minTableY) + 6;
 }
 
