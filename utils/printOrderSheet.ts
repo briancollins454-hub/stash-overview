@@ -1,12 +1,18 @@
 import { UnifiedOrder } from '../types';
 import { getNotesForOrder } from '../services/notesService';
-import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
+import {
+  isShopifyLineItemActiveForOps,
+  shopifyLineRemainingQuantity,
+} from '../services/shopifyLineItems';
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
-function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
+function renderItemRow(
+  i: UnifiedOrder['shopify']['items'][0],
+  mode: 'unfulfilled' | 'fulfilled' = 'unfulfilled',
+): string {
   const props = (i.properties || []).filter(p => p.value && !String(p.name).startsWith('_') && !String(p.name).toLowerCase().includes('dispatch'));
   const propsHtml = props.length > 0
     ? props.map(p => '<br><span style="color:#555;font-size:14px;">' + escapeHtml(String(p.name)) + ': <strong>' + escapeHtml(String(p.value)) + '</strong></span>').join('')
@@ -16,10 +22,22 @@ function renderItemRow(i: UnifiedOrder['shopify']['items'][0]): string {
   const imgHtml = i.imageUrl
     ? '<img src="' + i.imageUrl + '" crossorigin="anonymous" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'" style="width:80px;height:80px;object-fit:cover;border-radius:4px;" /><div style="display:none;width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>'
     : '<div style="width:80px;height:80px;background:#f3f4f6;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:10px;color:#999;">No img</div>';
+
   const unitPrice = i.price ? parseFloat(i.price) : 0;
-  const lineTotal = unitPrice * (i.quantity || 0);
-  const qty = i.quantity || 0;
-  const qtyHtml = qty > 1 ? '<strong style="font-size:16px;">' + qty + '</strong>' : '' + qty;
+  const originalQty = i.quantity || 0;
+  const fulfilledQty = Math.max(0, Number(i.fulfilledQuantity) || 0);
+  const remainingQty = shopifyLineRemainingQuantity(i);
+  const isPartial = mode === 'unfulfilled' && fulfilledQty > 0 && remainingQty > 0;
+
+  // Production team picks the remaining qty; show "(X of Y)" when partial so the gap is obvious.
+  const qty = mode === 'unfulfilled' ? remainingQty : originalQty;
+  const lineTotal = unitPrice * qty;
+  const qtyBase = qty > 1 ? '<strong style="font-size:16px;">' + qty + '</strong>' : '' + qty;
+  const partialNote = isPartial
+    ? '<br><span style="color:#dc2626;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;">' + fulfilledQty + ' of ' + originalQty + ' shipped</span>'
+    : '';
+  const qtyHtml = qtyBase + partialNote;
+
   return '<tr>' +
     '<td style="width:85px;text-align:center;vertical-align:middle;padding:4px;">' + imgHtml + '</td>' +
     '<td style="font-size:16px;font-weight:700;padding:6px;">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
@@ -138,20 +156,20 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   let unfulfilledSection = '';
   if (unfulfilledItems.length > 0) {
     unfulfilledSection = '<div class="section-title">Unfulfilled Items</div><table class="items-table">' +
-      itemTableHead + '<tbody>' + unfulfilledItems.map(renderItemRow).join('') + '</tbody></table>';
+      itemTableHead + '<tbody>' + unfulfilledItems.map(i => renderItemRow(i, 'unfulfilled')).join('') + '</tbody></table>';
   }
 
   // Fulfilled items section
   let fulfilledSection = '';
   if (fulfilledItems.length > 0) {
     fulfilledSection = '<div class="section-title">Fulfilled Items</div><table class="items-table">' +
-      itemTableHead + '<tbody>' + fulfilledItems.map(renderItemRow).join('') + '</tbody></table>';
+      itemTableHead + '<tbody>' + fulfilledItems.map(i => renderItemRow(i, 'fulfilled')).join('') + '</tbody></table>';
   }
 
   // Fallback: show all items if none matched either filter
   if (unfulfilledItems.length === 0 && fulfilledItems.length === 0) {
     unfulfilledSection = '<div class="section-title">Line Items</div><table class="items-table">' +
-      itemTableHead + '<tbody>' + items.map(renderItemRow).join('') + '</tbody></table>';
+      itemTableHead + '<tbody>' + items.map(i => renderItemRow(i, 'unfulfilled')).join('') + '</tbody></table>';
   }
 
   // Payment Details
