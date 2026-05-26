@@ -482,7 +482,7 @@ function drawPastDueBanner(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.text(
-    'Please settle outstanding balance ASAP.',
+    'Highlighted invoices are outside agreed credit terms. Please settle outstanding balance ASAP.',
     MARGIN + 4,
     y + 8.8,
   );
