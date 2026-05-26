@@ -15,6 +15,20 @@ import {
   type DaysSinceShipBucket,
 } from '../constants/daysSinceShipBuckets';
 
+/** A QuickBooks Online open invoice (mirrors the shape returned by /api/quickbooks ar-balance). */
+interface QboInvoice {
+  id: string;
+  docNumber: string | null;
+  customerName: string;
+  customerId: string;
+  totalAmount: number;
+  balance: number;
+  dueDate: string | null;
+  txnDate: string | null;
+}
+
+const QBO_INVOICES_CACHE_KEY = 'stash:qboInvoices:unpaidOrders';
+
 interface Props {
   decoJobs: DecoJob[];
   isDark: boolean;
@@ -23,7 +37,18 @@ interface Props {
   currentUserEmail?: string;
 }
 
-type SortKey = 'jobNumber' | 'customerName' | 'outstandingBalance' | 'dateShipped' | 'dateOrdered' | 'daysSince' | 'status' | 'salesPerson';
+type SortKey =
+  | 'jobNumber'
+  | 'customerName'
+  | 'outstandingBalance'
+  | 'qboBalance'
+  | 'billableAmount'
+  | 'accountTerms'
+  | 'dateShipped'
+  | 'dateOrdered'
+  | 'daysSince'
+  | 'status'
+  | 'salesPerson';
 
 // Sentinel used in the responsible-person dropdown to represent jobs that
 // have no salesperson attached in Deco. Kept as a non-printable character
@@ -41,6 +66,12 @@ interface Row extends DecoJob {
   hasShipped: boolean;
   authorisedAt?: string;
   authorisedBy?: string;
+  /** Open balance against this job in QuickBooks (matched by invoice DocNumber → jobNumber / poNumber). */
+  qboBalance: number;
+  /** Original total of the matched QBO invoice. */
+  qboInvoiceTotal: number;
+  /** Invoice doc number from QuickBooks if a match was found. */
+  qboDocNumber: string | null;
 }
 
 interface AuthorisedRow {
@@ -121,6 +152,55 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
   const [authorised, setAuthorised] = useState<Record<string, AuthorisedRow>>({});
   const [isTogglingId, setIsTogglingId] = useState<string | null>(null);
+
+  // QuickBooks A/R invoices, used for the "DUE" column. Cached so this page is
+  // snappy on re-mounts; refreshed alongside the Deco pull.
+  const [qboInvoices, setQboInvoices] = useState<QboInvoice[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.sessionStorage.getItem(QBO_INVOICES_CACHE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as QboInvoice[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [qboLoading, setQboLoading] = useState(false);
+
+  const persistQboCache = useCallback((rows: QboInvoice[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem(QBO_INVOICES_CACHE_KEY, JSON.stringify(rows));
+    } catch {
+      /* quota — ignore */
+    }
+  }, []);
+
+  const fetchQboInvoices = useCallback(async () => {
+    setQboLoading(true);
+    try {
+      const body: Record<string, string> = { action: 'ar-balance' };
+      if (settings.qboRealmId) body.realmId = settings.qboRealmId;
+      if (settings.qboAccessToken) body.accessToken = settings.qboAccessToken;
+      if (settings.qboBaseUrl) body.baseUrl = settings.qboBaseUrl;
+      const res = await fetch('/api/quickbooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.ok && Array.isArray(data.invoices)) {
+        setQboInvoices(data.invoices as QboInvoice[]);
+        persistQboCache(data.invoices as QboInvoice[]);
+      }
+    } catch {
+      /* leave cache in place; surface absence via DUE column showing "—" */
+    } finally {
+      setQboLoading(false);
+    }
+  }, [settings.qboRealmId, settings.qboAccessToken, settings.qboBaseUrl, persistQboCache]);
 
   // Multi-select on the Zero priced section. We keep the single-row
   // "Authorise £0" button intact for one-off decisions; this set drives
@@ -249,13 +329,16 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       setAllJobs(merged);
       setLastSynced(syncedAt);
       setNoCache(false);
+      // Pulling new Deco data is a good moment to refresh QBO too so the DUE
+      // column reflects whatever Accounts has invoiced since the last sync.
+      void fetchQboInvoices();
     } catch (e: any) {
       setPullError(e?.message || 'Failed to pull from Deco');
     } finally {
       setIsPulling(false);
       setPullProgress(null);
     }
-  }, [isPulling, isLoading, settings]);
+  }, [isPulling, isLoading, settings, fetchQboInvoices]);
 
   const loadAuthorised = useCallback(async () => {
     if (!isSupabaseReady()) return;
@@ -276,7 +359,50 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
   useEffect(() => {
     loadFromFinanceCache();
     loadAuthorised();
-  }, [loadFromFinanceCache, loadAuthorised]);
+    // Fire-and-forget QBO refresh. If it fails (token expired, etc.) we still
+    // render the page using the cached invoices from sessionStorage.
+    fetchQboInvoices();
+  }, [loadFromFinanceCache, loadAuthorised, fetchQboInvoices]);
+
+  /**
+   * Map QuickBooks invoices to their best Deco job match. QBO `DocNumber`
+   * is typically the PO Number (Shopify order #) or Deco job number, so we
+   * key the lookup on both, with the largest open balance winning ties.
+   */
+  const qboByJob = useMemo(() => {
+    const map = new Map<string, { balance: number; total: number; docNumber: string | null }>();
+    const upsert = (key: string, inv: QboInvoice) => {
+      const k = key.trim();
+      if (!k) return;
+      const cur = map.get(k);
+      if (!cur || inv.balance > cur.balance) {
+        map.set(k, { balance: inv.balance, total: inv.totalAmount, docNumber: inv.docNumber });
+      }
+    };
+    for (const inv of qboInvoices) {
+      if (inv.docNumber) upsert(inv.docNumber, inv);
+    }
+    return map;
+  }, [qboInvoices]);
+
+  const lookupQbo = useCallback(
+    (jobNumber: string, poNumber?: string) => {
+      const fromJob = qboByJob.get(jobNumber);
+      if (fromJob) return fromJob;
+      if (poNumber) {
+        const fromPo = qboByJob.get(poNumber);
+        if (fromPo) return fromPo;
+        // Shopify PO numbers come in with/without leading "#" — try both.
+        const stripped = poNumber.replace(/^#/, '');
+        if (stripped !== poNumber) {
+          const fromStripped = qboByJob.get(stripped);
+          if (fromStripped) return fromStripped;
+        }
+      }
+      return null;
+    },
+    [qboByJob],
+  );
 
   // ─── Authorise / un-authorise ────────────────────────────────────────
   const markAuthorised = useCallback(async (jobNumber: string, customerName: string) => {
@@ -450,18 +576,23 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           ? Math.floor((Date.now() - new Date(anchor).getTime()) / 86400000)
           : 0;
         const auth = authorised[j.jobNumber];
+        const qbo = lookupQbo(j.jobNumber, j.poNumber);
         return {
           ...j,
           outstandingBalance: balance,
           orderTotal: total,
+          billableAmount: billable,
           daysSince,
           isZeroPriced: !hasPricedSignal,
           hasShipped: !!j.dateShipped,
           authorisedAt: auth?.authorised_at,
           authorisedBy: auth?.authorised_by || undefined,
+          qboBalance: qbo?.balance ?? 0,
+          qboInvoiceTotal: qbo?.total ?? 0,
+          qboDocNumber: qbo?.docNumber ?? null,
         };
       });
-  }, [jobsBase, authorised]);
+  }, [jobsBase, authorised, lookupQbo]);
 
   const sorter = useCallback((a: Row, b: Row) => {
     let av: any, bv: any;
@@ -469,6 +600,9 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       case 'jobNumber': av = a.jobNumber; bv = b.jobNumber; break;
       case 'customerName': av = a.customerName; bv = b.customerName; break;
       case 'outstandingBalance': av = a.outstandingBalance || 0; bv = b.outstandingBalance || 0; break;
+      case 'qboBalance': av = a.qboBalance || 0; bv = b.qboBalance || 0; break;
+      case 'billableAmount': av = a.billableAmount || 0; bv = b.billableAmount || 0; break;
+      case 'accountTerms': av = (a.accountTerms || '').toLowerCase(); bv = (b.accountTerms || '').toLowerCase(); break;
       case 'dateShipped': av = a.dateShipped || ''; bv = b.dateShipped || ''; break;
       case 'dateOrdered': av = a.dateOrdered || ''; bv = b.dateOrdered || ''; break;
       case 'daysSince': av = a.daysSince; bv = b.daysSince; break;
@@ -581,12 +715,21 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
   const exportCsv = () => {
     const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages';
-    const header = ['Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status', 'Outstanding', 'Order Date', 'Shipped Date', 'Days Since', 'Shipped', 'Authorised At', 'Authorised By', 'Aging filter'];
+    const header = [
+      'Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status',
+      'Due (QBO)', 'QBO Invoice #', 'All (Deco)', 'Billed', 'Terms',
+      'Order Date', 'Shipped Date', 'Age (days)',
+      'Shipped', 'Authorised At', 'Authorised By', 'Aging filter',
+    ];
     const toRow = (j: Row, section: string) => [
       section, j.jobNumber, j.poNumber || '', j.customerName, j.jobName,
       j.salesPerson || '',
       j.status,
+      (j.qboBalance || 0).toFixed(2),
+      j.qboDocNumber || '',
       (j.outstandingBalance || 0).toFixed(2),
+      (j.billableAmount || 0).toFixed(2),
+      j.accountTerms || '',
       j.dateOrdered || '', j.dateShipped || '',
       j.daysSince.toString(),
       j.hasShipped ? 'YES' : 'no',
@@ -640,31 +783,38 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
     const renderSection = (title: string, rows: Row[], accent: 'amber' | 'rose') => {
       if (rows.length === 0) return '';
-      const totalOut = rows.reduce((s, r) => s + (r.outstandingBalance || 0), 0);
+      const totalDue = rows.reduce((s, r) => s + (r.qboBalance || 0), 0);
+      const totalAll = rows.reduce((s, r) => s + (r.outstandingBalance || 0), 0);
       const borderClr = accent === 'amber' ? '#d97706' : '#e11d48';
       const headerBg = accent === 'amber' ? '#fef3c7' : '#ffe4e6';
       const headerText = accent === 'amber' ? '#92400e' : '#9f1239';
 
-      const bodyRows = rows.map(r => `
+      const bodyRows = rows.map(r => {
+        const dueCell = (r.qboBalance || 0) > BALANCE_OWED_EPS
+          ? `<div class="due-amount">${esc(fmtMoney(r.qboBalance || 0))}</div>${r.qboDocNumber ? `<div class="inv-num">inv ${esc(r.qboDocNumber)}</div>` : ''}`
+          : '—';
+        return `
         <tr>
           <td class="job-num">${esc(r.jobNumber)}</td>
           <td>${esc(r.customerName)}</td>
           <td class="job-name">${esc(r.jobName || '—')}</td>
           <td>${esc(r.salesPerson || '—')}</td>
-          <td>${esc(r.status)}</td>
-          <td class="num ${(r.outstandingBalance || 0) > 0 ? 'owed' : ''}">${esc(fmtMoney(r.outstandingBalance || 0))}</td>
-          <td>${esc(fmtDay(r.dateOrdered))}</td>
+          <td class="num owed">${dueCell}</td>
+          <td class="num">${esc(fmtMoney(r.outstandingBalance || 0))}</td>
+          <td class="num">${(r.billableAmount || 0) > 0 ? esc(fmtMoney(r.billableAmount || 0)) : '—'}</td>
+          <td>${esc(r.accountTerms || '—')}</td>
           <td>${esc(fmtDay(r.dateShipped))}</td>
-          <td class="num">${r.daysSince}</td>
+          <td class="num">${r.daysSince}d</td>
           <td class="notes-col"></td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
 
       return `
         <section class="group">
           <div class="group-header" style="background:${headerBg};color:${headerText};border-left:4px solid ${borderClr};">
             <strong>${esc(title)}</strong>
-            <span class="group-meta">${rows.length} ${rows.length === 1 ? 'order' : 'orders'} · Outstanding ${esc(fmtMoney(totalOut))}</span>
+            <span class="group-meta">${rows.length} ${rows.length === 1 ? 'order' : 'orders'} · Due ${esc(fmtMoney(totalDue))} · All ${esc(fmtMoney(totalAll))}</span>
           </div>
           <table>
             <thead>
@@ -673,11 +823,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 <th>Customer</th>
                 <th>Job Name</th>
                 <th>Responsible</th>
-                <th>Status</th>
-                <th class="num">Outstanding</th>
-                <th>Ordered</th>
+                <th class="num">Due</th>
+                <th class="num">All</th>
+                <th class="num">Billed</th>
+                <th>Terms</th>
                 <th>Shipped</th>
-                <th class="num">Days</th>
+                <th class="num">Age</th>
                 <th class="notes-col">Notes / Action taken</th>
               </tr>
             </thead>
@@ -690,6 +841,9 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     const combinedOut =
       zeroPricedRows.reduce((s, r) => s + (r.outstandingBalance || 0), 0) +
       pricedRows.reduce((s, r) => s + (r.outstandingBalance || 0), 0);
+    const combinedDue =
+      zeroPricedRows.reduce((s, r) => s + (r.qboBalance || 0), 0) +
+      pricedRows.reduce((s, r) => s + (r.qboBalance || 0), 0);
 
     const styles = `
       * { box-sizing: border-box; }
@@ -714,7 +868,9 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       td.job-num { font-family: 'SF Mono', Menlo, monospace; font-weight: 600; color: #4f46e5; white-space: nowrap; }
       td.job-name { max-width: 180px; }
       td.owed { color: #e11d48; font-weight: 600; }
-      td.notes-col { width: 160px; }
+      td .due-amount { font-weight: 700; }
+      td .inv-num { font-size: 9px; color: #6b7280; font-weight: 500; margin-top: 1px; }
+      td.notes-col { width: 140px; }
       .actions { background: #eef2ff; border: 1px solid #c7d2fe; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
       .actions button { background: #4f46e5; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px; }
       .print-footer { margin-top: 20px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #6b7280; text-align: center; }
@@ -758,8 +914,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           <div class="tile-value">${pricedRows.length}</div>
         </div>
         <div class="tile">
-          <div class="tile-label">Outstanding total</div>
-          <div class="tile-value rose">${esc(fmtMoney(combinedOut))}</div>
+          <div class="tile-label">Due (QuickBooks)</div>
+          <div class="tile-value rose">${esc(fmtMoney(combinedDue))}</div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">All (Deco outstanding)</div>
+          <div class="tile-value">${esc(fmtMoney(combinedOut))}</div>
         </div>
       </div>
 
@@ -859,10 +1019,12 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 ['', 'Job Name'],
                 ['salesPerson', 'Responsible'],
                 ['status', 'Status'],
-                ['outstandingBalance', 'Outstanding'],
-                ['dateOrdered', 'Ordered'],
+                ['qboBalance', 'Due'],
+                ['outstandingBalance', 'All'],
+                ['billableAmount', 'Billed'],
+                ['accountTerms', 'Terms'],
                 ['dateShipped', 'Shipped'],
-                ['daysSince', 'Days'],
+                ['daysSince', 'Age'],
                 ['', ''],
               ] as [SortKey | '', string][]).map(([key, label], idx) => (
                 <th
@@ -926,16 +1088,50 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                       )}
                     </span>
                   </td>
-                  <td className={`px-4 py-3 font-bold ${
+                  {/* DUE — QuickBooks open invoice balance (the figure Accounts is chasing). */}
+                  <td
+                    className={`px-4 py-3 font-bold whitespace-nowrap ${
+                      j.qboBalance > BALANCE_OWED_EPS ? 'text-rose-500' : textSecondary
+                    }`}
+                    title={
+                      j.qboDocNumber
+                        ? `QuickBooks invoice ${j.qboDocNumber} · open balance ${fmt(j.qboBalance)}`
+                        : 'No matching open invoice found in QuickBooks (matched by job # or PO #)'
+                    }
+                  >
+                    {j.qboBalance > BALANCE_OWED_EPS ? (
+                      <span className="flex flex-col leading-tight">
+                        <span>{fmt(j.qboBalance)}</span>
+                        {j.qboDocNumber && (
+                          <span className={`text-[10px] font-medium ${textSecondary}`}>
+                            inv {j.qboDocNumber}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-xs italic opacity-60">—</span>
+                    )}
+                  </td>
+                  {/* ALL — current Deco outstanding (still includes open / un-invoiced orders). */}
+                  <td className={`px-4 py-3 ${
                     j.isZeroPriced
-                      ? 'text-amber-400'
+                      ? 'text-amber-400 font-semibold'
                       : (j.outstandingBalance || 0) > 0
-                        ? 'text-rose-400'
+                        ? `${textPrimary} font-semibold`
                         : textSecondary
                   }`}>
                     {fmt(j.outstandingBalance || 0)}
                   </td>
-                  <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateOrdered)}</td>
+                  {/* BILLED — total billable amount captured against the job. */}
+                  <td className={`px-4 py-3 ${textSecondary} whitespace-nowrap`}>
+                    {(j.billableAmount || 0) > 0 ? fmt(j.billableAmount || 0) : <span className="italic opacity-60">—</span>}
+                  </td>
+                  {/* TERMS — payment terms (Net 30, Due on Receipt, etc.). */}
+                  <td className={`px-4 py-3 ${textSecondary} whitespace-nowrap`}>
+                    {j.accountTerms?.trim()
+                      ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-slate-500/10 border border-slate-500/20">{j.accountTerms}</span>
+                      : <span className="italic opacity-60">—</span>}
+                  </td>
                   <td className={`px-4 py-3 ${textSecondary}`}>{fmtDate(j.dateShipped)}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -997,9 +1193,11 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     subtitle: string;
     count: number;
     outstanding?: number;
+    /** QuickBooks open balance for these rows (the "DUE" total). */
+    due?: number;
     accentClasses?: { header: string; title: string; count: string };
   }
-  const SectionHeader: React.FC<HeaderProps> = ({ sectionKey, icon, title, subtitle, count, outstanding, accentClasses }) => {
+  const SectionHeader: React.FC<HeaderProps> = ({ sectionKey, icon, title, subtitle, count, outstanding, due, accentClasses }) => {
     const isCollapsed = collapsed[sectionKey];
     return (
       <div
@@ -1029,9 +1227,21 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
             <span className={`text-[10px] uppercase font-semibold block leading-none ${accentClasses?.title || textSecondary}`}>Count</span>
             <span className={`text-base font-bold ${accentClasses?.title || textPrimary}`}>{count}</span>
           </div>
+          {due !== undefined && (
+            <div
+              className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}
+              title="QuickBooks open invoice balance for these rows"
+            >
+              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>Due (QBO)</span>
+              <span className="text-base font-bold text-rose-500">{fmt(due)}</span>
+            </div>
+          )}
           {outstanding !== undefined && (
-            <div className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}>
-              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>Outstanding</span>
+            <div
+              className={`rounded-lg px-3 py-1.5 border ${borderColor} ${cardBg}`}
+              title="Deco outstanding balance (still includes orders without a QBO invoice raised yet)"
+            >
+              <span className={`text-[10px] uppercase ${textSecondary} font-semibold block leading-none`}>All</span>
               <span className={`text-base font-bold ${textPrimary}`}>{fmt(outstanding)}</span>
             </div>
           )}
@@ -1042,6 +1252,15 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
 
   const totalCount = zeroPricedRows.length + pricedRows.length + authorisedRows.length;
   const combinedOutstanding = zeroPricedOutstanding + pricedOutstanding;
+  const zeroPricedDue = useMemo(
+    () => zeroPricedRows.reduce((s, j) => s + (j.qboBalance || 0), 0),
+    [zeroPricedRows],
+  );
+  const pricedDue = useMemo(
+    () => pricedRows.reduce((s, j) => s + (j.qboBalance || 0), 0),
+    [pricedRows],
+  );
+  const combinedDue = zeroPricedDue + pricedDue;
 
   return (
     <div className="space-y-4">
@@ -1091,6 +1310,32 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 </>
               );
             })()}
+            {(() => {
+              // QBO source-of-truth indicator. "Due" is meaningless without it,
+              // so flag the empty state loudly so staff don't think every job is
+              // settled when really QuickBooks just hasn't loaded.
+              if (qboLoading && qboInvoices.length === 0) {
+                return <span className="px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest bg-indigo-500/10 text-indigo-500 border-indigo-500/30">QBO loading…</span>;
+              }
+              if (qboInvoices.length > 0) {
+                return (
+                  <span
+                    className="px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                    title={`${qboInvoices.length} open invoices loaded from QuickBooks — used to populate the DUE column`}
+                  >
+                    QBO · {qboInvoices.length} open
+                  </span>
+                );
+              }
+              return (
+                <span
+                  className="px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-500 border-amber-500/30"
+                  title="No QuickBooks data — DUE column will show '—' until QBO is connected/refreshed. Connect from the Finance tab if needed."
+                >
+                  QBO not loaded
+                </span>
+              );
+            })()}
           </p>
           {pullError && (
             <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
@@ -1110,13 +1355,30 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
               ? (pullProgress && pullProgress.total > 0 ? `Pulling ${pullProgress.current}/${pullProgress.total}` : 'Pulling…')
               : 'Pull from Deco'}
           </button>
-          <button onClick={loadFromFinanceCache} disabled={isLoading || isPulling} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${(isLoading || isPulling) ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`} title="Re-read from the shared finance cache (fast, doesn't talk to Deco)">
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            {isLoading ? 'Loading…' : 'Refresh'}
+          <button
+            onClick={() => { loadFromFinanceCache(); fetchQboInvoices(); }}
+            disabled={isLoading || isPulling}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} ${(isLoading || isPulling) ? 'opacity-50' : 'hover:bg-white/10'} transition-colors`}
+            title="Re-read from the shared finance cache and refresh QuickBooks AR balances"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${(isLoading || qboLoading) ? 'animate-spin' : ''}`} />
+            {isLoading || qboLoading ? 'Loading…' : 'Refresh'}
           </button>
-          <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
-            <span className={`text-xs ${textSecondary}`}>Total Outstanding</span>
-            <p className="text-lg font-bold text-rose-500">{fmt(combinedOutstanding)}</p>
+          <div
+            className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}
+            title="QuickBooks open invoice balance for shipped jobs visible below."
+          >
+            <span className={`text-xs ${textSecondary}`}>Total Due (QBO)</span>
+            <p className="text-lg font-bold text-rose-500">
+              {qboInvoices.length === 0 && qboLoading ? '…' : fmt(combinedDue)}
+            </p>
+          </div>
+          <div
+            className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}
+            title="Deco outstanding balance — includes orders without a QBO invoice raised yet."
+          >
+            <span className={`text-xs ${textSecondary}`}>Total All (Deco)</span>
+            <p className={`text-lg font-bold ${textPrimary}`}>{fmt(combinedOutstanding)}</p>
           </div>
           <div className={`${cardBg} rounded-lg px-4 py-2 border ${borderColor}`}>
             <span className={`text-xs ${textSecondary}`}>Open orders</span>
@@ -1222,6 +1484,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           title="Zero priced — shipped without a price"
           subtitle="Order total is £0.00 and no payment has been recorded. Most dangerous bucket — likely never priced."
           count={zeroPricedRows.length}
+          due={zeroPricedDue}
           outstanding={zeroPricedOutstanding}
           accentClasses={zeroPricedRows.length > 0 ? {
             header: '',
@@ -1277,6 +1540,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           title="Priced but unpaid"
           subtitle="Shipped, a price on the order, and money still outstanding — chase payment."
           count={pricedRows.length}
+          due={pricedDue}
           outstanding={pricedOutstanding}
         />
         {!collapsed.priced && (

@@ -56,6 +56,9 @@ export interface OpenItemLine {
   /** Past due (due date before today) */
   isOverdue: boolean;
   daysPastDue: number;
+  /** Original invoice total (TotalAmt from QBO) — used in the AMOUNT column. */
+  amountTotal: number;
+  /** Open balance still owed (Balance from QBO) — used in the OPEN AMOUNT column. */
   amountDue: number;
 }
 
@@ -272,6 +275,7 @@ export function buildOpenItemStatement(
       dueDateShort: formatDateSlash(inv.dueDate),
       isOverdue: dpd > 0,
       daysPastDue: dpd,
+      amountTotal: inv.totalAmount,
       amountDue: inv.balance,
     };
   });

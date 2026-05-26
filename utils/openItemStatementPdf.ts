@@ -29,7 +29,15 @@ const TABLE_SIDE = 10;
 const STATEMENT_TABLE_W = PAGE_W - TABLE_SIDE * 2;
 const STATEMENT_TABLE_LEFT = TABLE_SIDE;
 const FOOTER_Y = PAGE_H - 10;
-const { green, greenText, headerText, overdueRed } = STATEMENT_COLORS;
+const {
+  green,
+  greenText,
+  headerText,
+  overdueRed,
+  overdueRedDeep,
+  overdueRowFill,
+  overdueBannerFill,
+} = STATEMENT_COLORS;
 
 const formatAmount = (v: number) =>
   v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -365,10 +373,7 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
   const tableW = PAGE_W - MARGIN * 2;
   const colW = tableW / 6;
   const x0 = MARGIN;
-
-  doc.setDrawColor(180, 180, 180);
-  doc.setLineWidth(0.15);
-  doc.rect(x0, y, tableW, 13);
+  const rowH = 16;
 
   const headers: { line1: string; line2: string }[] = [
     { line1: 'Current', line2: 'Due' },
@@ -387,6 +392,19 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
     aging.total,
   ];
 
+  // Light fills for past-due headers (1-30 through 90+) when there's a
+  // balance, so the eye lands on the problem buckets first.
+  for (let i = 1; i <= 4; i++) {
+    if (values[i] > 0.005) {
+      doc.setFillColor(...overdueRowFill);
+      doc.rect(x0 + colW * i, y, colW, rowH / 2 + 1, 'F');
+    }
+  }
+
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.15);
+  doc.rect(x0, y, tableW, rowH);
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.5);
   doc.setTextColor(80, 80, 80);
@@ -394,20 +412,86 @@ function drawAgingBar(doc: import('jspdf').jsPDF, y: number, aging: OpenItemStat
     const cx = x0 + colW * i + colW / 2;
     doc.text(h.line1, cx, y + 3.5, { align: 'center' });
     doc.text(h.line2, cx, y + 6.5, { align: 'center' });
-    if (i < 5) doc.line(x0 + colW * (i + 1), y, x0 + colW * (i + 1), y + 13);
+    if (i < 5) doc.line(x0 + colW * (i + 1), y, x0 + colW * (i + 1), y + rowH);
   });
 
+  // Divider above the values row, with a heavier red strip if there is
+  // anything past due so the totals row clearly separates from the headers.
+  doc.setDrawColor(180, 180, 180);
   doc.line(x0, y + 8, x0 + tableW, y + 8);
+
+  // Saturated fills behind each past-due value cell that has money in it.
+  for (let i = 1; i <= 4; i++) {
+    if (values[i] > 0.005) {
+      doc.setFillColor(...overdueRedDeep);
+      doc.rect(x0 + colW * i, y + 8, colW, rowH - 8, 'F');
+    }
+  }
+
+  // Amount Due (rightmost) — always emphasised so the customer can't miss
+  // the grand total; turn it red when anything is past due.
+  const anyPastDue =
+    aging.pastDue1_30 + aging.pastDue31_60 + aging.pastDue61_90 + aging.pastDue90Plus > 0.005;
+  if (anyPastDue) doc.setFillColor(...overdueRedDeep);
+  else doc.setFillColor(...green);
+  doc.rect(x0 + colW * 5, y + 8, colW, rowH - 8, 'F');
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(9);
   values.forEach((v, i) => {
     const cx = x0 + colW * i + colW / 2;
     const isOverdueBucket = i >= 1 && i <= 4 && v > 0.005;
-    doc.setTextColor(...(isOverdueBucket ? overdueRed : [0, 0, 0]));
-    doc.text(i === 5 ? `GBP ${formatAmount(v)}` : formatAmount(v), cx, y + 11.5, { align: 'center' });
+    const isTotal = i === 5;
+    if (isOverdueBucket || isTotal) {
+      doc.setTextColor(255, 255, 255);
+    } else {
+      doc.setTextColor(20, 20, 20);
+    }
+    doc.text(isTotal ? `GBP ${formatAmount(v)}` : formatAmount(v), cx, y + 13.5, { align: 'center' });
   });
 
-  return y + 15;
+  return y + rowH + 2;
+}
+
+/**
+ * Loud red banner shown at the top of the statement footer block whenever
+ * any past-due balance exists. Repeats the headline figure plus the worst
+ * bucket so the customer reads the urgency before scanning the table.
+ */
+function drawPastDueBanner(
+  doc: import('jspdf').jsPDF,
+  y: number,
+  aging: OpenItemStatement['aging'],
+): number {
+  const pastDueTotal =
+    aging.pastDue1_30 + aging.pastDue31_60 + aging.pastDue61_90 + aging.pastDue90Plus;
+  if (pastDueTotal <= 0.005) return y;
+
+  const boxW = PAGE_W - MARGIN * 2;
+  const boxH = 11;
+  doc.setFillColor(...overdueBannerFill);
+  doc.setDrawColor(...overdueBannerFill);
+  doc.setLineWidth(0.4);
+  doc.rect(MARGIN, y, boxW, boxH, 'FD');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('PAST DUE — ACTION REQUIRED', MARGIN + 4, y + 4.7);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(
+    'These invoices are outside agreed credit terms. Please settle today to keep the account open.',
+    MARGIN + 4,
+    y + 8.8,
+  );
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(`GBP ${formatAmount(pastDueTotal)}`, PAGE_W - MARGIN - 4, y + 7.2, { align: 'right' });
+
+  return y + boxH + 3;
 }
 
 /** Canvas aspect — must match drawPayNowButtons placement (do not stretch to full column width). */
@@ -597,6 +681,7 @@ function drawStatementFooter(
   buttonImages: string[],
 ): number {
   let y = startY;
+  y = drawPastDueBanner(doc, y, statement.aging);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(0, 0, 0);
@@ -631,20 +716,28 @@ function drawLineTable(
   startY: number,
   chunk: OpenItemLine[],
 ) {
-  const body = chunk.map(l => [
-    l.txnDateShort,
-    l.docNumber,
-    l.dueDateShort,
-    formatAmount(l.amountDue),
-    formatAmount(l.amountDue),
-  ]);
+  const body = chunk.map(l => {
+    const overdueTag = l.isOverdue
+      ? `  PAST DUE${l.daysPastDue > 0 ? ` ${l.daysPastDue}d` : ''}`
+      : '';
+    return [
+      l.txnDateShort,
+      l.docNumber,
+      `${l.dueDateShort}${overdueTag}`,
+      // AMOUNT — full invoice total (TotalAmt from QBO); falls back to the
+      // open balance for any legacy rows that don't carry totalAmount yet.
+      formatAmount(l.amountTotal > 0 ? l.amountTotal : l.amountDue),
+      // OPEN AMOUNT — outstanding balance still owed.
+      formatAmount(l.amountDue),
+    ];
+  });
 
   const colW = [
-    STATEMENT_TABLE_W * 0.14,
-    STATEMENT_TABLE_W * 0.20,
+    STATEMENT_TABLE_W * 0.13,
     STATEMENT_TABLE_W * 0.18,
-    STATEMENT_TABLE_W * 0.24,
-    STATEMENT_TABLE_W * 0.24,
+    STATEMENT_TABLE_W * 0.25,
+    STATEMENT_TABLE_W * 0.22,
+    STATEMENT_TABLE_W * 0.22,
   ];
 
   autoTable(doc, {
@@ -678,12 +771,29 @@ function drawLineTable(
       4: { cellWidth: colW[4], halign: 'right' },
     },
     didParseCell: data => {
-      if (data.section !== 'body' || data.column.index !== 2) return;
+      if (data.section !== 'body') return;
       const line = chunk[data.row.index];
-      if (line?.isOverdue) {
-        data.cell.styles.textColor = [...overdueRed];
-        data.cell.styles.fontStyle = 'bold';
+      if (!line?.isOverdue) return;
+      // Overdue rows scream — soft red fill across every cell, bold red text
+      // everywhere (not just the due date), and a saturated red on the date
+      // and the OPEN AMOUNT (the figure the customer needs to pay now).
+      data.cell.styles.fillColor = [...overdueRowFill];
+      data.cell.styles.fontStyle = 'bold';
+      data.cell.styles.textColor = [...overdueRed];
+      if (data.column.index === 2 || data.column.index === 4) {
+        data.cell.styles.textColor = [...overdueRedDeep];
       }
+    },
+    didDrawCell: data => {
+      // Red left edge marker on overdue rows — extra visual anchor so the
+      // row reads as "stop, this is past due" before they even look at the
+      // numbers. Only paint on the first column to avoid double-painting.
+      if (data.section !== 'body' || data.column.index !== 0) return;
+      const line = chunk[data.row.index];
+      if (!line?.isOverdue) return;
+      const { x, y, height } = data.cell;
+      doc.setFillColor(...overdueRedDeep);
+      doc.rect(x - 0.6, y, 1.4, height, 'F');
     },
   });
 }
@@ -696,7 +806,7 @@ function redrawAllFooters(doc: import('jspdf').jsPDF) {
   }
 }
 
-const FOOTER_SECTION_HEIGHT = 84;
+const FOOTER_SECTION_HEIGHT = 102;
 
 async function renderOpenItemStatementPdf(
   statement: OpenItemStatement,

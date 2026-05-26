@@ -6,6 +6,12 @@ export const STATEMENT_COLORS = {
   greenText: [90, 140, 40] as const,
   headerText: [255, 255, 255] as const,
   overdueRed: [192, 40, 40] as const,
+  /** Saturated red used for the aging-summary past-due column fills. */
+  overdueRedDeep: [176, 18, 18] as const,
+  /** Soft red row fill — used to make every overdue invoice line scream "PAST DUE". */
+  overdueRowFill: [253, 226, 226] as const,
+  /** Stronger red for top "PAST DUE" banner background. */
+  overdueBannerFill: [220, 38, 38] as const,
 } as const;
 
 /** Shopify brand trio — use this URL in the statement PDF header (top right). */

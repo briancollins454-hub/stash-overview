@@ -476,38 +476,64 @@ export const OpenItemStatementModal: React.FC<OpenItemStatementModalProps> = ({
                 </label>
               </div>
 
-              {/* Preview table */}
+              {/* Preview table — mirrors the PDF layout: AMOUNT is the full
+                  invoice total, OPEN AMOUNT is what's still owed, and any
+                  overdue line gets a loud red row background so it can't be
+                  missed at a glance. */}
               <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
                 <table className="w-full text-xs">
                   <thead className={isDark ? 'bg-slate-800' : 'bg-gray-100'}>
                     <tr>
                       <th className="text-left p-2 font-black uppercase tracking-widest text-[9px]">Invoice</th>
                       <th className="text-left p-2 font-black uppercase tracking-widest text-[9px]">Date</th>
-                      <th className="text-left p-2 font-black uppercase tracking-widest text-[9px]">Due</th>
+                      <th className="text-left p-2 font-black uppercase tracking-widest text-[9px]">Due Date</th>
                       <th className="text-right p-2 font-black uppercase tracking-widest text-[9px]">Days</th>
-                      <th className="text-right p-2 font-black uppercase tracking-widest text-[9px]">Due</th>
+                      <th className="text-right p-2 font-black uppercase tracking-widest text-[9px]">Amount</th>
+                      <th className="text-right p-2 font-black uppercase tracking-widest text-[9px]">Open Amount</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {statement.lines.map(line => (
-                      <tr key={line.invoiceId} className={`border-t ${isDark ? 'border-slate-700/50' : 'border-gray-100'}`}>
-                        <td className="p-2 font-mono font-bold">{line.docNumber}</td>
-                        <td className="p-2 tabular-nums">{line.txnDateShort}</td>
-                        <td className={`p-2 tabular-nums ${line.isOverdue ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
-                          {line.dueDateShort}
-                        </td>
-                        <td className={`p-2 text-right tabular-nums ${line.isOverdue ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
-                          {line.daysPastDue > 0 ? line.daysPastDue : '—'}
-                        </td>
-                        <td className="p-2 text-right font-bold tabular-nums">
-                          £{line.amountDue.toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
+                    {statement.lines.map(line => {
+                      const overdueRow = line.isOverdue
+                        ? (isDark
+                          ? 'bg-red-500/15 border-l-4 border-red-500'
+                          : 'bg-red-50 border-l-4 border-red-500')
+                        : '';
+                      const overdueText = line.isOverdue
+                        ? 'text-red-600 dark:text-red-400 font-bold'
+                        : '';
+                      const fullAmount = line.amountTotal > 0 ? line.amountTotal : line.amountDue;
+                      return (
+                        <tr
+                          key={line.invoiceId}
+                          className={`border-t ${isDark ? 'border-slate-700/50' : 'border-gray-100'} ${overdueRow}`}
+                        >
+                          <td className={`p-2 font-mono font-bold ${overdueText}`}>{line.docNumber}</td>
+                          <td className={`p-2 tabular-nums ${overdueText}`}>{line.txnDateShort}</td>
+                          <td className={`p-2 tabular-nums ${overdueText}`}>
+                            {line.dueDateShort}
+                            {line.isOverdue && (
+                              <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-red-600 text-white">
+                                PAST DUE
+                              </span>
+                            )}
+                          </td>
+                          <td className={`p-2 text-right tabular-nums ${overdueText}`}>
+                            {line.daysPastDue > 0 ? `${line.daysPastDue}d` : '—'}
+                          </td>
+                          <td className={`p-2 text-right tabular-nums ${overdueText}`}>
+                            £{fullAmount.toFixed(2)}
+                          </td>
+                          <td className={`p-2 text-right font-black tabular-nums ${line.isOverdue ? 'text-red-700 dark:text-red-300' : ''}`}>
+                            £{line.amountDue.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className={isDark ? 'bg-slate-800' : 'bg-indigo-50'}>
                     <tr>
-                      <td colSpan={4} className="p-2 text-right font-black uppercase text-[10px] tracking-widest">
+                      <td colSpan={5} className="p-2 text-right font-black uppercase text-[10px] tracking-widest">
                         Total outstanding
                       </td>
                       <td className="p-2 text-right font-black text-red-600 dark:text-red-400">
