@@ -482,7 +482,7 @@ function drawPastDueBanner(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.text(
-    'These invoices are outside agreed credit terms. Please settle today to keep the account open.',
+    'These invoices are outside agreed credit terms. Please settle ASAP to keep the account open.',
     MARGIN + 4,
     y + 8.8,
   );
