@@ -1,11 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Barcode, Camera, CheckCircle2, Keyboard, Loader2, Package, Printer, Save, ScanLine,
-  Trash2,
+  AlertTriangle, ArrowLeft, CheckCircle2, FileSpreadsheet, Loader2, Printer, RotateCcw, Save, ScanLine,
 } from 'lucide-react';
 import { openStockTakePrint } from '../utils/stockTakePrint';
-import BarcodeCameraScanner from './BarcodeCameraScanner';
+import { downloadStockTakeCsv } from '../utils/stockTakeCsv';
 import SupplierCatalogPanel from './SupplierCatalogPanel';
+import LinesPanel from './stock-take/LinesPanel';
+import SessionListPanel from './stock-take/SessionListPanel';
+import ScanInputPanel from './stock-take/ScanInputPanel';
+import UnknownBarcodeOverlay from './stock-take/UnknownBarcodeOverlay';
+import PreCommitReviewModal from './stock-take/PreCommitReviewModal';
+import {
+  isScanFeedbackEnabled,
+  playScanFeedback,
+  setScanFeedbackEnabled,
+} from './stock-take/scanFeedback';
 import type { DecoJob, PhysicalStockItem, ReferenceProduct, SupplierCatalogItem } from '../types';
 import { fetchSupplierCatalog } from '../services/supplierCatalogService';
 import { isSupabaseReady } from '../services/supabase';
@@ -18,6 +27,9 @@ import {
   type ResolvedProduct,
 } from '../services/productResolver';
 import {
+  addStockTakeLineQty,
+  applyScanToReference,
+  buildAuditRows,
   buildPhysicalStockFromStockTake,
   createStockTakeSession,
   deleteStockTakeLine,
@@ -28,13 +40,26 @@ import {
   manualProductFromForm,
   markSessionCommitted,
   mergeReferenceFromLines,
+  missingFromCount,
+  reopenStockTakeSession,
+  referenceDrift,
   upsertStockTakeLine,
+  writeStockTakeAudit,
+  type MissingLine,
   type StockTakeLineView,
   type StockTakeLocation,
   type StockTakeSession,
 } from '../services/stockTakeService';
 
 const DRAFT_KEY = 'stash_stock_take_draft';
+const FEEDBACK_PREF_KEY = 'stash_stock_take_sound';
+
+interface DraftSnapshot {
+  sessionId: string;
+  session?: StockTakeSession;
+  lines: StockTakeLineView[];
+  savedAt: string;
+}
 
 function prefersCameraScan(): boolean {
   if (typeof window === 'undefined') return false;
@@ -56,6 +81,13 @@ function formatSessionWhen(iso: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+interface UndoState {
+  lineId: string;
+  prevQty: number;
+  /** True if the line did not exist before this scan (so undo deletes it). */
+  isNew: boolean;
 }
 
 interface Props {
@@ -83,6 +115,9 @@ const StockTakeScanner: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [scanValue, setScanValue] = useState('');
   const [addQty, setAddQty] = useState(1);
+  const [cartonMode, setCartonMode] = useState(false);
+  const [embellished, setEmbellished] = useState(false);
+  const [clubName, setClubName] = useState('');
   const [lastKey, setLastKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
@@ -105,6 +140,12 @@ const StockTakeScanner: React.FC<Props> = ({
   const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogItem[]>([]);
   const [catalogLoadError, setCatalogLoadError] = useState<string | null>(null);
   const [unknownHint, setUnknownHint] = useState<string | null>(null);
+  const [localDraft, setLocalDraft] = useState<DraftSnapshot | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [undoStack, setUndoStack] = useState<UndoState[]>([]);
+  const [ignoredDrift, setIgnoredDrift] = useState<Set<string>>(() => new Set());
+  const [soundEnabled, setSoundEnabled] = useState(() => isScanFeedbackEnabled());
+
   const lastCamScanRef = useRef<{ code: string; at: number; counted?: boolean }>({ code: '', at: 0 });
   const dismissedCodesRef = useRef<Map<string, number>>(new Map());
   const sessionRef = useRef(session);
@@ -116,6 +157,69 @@ const StockTakeScanner: React.FC<Props> = ({
   );
   const barcodeLookupRef = useRef(barcodeLookup);
   barcodeLookupRef.current = barcodeLookup;
+
+  // ─── Sound pref persistence ────────────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FEEDBACK_PREF_KEY);
+      if (raw === '0') {
+        setScanFeedbackEnabled(false);
+        setSoundEnabled(false);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleSound = useCallback(() => {
+    setSoundEnabled(prev => {
+      const next = !prev;
+      setScanFeedbackEnabled(next);
+      try {
+        localStorage.setItem(FEEDBACK_PREF_KEY, next ? '1' : '0');
+      } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
+  // ─── Local draft restore (bug 1) ───────────────────────────────────────────
+  useEffect(() => {
+    if (typeof window === 'undefined' || session) return;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as DraftSnapshot;
+      if (parsed && Array.isArray(parsed.lines) && parsed.lines.length > 0) {
+        setLocalDraft(parsed);
+      } else {
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    } catch {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+  }, [session]);
+
+  const restoreLocalDraft = useCallback(() => {
+    if (!localDraft) return;
+    if (localDraft.session) {
+      setSession(localDraft.session);
+    } else {
+      setSession({
+        id: localDraft.sessionId,
+        label: 'Restored draft',
+        location: 'church_st',
+        status: 'open',
+        created_by: null,
+        created_at: new Date().toISOString(),
+        committed_at: null,
+      });
+    }
+    setLines(localDraft.lines);
+    setLocalDraft(null);
+  }, [localDraft]);
+
+  const discardLocalDraft = useCallback(() => {
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+    setLocalDraft(null);
+  }, []);
 
   useEffect(() => () => {
     setCameraOpen(false);
@@ -181,10 +285,18 @@ const StockTakeScanner: React.FC<Props> = ({
     if (session) void reloadSupplierCatalog();
   }, [session?.id, reloadSupplierCatalog]);
 
+  // Persist a recoverable draft on every line change.
   useEffect(() => {
-    if (session && session.status === 'open') {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ sessionId: session.id, lines }));
-    }
+    if (!session || session.status !== 'open') return;
+    const snapshot: DraftSnapshot = {
+      sessionId: session.id,
+      session,
+      lines,
+      savedAt: new Date().toISOString(),
+    };
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(snapshot));
+    } catch { /* storage full or disabled */ }
   }, [session, lines]);
 
   useEffect(() => {
@@ -199,6 +311,26 @@ const StockTakeScanner: React.FC<Props> = ({
     return { skus, units };
   }, [lines]);
 
+  const netVariance = useMemo(() => {
+    let net = 0;
+    for (const line of lines) {
+      const book = bookByKey.get(line.stockKey) || 0;
+      net += line.qty - book;
+    }
+    return net;
+  }, [lines, bookByKey]);
+
+  const driftRows = useMemo(
+    () => referenceDrift(lines, referenceProducts).filter(row => !ignoredDrift.has(row.lineId)),
+    [lines, referenceProducts, ignoredDrift],
+  );
+
+  const missing: MissingLine[] = useMemo(
+    () => (session ? missingFromCount(lines, physicalStock) : []),
+    [session, lines, physicalStock],
+  );
+
+  // ─── Session control ──────────────────────────────────────────────────────
   const startSession = async () => {
     setError(null);
     try {
@@ -210,6 +342,7 @@ const StockTakeScanner: React.FC<Props> = ({
       });
       setSession(s);
       setLines([]);
+      setUndoStack([]);
       setOpenSessions(prev => [s, ...prev]);
       setNewLabel('');
     } catch (e: unknown) {
@@ -240,6 +373,7 @@ const StockTakeScanner: React.FC<Props> = ({
       if (!s) throw new Error('Session not found');
       setSession(s);
       setLines(ls);
+      setUndoStack([]);
       setCameraOpen(s.status === 'open');
       setUnknownCode(null);
       setCameraFlash(null);
@@ -256,12 +390,14 @@ const StockTakeScanner: React.FC<Props> = ({
     setUnknownCode(null);
     setCameraFlash(null);
     setCameraError(null);
-    localStorage.removeItem(DRAFT_KEY);
+    setUndoStack([]);
+    setIgnoredDrift(new Set());
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
   };
 
   const isReadOnly = session?.status === 'committed';
 
-  const persistLine = async (line: StockTakeLineView) => {
+  const persistLineRow = async (line: StockTakeLineView) => {
     if (!session || session.id.startsWith('local_')) return;
     try {
       await upsertStockTakeLine(line);
@@ -270,36 +406,85 @@ const StockTakeScanner: React.FC<Props> = ({
     }
   };
 
-  const addScan = (product: ResolvedProduct, qty: number) => {
+  // ─── Adding a scan (with undo bookkeeping) ────────────────────────────────
+  const addScan = (product: ResolvedProduct, qty: number, opts?: { source?: 'manual' | 'scan' }) => {
     if (!session) return;
-    const isEmbellished = false;
+    const isEmb = embellished;
+    const club = isEmb ? clubName.trim() : '';
     const stockKey = physicalStockAggregateKey({
       ean: product.ean,
-      isEmbellished,
+      isEmbellished: isEmb,
+      clubName: club || undefined,
       size: product.size,
       colour: product.colour,
     });
+
     setLines(prev => {
       const idx = prev.findIndex(l => l.stockKey === stockKey);
       if (idx >= 0) {
         const next = [...prev];
+        const prevQty = next[idx].qty;
         const updated: StockTakeLineView = {
           ...next[idx],
-          qty: next[idx].qty + qty,
+          qty: prevQty + qty,
           updatedAt: new Date().toISOString(),
         };
         next[idx] = updated;
-        void persistLine(updated);
+        setUndoStack(s => [...s, { lineId: updated.id, prevQty, isNew: false }]);
+        if (session.id.startsWith('local_')) {
+          // no-op
+        } else {
+          void addStockTakeLineQty(updated, qty).then(serverLine => {
+            if (!serverLine) return;
+            setLines(curr => curr.map(l => (l.id === updated.id ? { ...l, qty: serverLine.qty } : l)));
+          });
+        }
         return next;
       }
-      const line = lineFromResolved(session.id, product, qty);
-      void persistLine(line);
+      const line = lineFromResolved(session.id, product, qty, { isEmbellished: isEmb, clubName: club });
+      setUndoStack(s => [...s, { lineId: line.id, prevQty: 0, isNew: true }]);
+      if (session.id.startsWith('local_')) {
+        // local only
+      } else {
+        void addStockTakeLineQty(line, qty).then(serverLine => {
+          if (!serverLine) {
+            void persistLineRow(line);
+            return;
+          }
+          setLines(curr => curr.map(l => (l.id === line.id ? { ...l, qty: serverLine.qty } : l)));
+        });
+      }
       return [line, ...prev];
     });
     setLastKey(stockKey);
     setScanValue('');
-    setAddQty(1);
+    if (!cartonMode) setAddQty(1);
+    if (opts?.source !== 'manual') playScanFeedback('ok');
   };
+
+  const undoLastScan = useCallback(() => {
+    setUndoStack(stack => {
+      if (stack.length === 0) return stack;
+      const next = [...stack];
+      const last = next.pop()!;
+      setLines(prev => {
+        if (last.isNew) {
+          const removed = prev.find(l => l.id === last.lineId);
+          if (removed && !session?.id.startsWith('local_')) {
+            void deleteStockTakeLine(last.lineId).catch(() => undefined);
+          }
+          return prev.filter(l => l.id !== last.lineId);
+        }
+        return prev.map(l => {
+          if (l.id !== last.lineId) return l;
+          const restored = { ...l, qty: last.prevQty, updatedAt: new Date().toISOString() };
+          void persistLineRow(restored);
+          return restored;
+        });
+      });
+      return next;
+    });
+  }, [session]);
 
   const showUnknown = useCallback((code: string) => {
     const explanation = explainBarcodeLookup(code, {
@@ -326,22 +511,30 @@ const StockTakeScanner: React.FC<Props> = ({
     (raw: string, opts?: { fromCamera?: boolean }): boolean => {
       const code = normalizeBarcodeInput(raw);
       if (!code || !sessionRef.current) return false;
-      if (isScanDismissed(code)) return false;
+      if (isScanDismissed(code)) {
+        playScanFeedback('reject');
+        return false;
+      }
       if (opts?.fromCamera && !isPlausibleScanCode(code)) return false;
 
       const now = Date.now();
       const last = lastCamScanRef.current;
       const camCooldownMs = 3000;
 
-      if (opts?.fromCamera && now - last.at < 1200) return true;
+      if (opts?.fromCamera && now - last.at < 1200) {
+        playScanFeedback('duplicate');
+        return true;
+      }
 
       if (opts?.fromCamera && last.code === code && now - last.at < camCooldownMs) {
+        playScanFeedback('duplicate');
         return true;
       }
 
       const product = barcodeLookupRef.current.resolve(code);
       if (!product) {
         if (opts?.fromCamera && unknownCode === code) return true;
+        playScanFeedback('reject');
         showUnknown(code);
         lastCamScanRef.current = { code, at: now };
         if (opts?.fromCamera) {
@@ -351,14 +544,12 @@ const StockTakeScanner: React.FC<Props> = ({
       }
 
       if (opts?.fromCamera && last.code === code && last.counted && now - last.at < camCooldownMs) {
+        playScanFeedback('duplicate');
         return true;
       }
 
       lastCamScanRef.current = { code, at: now, counted: true };
       setUnknownCode(null);
-      try {
-        navigator.vibrate?.(35);
-      } catch { /* unsupported */ }
       if (opts?.fromCamera) {
         const matchedEan = normalizeBarcodeInput(product.ean);
         setCameraFlash(
@@ -371,7 +562,7 @@ const StockTakeScanner: React.FC<Props> = ({
       addScan(product, Math.max(1, addQty));
       return true;
     },
-    [addQty, isScanDismissed, showUnknown, unknownCode],
+    [addQty, isScanDismissed, showUnknown, unknownCode, embellished, clubName, cartonMode],
   );
 
   const processBarcode = useCallback(
@@ -397,18 +588,25 @@ const StockTakeScanner: React.FC<Props> = ({
   const registerUnknown = () => {
     if (!unknownCode || !regForm.description.trim()) return;
     const product = manualProductFromForm(unknownCode, regForm);
-    addScan(product, Math.max(1, addQty));
+    addScan(product, Math.max(1, addQty), { source: 'manual' });
+    playScanFeedback('ok');
     setUnknownCode(null);
   };
 
   const setLineQty = (id: string, qty: number) => {
     const q = Math.max(0, qty);
     setLines(prev => {
-      if (q === 0) return prev.filter(l => l.id !== id);
+      if (q === 0) {
+        const removed = prev.find(l => l.id === id);
+        if (removed && session && !session.id.startsWith('local_')) {
+          void deleteStockTakeLine(id).catch(() => undefined);
+        }
+        return prev.filter(l => l.id !== id);
+      }
       return prev.map(l => {
         if (l.id !== id) return l;
         const updated = { ...l, qty: q, updatedAt: new Date().toISOString() };
-        void persistLine(updated);
+        void persistLineRow(updated);
         return updated;
       });
     });
@@ -421,6 +619,26 @@ const StockTakeScanner: React.FC<Props> = ({
     } catch { /* */ }
   };
 
+  const applyDriftToReference = (lineId: string) => {
+    const line = lines.find(l => l.id === lineId);
+    if (!line) return;
+    const next = applyScanToReference(line, referenceProducts);
+    onUpdateReferenceProducts(next);
+    setIgnoredDrift(prev => {
+      const out = new Set(prev);
+      out.add(lineId);
+      return out;
+    });
+  };
+
+  const ignoreDrift = (lineId: string) => {
+    setIgnoredDrift(prev => {
+      const out = new Set(prev);
+      out.add(lineId);
+      return out;
+    });
+  };
+
   const handlePrintPdf = () => {
     if (!session || lines.length === 0) return;
     openStockTakePrint({
@@ -431,33 +649,86 @@ const StockTakeScanner: React.FC<Props> = ({
         bookQty: bookByKey.get(line.stockKey) ?? 0,
       })),
       totals,
+      missing,
     });
   };
 
-  const handleCommit = async () => {
+  const handleCsv = () => {
     if (!session || lines.length === 0) return;
-    const msg =
-      `Commit ${totals.skus} SKU(s) / ${totals.units} unit(s) to branch stock?\n\n` +
-      'Counted lines will REPLACE on-hand quantity for those products. ' +
-      'Items you did not scan are left unchanged.';
-    if (!window.confirm(msg)) return;
+    downloadStockTakeCsv({
+      session,
+      locationLabel: LOCATION_LABELS[session.location as StockTakeLocation] || session.location,
+      rows: lines.map(line => ({
+        line,
+        bookQty: bookByKey.get(line.stockKey) ?? 0,
+      })),
+      missing: missing.map(m => ({
+        ean: m.ean,
+        description: m.description,
+        vendor: m.vendor,
+        productCode: m.productCode,
+        colour: m.colour,
+        size: m.size,
+        bookQty: m.bookQty,
+      })),
+    });
+  };
 
+  const handleReopen = async () => {
+    if (!session) return;
+    if (!window.confirm('Re-open this committed session so you can adjust qty? On-hand stock will not change until you commit again.')) return;
+    try {
+      if (!session.id.startsWith('local_')) {
+        await reopenStockTakeSession(session);
+      }
+      setSession({ ...session, status: 'open', committed_at: null, reopened_count: (session.reopened_count || 0) + 1 });
+      setUndoStack([]);
+      void loadOpen();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to re-open session');
+    }
+  };
+
+  const handleStartCommit = () => {
+    if (!session || lines.length === 0) return;
+    setReviewOpen(true);
+  };
+
+  const performCommit = async (opts: { zeroKeys: string[] }) => {
+    if (!session || lines.length === 0) return;
     setCommitting(true);
     setError(null);
     try {
-      const { next, summary } = buildPhysicalStockFromStockTake(lines, physicalStock);
+      const { next, summary } = buildPhysicalStockFromStockTake(lines, physicalStock, opts.zeroKeys);
       onCommitStock(next);
       const refs = mergeReferenceFromLines(lines, referenceProducts);
       onUpdateReferenceProducts(refs);
       const committedAt = new Date().toISOString();
+      const committedBy = currentUser?.email || currentUser?.displayName || null;
+      const audit = buildAuditRows(session, lines, physicalStock, committedBy);
       if (!session.id.startsWith('local_')) {
-        await markSessionCommitted(session.id);
+        await markSessionCommitted(session.id, {
+          skus: totals.skus,
+          units: totals.units,
+          netVariance,
+          committedBy,
+        });
+        void writeStockTakeAudit(session, audit);
       }
-      setSession({ ...session, status: 'committed', committed_at: committedAt });
-      localStorage.removeItem(DRAFT_KEY);
+      setSession({
+        ...session,
+        status: 'committed',
+        committed_at: committedAt,
+        total_skus: totals.skus,
+        total_units: totals.units,
+        net_variance: netVariance,
+        committed_by: committedBy,
+      });
+      try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       window.alert(
-        `Stock take committed.\nUpdated: ${summary.updated}\nNew: ${summary.created}\nDuplicate rows removed: ${summary.removed}\n\nYou can open PDF or review lines below.`,
+        `Stock take committed.\nUpdated: ${summary.updated}\nNew: ${summary.created}\nZeroed (missing): ${summary.zeroed}\nDuplicate rows removed: ${summary.removed}`,
       );
+      setReviewOpen(false);
       void loadOpen();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Commit failed');
@@ -472,6 +743,8 @@ const StockTakeScanner: React.FC<Props> = ({
         <AlertTriangle className="w-5 h-5 inline mr-2" />
         Supabase is not configured. Stock take sessions need the cloud tables — run{' '}
         <code className="text-xs bg-amber-100 px-1 rounded">migrations/stash_stock_take.sql</code>{' '}
+        and{' '}
+        <code className="text-xs bg-amber-100 px-1 rounded">migrations/stash_stock_take_v2.sql</code>{' '}
         in the SQL editor, then reload.
       </div>
     );
@@ -531,89 +804,20 @@ const StockTakeScanner: React.FC<Props> = ({
       )}
 
       {!session ? (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-6">
-          <div>
-            <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3">Start new count</h2>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                value={newLabel}
-                onChange={e => setNewLabel(e.target.value)}
-                placeholder="Session name (optional)"
-                className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold"
-              />
-              <select
-                value={newLocation}
-                onChange={e => setNewLocation(e.target.value as StockTakeLocation)}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-[10px] font-black uppercase tracking-widest"
-              >
-                {Object.entries(LOCATION_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => void startSession()}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
-              >
-                Start
-              </button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-indigo-500" /></div>
-          ) : (
-            <div className="space-y-6">
-              {openSessions.length > 0 && (
-            <div>
-              <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Resume open session</h2>
-              <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-                {openSessions.map(s => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => void resumeSession(s.id)}
-                      className="w-full text-left px-4 py-3 hover:bg-indigo-50/50 flex justify-between items-center"
-                    >
-                      <span className="font-bold text-gray-900 text-sm">{s.label}</span>
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">
-                        {LOCATION_LABELS[s.location as StockTakeLocation] || s.location}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-              )}
-              {committedSessions.length > 0 && (
-                <div>
-                  <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">
-                    Committed counts
-                  </h2>
-                  <p className="text-[11px] text-gray-500 mb-2">
-                    Reopen a finished count to view lines or print the PDF report.
-                  </p>
-                  <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-                    {committedSessions.map(s => (
-                      <li key={s.id}>
-                        <button
-                          type="button"
-                          onClick={() => void resumeSession(s.id)}
-                          className="w-full text-left px-4 py-3 hover:bg-emerald-50/50 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1"
-                        >
-                          <span className="font-bold text-gray-900 text-sm">{s.label}</span>
-                          <span className="text-[10px] font-bold text-emerald-700 uppercase shrink-0">
-                            Committed {formatSessionWhen(s.committed_at || s.created_at)}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <SessionListPanel
+          loading={loading}
+          openSessions={openSessions}
+          committedSessions={committedSessions}
+          newLabel={newLabel}
+          newLocation={newLocation}
+          onChangeLabel={setNewLabel}
+          onChangeLocation={setNewLocation}
+          onStart={() => void startSession()}
+          onResume={id => void resumeSession(id)}
+          hasLocalDraft={!!localDraft}
+          onRestoreLocalDraft={restoreLocalDraft}
+          onDiscardLocalDraft={discardLocalDraft}
+        />
       ) : (
         <>
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-2">
@@ -622,6 +826,9 @@ const StockTakeScanner: React.FC<Props> = ({
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
                 {LOCATION_LABELS[session.location as StockTakeLocation] || session.location}
                 {' · '}{totals.skus} lines · {totals.units} units
+                {' · net '}<span className={netVariance > 0 ? 'text-amber-700' : netVariance < 0 ? 'text-red-600' : 'text-emerald-700'}>
+                  {netVariance >= 0 ? `+${netVariance}` : netVariance}
+                </span>
                 {isReadOnly && session.committed_at && (
                   <> · Committed {formatSessionWhen(session.committed_at)}</>
                 )}
@@ -636,7 +843,7 @@ const StockTakeScanner: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={exitSession}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-gray-50"
+                className="flex items-center gap-2 min-h-[44px] px-4 border border-gray-200 text-gray-600 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-gray-50"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back
@@ -644,282 +851,140 @@ const StockTakeScanner: React.FC<Props> = ({
               <button
                 type="button"
                 disabled={lines.length === 0}
+                onClick={handleCsv}
+                className="flex items-center gap-2 min-h-[44px] px-4 border border-gray-200 text-gray-700 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-gray-50"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                CSV
+              </button>
+              <button
+                type="button"
+                disabled={lines.length === 0}
                 onClick={handlePrintPdf}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-gray-50"
+                className="flex items-center gap-2 min-h-[44px] px-4 border border-gray-200 text-gray-700 rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-gray-50"
               >
                 <Printer className="w-4 h-4" />
                 PDF
               </button>
+              {isReadOnly && (
+                <button
+                  type="button"
+                  onClick={() => void handleReopen()}
+                  className="flex items-center gap-2 min-h-[44px] px-4 border border-indigo-200 text-indigo-700 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50"
+                  title="Re-open for adjustment"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Re-open
+                </button>
+              )}
               {!isReadOnly && (
                 <button
                   type="button"
                   disabled={committing || lines.length === 0}
-                  onClick={() => void handleCommit()}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
+                  onClick={handleStartCommit}
+                  className="flex items-center gap-2 min-h-[44px] px-4 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest disabled:opacity-40 hover:bg-emerald-500"
                 >
                   {committing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  Commit to stock
+                  Review &amp; commit
                 </button>
               )}
             </div>
           </div>
 
           {!isReadOnly && (
-          <div className="bg-white rounded-xl border-2 border-indigo-200 shadow-sm p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2">
-                <Barcode className="w-4 h-4" /> Add items
-              </label>
-              <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[10px] font-black uppercase tracking-widest">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScanMode('camera');
-                    setCameraOpen(true);
-                    setCameraError(null);
-                    setCameraFlash(null);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors ${scanMode === 'camera' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                >
-                  <Camera className="w-3.5 h-3.5" /> Camera
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCameraOpen(false);
-                    setScanMode('keyboard');
-                    setCameraError(null);
-                    setCameraFlash(null);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 border-l border-gray-200 transition-colors ${scanMode === 'keyboard' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                >
-                  <Keyboard className="w-3.5 h-3.5" /> Type
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[9px] font-black uppercase text-gray-400">Qty per scan</span>
-              <input
-                type="number"
-                min={1}
-                value={addQty}
-                onChange={e => setAddQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                className="w-16 py-1.5 text-center font-black text-sm border border-gray-200 rounded-lg"
-              />
-              <span className="text-[10px] text-gray-400">1 for singles; higher for cartons</span>
-            </div>
-            {scanMode === 'camera' && (
-              <div className="relative space-y-2">
-                <BarcodeCameraScanner
-                  active={cameraOpen}
-                  paused={!!unknownCode}
-                  onScan={handleCameraScan}
-                  onError={handleCameraError}
-                  onClose={() => setCameraOpen(false)}
-                />
-                {!cameraOpen && (
-                  <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/95 p-6 text-center">
-                    <Camera className="w-8 h-8 text-gray-400" />
-                    <p className="text-sm font-bold text-gray-600">Camera is off</p>
-                    <p className="text-[11px] text-gray-400 max-w-xs">
-                      Turn it on to scan barcodes, or use Type for a USB scanner.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCameraOpen(true);
-                        setCameraError(null);
-                      }}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
-                    >
-                      Open camera
-                    </button>
-                  </div>
-                )}
-                {cameraError && (
-                  <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    {cameraError}
-                  </p>
-                )}
-                {cameraFlash && !unknownCode && (
-                  <p className="text-center text-sm font-black text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2 font-mono">
-                    ✓ {cameraFlash}
-                  </p>
-                )}
-                {unknownCode && (
-                  <div className="absolute inset-0 z-20 flex items-end sm:items-center justify-center p-2 bg-black/50 rounded-xl">
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3 w-full max-h-[85%] overflow-y-auto shadow-lg">
-                      <p className="text-sm font-black text-amber-900">
-                        Unknown barcode: <span className="font-mono">{unknownCode}</span>
-                      </p>
-                      <p className="text-[11px] text-amber-800 leading-relaxed">
-                        {unknownHint || 'Not in your supplier feeds or master list. Add once, or cancel to keep scanning.'}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input
-                          required
-                          value={regForm.description}
-                          onChange={e => setRegForm(f => ({ ...f, description: e.target.value }))}
-                          placeholder="Description *"
-                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm font-bold sm:col-span-2"
-                        />
-                        <input
-                          value={regForm.vendor}
-                          onChange={e => setRegForm(f => ({ ...f, vendor: e.target.value }))}
-                          placeholder="Vendor"
-                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                        />
-                        <input
-                          value={regForm.productCode}
-                          onChange={e => setRegForm(f => ({ ...f, productCode: e.target.value }))}
-                          placeholder="Product code"
-                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                        />
-                        <input
-                          value={regForm.colour}
-                          onChange={e => setRegForm(f => ({ ...f, colour: e.target.value }))}
-                          placeholder="Colour"
-                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                        />
-                        <input
-                          value={regForm.size}
-                          onChange={e => setRegForm(f => ({ ...f, size: e.target.value }))}
-                          placeholder="Size"
-                          className="px-3 py-2 border border-amber-200 rounded-lg text-sm"
-                        />
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={registerUnknown}
-                          className="px-4 py-2 bg-amber-600 text-white rounded-lg text-[10px] font-black uppercase"
-                        >
-                          Add to count
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelUnknown}
-                          className="px-4 py-2 border border-amber-300 rounded-lg text-[10px] font-black uppercase text-amber-800"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {scanMode === 'keyboard' && (
-              <form onSubmit={handleScanSubmit} className="space-y-2">
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    ref={scanRef}
-                    value={scanValue}
-                    onChange={e => setScanValue(e.target.value)}
-                    placeholder="EAN / barcode — Enter to add"
-                    className="flex-1 min-w-[200px] px-4 py-3 text-lg font-mono border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500/30 outline-none"
-                    autoComplete="off"
+            <ScanInputPanel
+              scanMode={scanMode}
+              onChangeMode={mode => {
+                if (mode === 'camera') {
+                  setScanMode('camera');
+                  setCameraOpen(true);
+                  setCameraError(null);
+                  setCameraFlash(null);
+                } else {
+                  setCameraOpen(false);
+                  setScanMode('keyboard');
+                  setCameraError(null);
+                  setCameraFlash(null);
+                }
+              }}
+              cameraOpen={cameraOpen}
+              cameraError={cameraError}
+              cameraFlash={cameraFlash && !unknownCode ? cameraFlash : null}
+              onCameraOpen={() => {
+                setCameraOpen(true);
+                setCameraError(null);
+              }}
+              onCameraScan={handleCameraScan}
+              onCameraError={handleCameraError}
+              onCameraClose={() => setCameraOpen(false)}
+              pauseCamera={!!unknownCode}
+              scanValue={scanValue}
+              onChangeScanValue={setScanValue}
+              onScanSubmit={handleScanSubmit}
+              scanInputRef={scanRef}
+              addQty={addQty}
+              onChangeAddQty={setAddQty}
+              cartonMode={cartonMode}
+              onToggleCartonMode={() => setCartonMode(v => !v)}
+              embellished={embellished}
+              onToggleEmbellished={() => setEmbellished(v => !v)}
+              clubName={clubName}
+              onChangeClubName={setClubName}
+              soundEnabled={soundEnabled}
+              onToggleSound={toggleSound}
+              unknownOverlay={
+                unknownCode ? (
+                  <UnknownBarcodeOverlay
+                    unknownCode={unknownCode}
+                    hint={unknownHint}
+                    form={regForm}
+                    onChangeForm={setRegForm}
+                    onRegister={registerUnknown}
+                    onCancel={cancelUnknown}
                   />
-                  <button
-                    type="submit"
-                    className="px-4 py-3 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500"
-                  >
-                    Add
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-400">
-                  USB wedge scanners work here — focus stays in the box.
-                </p>
-              </form>
-            )}
-          </div>
+                ) : undefined
+              }
+            />
           )}
 
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-gray-500">
-              <Package className="w-3.5 h-3.5" /> {isReadOnly ? 'Counted lines (committed)' : 'Counted lines'}
-            </div>
-            {lines.length === 0 ? (
-              <p className="p-8 text-center text-sm text-gray-400 font-bold">
-                {isReadOnly ? 'No lines were saved for this session.' : 'No scans yet — start scanning.'}
-              </p>
-            ) : (
-              <ul className="divide-y divide-gray-50 max-h-[50vh] overflow-y-auto">
-                {lines.map(line => {
-                  const book = bookByKey.get(line.stockKey) ?? 0;
-                  const highlight = line.stockKey === lastKey;
-                  return (
-                    <li
-                      key={line.id}
-                      className={`px-4 py-3 flex flex-wrap items-center gap-3 ${highlight ? 'bg-indigo-50/80' : ''}`}
-                    >
-                      <div className="flex-1 min-w-[180px]">
-                        <p className="font-bold text-gray-900 text-sm leading-tight">{line.description}</p>
-                        <p className="text-[10px] font-mono text-indigo-600 mt-0.5">{line.ean}</p>
-                        {line.productCode && line.productCode !== line.ean && (
-                          <p className="text-[9px] font-mono text-gray-500">Style / SKU {line.productCode}</p>
-                        )}
-                        <p className="text-[9px] text-gray-400 uppercase tracking-widest mt-0.5">
-                          {[line.colour, line.size].filter(Boolean).join(' · ') || '—'}
-                          {' · '}{line.resolvedVia}
-                          {book > 0 ? ` · was ${book} on book` : ' · not on book'}
-                        </p>
-                      </div>
-                      {isReadOnly ? (
-                        <p className="text-lg font-black text-indigo-700 tabular-nums">{line.qty}</p>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setLineQty(line.id, line.qty - 1)}
-                            className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
-                          >
-                            −
-                          </button>
-                          <input
-                            type="number"
-                            min={0}
-                            value={line.qty}
-                            onChange={e => setLineQty(line.id, parseInt(e.target.value, 10) || 0)}
-                            className="w-14 h-8 text-center font-black border border-gray-200 rounded-lg"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setLineQty(line.id, line.qty + 1)}
-                            className="w-8 h-8 rounded-lg border border-gray-200 font-black text-gray-600 hover:bg-gray-50"
-                          >
-                            +
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void removeLine(line.id)}
-                            className="p-2 text-gray-400 hover:text-red-600"
-                            title="Remove line"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+          <LinesPanel
+            lines={lines}
+            bookByKey={bookByKey}
+            lastKey={lastKey}
+            isReadOnly={!!isReadOnly}
+            drift={driftRows}
+            onSetQty={setLineQty}
+            onRemove={removeLine}
+            onApplyDrift={applyDriftToReference}
+            onIgnoreDrift={ignoreDrift}
+            onUndoLastScan={undoLastScan}
+            canUndo={undoStack.length > 0}
+          />
 
           <p className="text-[10px] text-gray-500 flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
             {isReadOnly
-              ? 'This count is committed. Use PDF for a printable report, or Back to open another session.'
+              ? 'This count is committed. Use PDF / CSV for a printable report, or Re-open to amend.'
               : (
                 <>
                   Commit replaces on-hand quantity for scanned products only. Run{' '}
-                  <code className="bg-gray-100 px-1 rounded">stash_stock_take.sql</code> in Supabase if sessions fail to save.
+                  <code className="bg-gray-100 px-1 rounded">stash_stock_take_v2.sql</code> in Supabase to enable the audit log and atomic line increments.
                 </>
               )}
           </p>
         </>
       )}
+
+      <PreCommitReviewModal
+        open={reviewOpen && !!session}
+        location={session?.location || 'church_st'}
+        locationLabel={session ? LOCATION_LABELS[session.location as StockTakeLocation] || session.location : ''}
+        totals={totals}
+        missing={missing}
+        committing={committing}
+        onCancel={() => setReviewOpen(false)}
+        onConfirm={performCommit}
+      />
     </div>
   );
 };
