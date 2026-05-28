@@ -19,7 +19,6 @@ import {
 } from '../../utils/rota';
 import {
     acknowledgeShift,
-    claimOpenShift,
     createSwapRequest,
     decideSwapRequest,
     dispatchRotaEmail,
@@ -128,19 +127,31 @@ export const RotaStaffSurface: React.FC<RotaStaffSurfaceProps> = ({ currentUser,
     };
 
     const handleClaim = async (shift: RotaShift) => {
-        if (!window.confirm(`Claim this shift on ${shortDateLabel(new Date(shift.start_at))} ${isoToTime(shift.start_at)}–${isoToTime(shift.end_at)}?`)) return;
+        if (!window.confirm(`Request this open shift on ${shortDateLabel(new Date(shift.start_at))} ${isoToTime(shift.start_at)}–${isoToTime(shift.end_at)}? A manager will need to approve.`)) return;
         try {
-            const claimed = await claimOpenShift(shift.id, myUserId);
-            if (claimed) {
-                setAllShifts(prev => prev.map(s => s.id === claimed.id ? claimed : s));
-                setMyShifts(prev => [...prev, claimed]);
-                setInfo('Shift claimed — it now appears in your rota.');
-            } else {
-                setError('Someone else picked that shift first — refreshing.');
-                void reload();
+            const claimReq = await createSwapRequest({
+                requester_id: myUserId,
+                counterparty_id: myUserId, // manager approval will assign shift to this user
+                shift_id: shift.id,
+                offered_shift_id: null,
+                reason: `Open-shift claim request (${shortDateLabel(new Date(shift.start_at))} ${isoToTime(shift.start_at)}-${isoToTime(shift.end_at)})`,
+                status: 'pending',
+                decided_by: null,
+                decided_at: null,
+            });
+            if (claimReq) {
+                setSwaps(prev => [claimReq, ...prev]);
+                dispatchRotaEmail({
+                    kind: 'shift_swap_requested',
+                    swap: claimReq,
+                    employee: employee
+                        ? { display_name: employee.display_name, email: employee.email }
+                        : { display_name: currentUser.displayName, email: currentUser.email || null },
+                });
+                setInfo('Claim request sent to manager for approval.');
             }
         } catch (e: any) {
-            setError(e?.message || 'Failed to claim shift');
+            setError(e?.message || 'Failed to request claim');
         }
     };
 
@@ -345,7 +356,7 @@ export const RotaStaffSurface: React.FC<RotaStaffSurfaceProps> = ({ currentUser,
                                             onClick={() => handleClaim(s)}
                                             className="flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg bg-pink-600 text-white hover:bg-pink-700"
                                         >
-                                            Claim shift
+                                            Request claim
                                         </button>
                                     </li>
                                 ))}

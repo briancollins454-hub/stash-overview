@@ -54,9 +54,11 @@ const MANAGER_SUB_TABS: { id: RotaSubTab; label: string; icon: typeof CalendarRa
 ];
 
 export const RotaApp: React.FC<RotaAppProps> = ({ currentUser, forceStaffOnly }) => {
-    const isManager = !forceStaffOnly && ['superuser', 'admin', 'manager'].includes(currentUser.role);
+    // Only senior-management roles can amend rota data.
+    // Everyone else stays on the staff surface (view/request/ack/claim).
+    const canAmendRota = !forceStaffOnly && ['superuser', 'admin'].includes(currentUser.role);
     const [searchParams, setSearchParams] = useSearchParams();
-    const initialSub = (searchParams.get('sub') as RotaSubTab) || (isManager ? 'planner' : 'me');
+    const initialSub = (searchParams.get('sub') as RotaSubTab) || (canAmendRota ? 'planner' : 'me');
     const [activeSub, setActiveSub] = useState<RotaSubTab>(initialSub);
 
     // Keep the URL ?sub= in sync so deep links (especially from email
@@ -64,13 +66,13 @@ export const RotaApp: React.FC<RotaAppProps> = ({ currentUser, forceStaffOnly })
     // browser back button doesn't gather one entry per pane switch.
     useEffect(() => {
         const next = new URLSearchParams(searchParams);
-        if (activeSub === (isManager ? 'planner' : 'me')) next.delete('sub');
+        if (activeSub === (canAmendRota ? 'planner' : 'me')) next.delete('sub');
         else next.set('sub', activeSub);
         setSearchParams(next, { replace: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeSub]);
 
-    if (!isManager) {
+    if (!canAmendRota) {
         return (
             <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
                 <RotaStaffSurface currentUser={currentUser} />
