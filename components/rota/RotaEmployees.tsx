@@ -5,7 +5,7 @@
 // against user_id.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Save, Search, UserMinus, X, AlertTriangle } from 'lucide-react';
+import { Loader2, Plus, Save, Search, UserMinus, X, AlertTriangle, Copy, Calendar } from 'lucide-react';
 import {
     fetchEmployees, upsertEmployee, deactivateEmployee,
 } from '../../services/rotaService';
@@ -42,6 +42,10 @@ const EMPTY: EditingEmployee = {
     is_active: true,
     email: '',
     notes: '',
+    leave_year_start_month: 1,
+    leave_year_start_day: 1,
+    notify_email: true,
+    default_role: '',
 };
 
 export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => {
@@ -111,7 +115,11 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
                 email: editing.email || null,
                 notes: editing.notes || '',
                 rotacloud_id: editing.rotacloud_id || null,
-            });
+                leave_year_start_month: Number(editing.leave_year_start_month || 1),
+                leave_year_start_day: Number(editing.leave_year_start_day || 1),
+                notify_email: editing.notify_email !== false,
+                default_role: editing.default_role || '',
+            } as any);
             if (saved) {
                 setEmployees(prev => {
                     const without = prev.filter(e => e.user_id !== saved.user_id);
@@ -396,6 +404,76 @@ const EmployeeEditor: React.FC<EmployeeEditorProps> = ({
                             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
                         />
                     </Field>
+
+                    <div className="border-t border-slate-200 pt-3 space-y-3">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1"><Calendar className="w-3 h-3" />Advanced</p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Field label="Default role">
+                                <input
+                                    type="text"
+                                    value={editing.default_role || ''}
+                                    onChange={e => onChange({ ...editing, default_role: e.target.value })}
+                                    placeholder="Auto-fills new shifts"
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
+                                />
+                            </Field>
+                            <Field label="Email notifications">
+                                <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        checked={editing.notify_email !== false}
+                                        onChange={e => onChange({ ...editing, notify_email: e.target.checked })}
+                                    />
+                                    Receive shift / time-off emails
+                                </label>
+                            </Field>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Field label="Leave year starts (month)">
+                                <select
+                                    value={editing.leave_year_start_month ?? 1}
+                                    onChange={e => onChange({ ...editing, leave_year_start_month: parseInt(e.target.value, 10) })}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
+                                >
+                                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                                        .map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                                </select>
+                            </Field>
+                            <Field label="Day">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={28}
+                                    value={editing.leave_year_start_day ?? 1}
+                                    onChange={e => onChange({ ...editing, leave_year_start_day: Math.min(Math.max(parseInt(e.target.value, 10) || 1, 1), 28) })}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold tabular-nums focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
+                                />
+                            </Field>
+                        </div>
+                        {editing.ical_token && (
+                            <Field label="iCal subscribe URL">
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        readOnly
+                                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/rota-ics?token=${editing.ical_token}`}
+                                        className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-[11px] bg-slate-50 font-mono"
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            const url = `${window.location.origin}/api/rota-ics?token=${editing.ical_token}`;
+                                            navigator.clipboard.writeText(url).catch(() => window.prompt('Copy this URL', url));
+                                        }}
+                                        type="button"
+                                        className="p-2 rounded-lg border border-slate-300 hover:bg-slate-50"
+                                        title="Copy iCal URL"
+                                    >
+                                        <Copy className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                                <p className="text-[10px] text-slate-500 mt-1">Paste into Apple Calendar / Google Calendar's "Subscribe to calendar".</p>
+                            </Field>
+                        )}
+                    </div>
                 </div>
 
                 <footer className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-200 bg-slate-50">

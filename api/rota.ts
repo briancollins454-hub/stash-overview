@@ -71,6 +71,53 @@ function buildRequestEmail(payload: any): { subject: string; html: string } {
     return { subject, html };
 }
 
+function buildPublishedEmail(payload: any): { subject: string; html: string } {
+    const employeeName = payload.employee?.display_name || 'there';
+    const start = formatDate(payload.publishWindow?.start || '');
+    const end = formatDate(payload.publishWindow?.end || '');
+    const shifts: any[] = Array.isArray(payload.publishedShifts) ? payload.publishedShifts : [];
+    const mine = shifts.filter(s => s.user_id && payload.employee && s.user_id === payload.employee.user_id);
+    const rows = mine.length
+        ? mine.map(s => {
+            try {
+                const d = new Date(s.start_at);
+                const ed = new Date(s.end_at);
+                const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                const t1 = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                const t2 = `${String(ed.getHours()).padStart(2, '0')}:${String(ed.getMinutes()).padStart(2, '0')}`;
+                return `<tr><td style="padding:4px 8px;color:#475569">${escapeHtml(day)}</td><td style="padding:4px 8px;font-weight:600">${t1}–${t2}</td><td style="padding:4px 8px;color:#475569">${escapeHtml(s.role || '')}</td></tr>`;
+            } catch { return ''; }
+        }).join('') : '';
+    const subject = `Your rota is published — ${start}${end ? ` → ${end}` : ''}`;
+    const html = `
+        <div style="font-family:Inter,system-ui,sans-serif;color:#0f172a;max-width:520px;line-height:1.5">
+            <h2 style="margin:0 0 12px;font-size:18px;color:#0f766e">Your shifts are live</h2>
+            <p style="margin:0 0 8px">Hi ${escapeHtml(employeeName)}, your rota for ${escapeHtml(start)} – ${escapeHtml(end)} has been published.</p>
+            ${rows ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;border:1px solid #e2e8f0;border-radius:6px">${rows}</table>` : '<p style="margin:0 0 8px;color:#64748b">You aren\'t scheduled in this window — enjoy.</p>'}
+            <p style="margin:16px 0 8px;font-size:14px"><a href="https://stashoverview.co.uk/?surface=rota" style="color:#0f766e;font-weight:600">Open Stash Rota</a> to acknowledge or request a swap.</p>
+            <p style="margin-top:24px;font-size:12px;color:#94a3b8">Stash Rota — automated notification</p>
+        </div>
+    `;
+    return { subject, html };
+}
+
+function buildSwapRequestEmail(payload: any): { subject: string; html: string } {
+    const swap = payload.swap || {};
+    const requester = payload.employee?.display_name || 'A team member';
+    const reason = (swap.reason || '').trim();
+    const subject = `Shift swap requested by ${requester}`;
+    const html = `
+        <div style="font-family:Inter,system-ui,sans-serif;color:#0f172a;max-width:520px;line-height:1.5">
+            <h2 style="margin:0 0 12px;font-size:18px;color:#0f766e">New shift-swap request</h2>
+            <p style="margin:0 0 8px"><strong>${escapeHtml(requester)}</strong> wants to swap a shift.</p>
+            ${reason ? `<p style="margin:0 0 8px;color:#475569">"${escapeHtml(reason)}"</p>` : ''}
+            <p style="margin:16px 0 8px;font-size:14px">Review &amp; decide in <a href="https://stashoverview.co.uk/?tab=rota&amp;sub=swaps" style="color:#0f766e;font-weight:600">Stash &rsaquo; Rota &rsaquo; Swaps</a>.</p>
+            <p style="margin-top:24px;font-size:12px;color:#94a3b8">Stash Rota — automated notification</p>
+        </div>
+    `;
+    return { subject, html };
+}
+
 function buildDecisionEmail(payload: any): { subject: string; html: string } {
     const employeeName = payload.employee?.display_name || 'there';
     const req = payload.request || {};
@@ -118,6 +165,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action !== 'notify') {
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }
+    // Email branch only — iCal lives at /api/rota-ics so it can serve text
+    // bodies and accept GET requests.
 
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
@@ -149,6 +198,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
             to = [employeeEmail];
             const built = buildDecisionEmail(req.body);
+            subject = built.subject;
+            html = built.html;
+        } else if (kind === 'shifts_published') {
+            // Bulk: one email per employee with their shifts in the window.
+            const recipients: { display_name?: string; email?: string; user_id?: string }[] =
+                Array.isArray(req.body.employees) ? req.body.employees : [];
+            const valid = recipients.filter(r => r.email);
+            if (valid.length === 0) {
+                return res.status(200).json({ skipped: true, reason: 'No employee emails on file' });
+            }
+            const resendBulk = new Resend(apiKey);
+            const results = await Promise.all(valid.map(async r => {
+                const built = buildPublishedEmail({ ...req.body, employee: r });
+                try {
+                    const { data, error } = await resendBulk.emails.send({
+                        from: fromAddress,
+                        to: [r.email as string],
+                        subject: built.subject,
+                        html: built.html,
+                    });
+                    return { ok: !error, id: data?.id, error: error?.message };
+                } catch (e: any) {
+                    return { ok: false, error: e?.message };
+                }
+            }));
+            return res.status(200).json({ success: true, sent: results.filter(r => r.ok).length, total: results.length });
+        } else if (kind === 'shift_swap_requested') {
+            if (!managerEmail) {
+                return res.status(200).json({ skipped: true, reason: 'No manager email configured' });
+            }
+            to = [managerEmail];
+            const built = buildSwapRequestEmail(req.body);
             subject = built.subject;
             html = built.html;
         } else {

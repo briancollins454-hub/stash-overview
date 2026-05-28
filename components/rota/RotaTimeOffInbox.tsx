@@ -8,6 +8,7 @@ import {
     Loader2, Check, XCircle, MailCheck, Plane, AlertTriangle, Filter, Search, Plus,
 } from 'lucide-react';
 import {
+    appendAudit,
     decideTimeOff, dispatchRotaEmail, fetchEmployees, fetchTimeOff,
     submitTimeOff,
 } from '../../services/rotaService';
@@ -92,6 +93,18 @@ export const RotaTimeOffInbox: React.FC<RotaTimeOffInboxProps> = ({ currentUser 
                     request: updated,
                     employee: emp ? { display_name: emp.display_name, email: emp.email } : undefined,
                     decidedByDisplayName: currentUser.displayName,
+                });
+                void appendAudit({
+                    entity: 'time_off',
+                    entity_id: String(updated.id),
+                    action: status === 'approved' ? 'update' : 'update',
+                    diff: {
+                        status: { from: decisionFor.status, to: status },
+                        decided_note: { from: decisionFor.decided_note, to: decisionNote || '' },
+                    },
+                    actor_id: currentUser.id,
+                    actor_name: currentUser.displayName,
+                    note: status,
                 });
             }
             setDecisionFor(null);

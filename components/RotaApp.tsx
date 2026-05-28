@@ -4,8 +4,11 @@
 // surface for everyone else. Lazy-loads heavy children to keep the bundle
 // reasonable.
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarRange, Users, Inbox, Plane, Upload, UserCheck, Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {
+    CalendarRange, Users, Inbox, Plane, Upload, UserCheck, Loader2,
+    BarChart3, ShieldOff, History, ArrowRightLeft, Clock,
+} from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { RotaPlanner } from './rota/RotaPlanner';
 import { RotaEmployees } from './rota/RotaEmployees';
@@ -13,6 +16,11 @@ import { RotaTimeOffInbox } from './rota/RotaTimeOffInbox';
 import { RotaClosures } from './rota/RotaClosures';
 import { RotaCloudImporter } from './rota/RotaCloudImporter';
 import { RotaStaffSurface } from './rota/RotaStaffSurface';
+import { RotaBlockedDatesPanel } from './rota/RotaBlockedDatesPanel';
+import { RotaToilLedger } from './rota/RotaToilLedger';
+import { RotaSwapsInbox } from './rota/RotaSwapsInbox';
+import { RotaReports } from './rota/RotaReports';
+import { RotaAuditLog } from './rota/RotaAuditLog';
 
 export interface RotaAppProps {
     currentUser: {
@@ -26,13 +34,21 @@ export interface RotaAppProps {
     forceStaffOnly?: boolean;
 }
 
-type RotaSubTab = 'planner' | 'employees' | 'time-off' | 'closures' | 'import' | 'me';
+type RotaSubTab =
+    | 'planner' | 'employees' | 'time-off' | 'closures'
+    | 'swaps' | 'blocked' | 'toil' | 'reports' | 'audit'
+    | 'import' | 'me';
 
 const MANAGER_SUB_TABS: { id: RotaSubTab; label: string; icon: typeof CalendarRange }[] = [
-    { id: 'planner', label: 'Week planner', icon: CalendarRange },
+    { id: 'planner', label: 'Planner', icon: CalendarRange },
     { id: 'time-off', label: 'Time off', icon: Inbox },
+    { id: 'swaps', label: 'Swaps', icon: ArrowRightLeft },
     { id: 'employees', label: 'Employees', icon: Users },
     { id: 'closures', label: 'Closures', icon: Plane },
+    { id: 'blocked', label: 'Blocked dates', icon: ShieldOff },
+    { id: 'toil', label: 'TOIL', icon: Clock },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
+    { id: 'audit', label: 'Audit log', icon: History },
     { id: 'me', label: 'My rota', icon: UserCheck },
     { id: 'import', label: 'Import', icon: Upload },
 ];
@@ -102,8 +118,13 @@ export const RotaApp: React.FC<RotaAppProps> = ({ currentUser, forceStaffOnly })
             <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
                 {activeSub === 'planner' && <RotaPlanner currentUser={currentUser} />}
                 {activeSub === 'time-off' && <RotaTimeOffInbox currentUser={currentUser} />}
+                {activeSub === 'swaps' && <RotaSwapsInbox currentUser={currentUser} />}
                 {activeSub === 'employees' && <RotaEmployees currentUser={currentUser} />}
                 {activeSub === 'closures' && <RotaClosures currentUser={currentUser} />}
+                {activeSub === 'blocked' && <RotaBlockedDatesPanel currentUser={currentUser} />}
+                {activeSub === 'toil' && <RotaToilLedger currentUser={currentUser} />}
+                {activeSub === 'reports' && <RotaReports />}
+                {activeSub === 'audit' && <RotaAuditLog />}
                 {activeSub === 'me' && <RotaStaffSurface currentUser={currentUser} chromeless />}
                 {activeSub === 'import' && <RotaCloudImporter currentUser={currentUser} />}
             </main>
