@@ -5,7 +5,7 @@
 // against user_id.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Plus, Save, Search, UserMinus, X, AlertTriangle, Copy, Calendar } from 'lucide-react';
+import { Loader2, Plus, Save, Search, UserMinus, UserPlus, X, AlertTriangle, Copy, Calendar } from 'lucide-react';
 import {
     fetchEmployees, upsertEmployee, deactivateEmployee,
 } from '../../services/rotaService';
@@ -56,6 +56,7 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
     const [stashUsers, setStashUsers] = useState<StashUser[]>([]);
     const [editing, setEditing] = useState<EditingEmployee | null>(null);
     const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active');
 
     const reload = useCallback(async () => {
         setLoading(true);
@@ -82,14 +83,25 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
 
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
-        if (!q) return employees;
-        return employees.filter(e =>
-            e.display_name.toLowerCase().includes(q) ||
-            e.job_title.toLowerCase().includes(q) ||
-            (e.email || '').toLowerCase().includes(q) ||
-            e.team.toLowerCase().includes(q),
-        );
-    }, [employees, search]);
+        return employees
+            .filter(e => statusFilter === 'all'
+                ? true
+                : statusFilter === 'active' ? e.is_active : !e.is_active)
+            .filter(e => {
+                if (!q) return true;
+                return (
+                    e.display_name.toLowerCase().includes(q) ||
+                    e.job_title.toLowerCase().includes(q) ||
+                    (e.email || '').toLowerCase().includes(q) ||
+                    e.team.toLowerCase().includes(q)
+                );
+            });
+    }, [employees, search, statusFilter]);
+
+    const inactiveCount = useMemo(
+        () => employees.filter(e => !e.is_active).length,
+        [employees],
+    );
 
     const handleSave = async () => {
         if (!editing) return;
@@ -140,6 +152,18 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
         setEmployees(prev => prev.map(e => e.user_id === userId ? { ...e, is_active: false } : e));
     };
 
+    const handleReactivate = async (employee: RotaEmployee) => {
+        if (!window.confirm(`Reactivate ${employee.display_name}? They'll show up in shift pickers again.`)) return;
+        try {
+            const saved = await upsertEmployee({ ...employee, is_active: true });
+            if (saved) {
+                setEmployees(prev => prev.map(e => e.user_id === saved.user_id ? saved : e));
+            }
+        } catch (e: any) {
+            setError(e?.message || 'Failed to reactivate');
+        }
+    };
+
     const handleAddNew = () => {
         setEditing({ ...EMPTY });
     };
@@ -147,7 +171,7 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
     return (
         <section>
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-5 mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-sm">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
                     <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                     <input
                         type="search"
@@ -156,6 +180,20 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
                         onChange={e => setSearch(e.target.value)}
                         className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
                     />
+                </div>
+                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 text-[11px] font-black uppercase tracking-widest">
+                    {(['active', 'inactive', 'all'] as const).map(opt => (
+                        <button
+                            key={opt}
+                            onClick={() => setStatusFilter(opt)}
+                            className={`px-3 py-1.5 rounded-md transition-colors ${statusFilter === opt ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                            {opt}
+                            {opt === 'inactive' && inactiveCount > 0 && (
+                                <span className={`ml-1.5 px-1 rounded text-[9px] ${statusFilter === opt ? 'bg-slate-200 text-slate-700' : 'bg-slate-200 text-slate-600'}`}>{inactiveCount}</span>
+                            )}
+                        </button>
+                    ))}
                 </div>
                 <button
                     onClick={handleAddNew}
@@ -215,13 +253,21 @@ export const RotaEmployees: React.FC<RotaEmployeesProps> = ({ currentUser }) => 
                                             </span>
                                         </td>
                                         <td className="p-3 text-right">
-                                            {e.is_active && (
+                                            {e.is_active ? (
                                                 <button
                                                     onClick={(ev) => { ev.stopPropagation(); handleDeactivate(e.user_id); }}
                                                     className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                                                     title="Deactivate"
                                                 >
                                                     <UserMinus className="w-4 h-4" />
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={(ev) => { ev.stopPropagation(); handleReactivate(e); }}
+                                                    className="p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                                    title="Reactivate"
+                                                >
+                                                    <UserPlus className="w-4 h-4" />
                                                 </button>
                                             )}
                                         </td>
@@ -327,6 +373,19 @@ const EmployeeEditor: React.FC<EmployeeEditorProps> = ({
                             className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-bold focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none"
                         />
                     </Field>
+
+                    <label className={`flex items-center justify-between gap-3 px-3 py-2 rounded-lg border ${editing.is_active ? 'border-emerald-200 bg-emerald-50' : 'border-slate-300 bg-slate-100'}`}>
+                        <div>
+                            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Status</div>
+                            <div className="text-sm font-bold text-slate-800">{editing.is_active ? 'Active — shows in pickers' : 'Inactive — hidden from pickers'}</div>
+                        </div>
+                        <input
+                            type="checkbox"
+                            checked={editing.is_active !== false}
+                            onChange={e => onChange({ ...editing, is_active: e.target.checked })}
+                            className="w-5 h-5"
+                        />
+                    </label>
 
                     <div className="grid grid-cols-2 gap-3">
                         <Field label="Job title">
