@@ -42,6 +42,8 @@ type SortKey =
   | 'customerName'
   | 'outstandingBalance'
   | 'qboBalance'
+  | 'qboInvoiceTotal'
+  | 'openAmount'
   | 'billableAmount'
   | 'accountTerms'
   | 'dateShipped'
@@ -49,6 +51,18 @@ type SortKey =
   | 'daysSince'
   | 'status'
   | 'salesPerson';
+
+/** Full invoice / order value for display (QBO TotalAmt when matched). */
+function invoiceAmount(j: Pick<Row, 'qboInvoiceTotal' | 'orderTotal' | 'billableAmount'>): number {
+  if ((j.qboInvoiceTotal || 0) > BALANCE_OWED_EPS) return j.qboInvoiceTotal;
+  return Math.max(j.orderTotal || 0, j.billableAmount || 0, 0);
+}
+
+/** Amount still owed — prefer QuickBooks Balance when we have a matched invoice. */
+function openAmount(j: Pick<Row, 'qboBalance' | 'qboDocNumber' | 'outstandingBalance'>): number {
+  if (j.qboDocNumber && (j.qboBalance || 0) > BALANCE_OWED_EPS) return j.qboBalance;
+  return j.outstandingBalance || 0;
+}
 
 // Sentinel used in the responsible-person dropdown to represent jobs that
 // have no salesperson attached in Deco. Kept as a non-printable character
@@ -601,6 +615,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       case 'customerName': av = a.customerName; bv = b.customerName; break;
       case 'outstandingBalance': av = a.outstandingBalance || 0; bv = b.outstandingBalance || 0; break;
       case 'qboBalance': av = a.qboBalance || 0; bv = b.qboBalance || 0; break;
+      case 'qboInvoiceTotal': av = invoiceAmount(a); bv = invoiceAmount(b); break;
+      case 'openAmount': av = openAmount(a); bv = openAmount(b); break;
       case 'billableAmount': av = a.billableAmount || 0; bv = b.billableAmount || 0; break;
       case 'accountTerms': av = (a.accountTerms || '').toLowerCase(); bv = (b.accountTerms || '').toLowerCase(); break;
       case 'dateShipped': av = a.dateShipped || ''; bv = b.dateShipped || ''; break;
@@ -717,7 +733,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
     const agingLabel = DAYS_SHIP_BUCKET_OPTIONS.find(o => o.id === daysSinceBucket)?.label ?? 'All ages';
     const header = [
       'Section', 'Job Number', 'PO Number', 'Customer', 'Job Name', 'Responsible', 'Status',
-      'Due (QBO)', 'QBO Invoice #', 'All (Deco)', 'Billed', 'Terms',
+      'Due (QBO)', 'Amount (invoice total)', 'Open (outstanding)', 'QBO Invoice #',
+      'All (Deco)', 'Billed', 'Terms',
       'Order Date', 'Shipped Date', 'Age (days)',
       'Shipped', 'Authorised At', 'Authorised By', 'Aging filter',
     ];
@@ -726,6 +743,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       j.salesPerson || '',
       j.status,
       (j.qboBalance || 0).toFixed(2),
+      invoiceAmount(j).toFixed(2),
+      openAmount(j).toFixed(2),
       j.qboDocNumber || '',
       (j.outstandingBalance || 0).toFixed(2),
       (j.billableAmount || 0).toFixed(2),
@@ -790,6 +809,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
       const headerText = accent === 'amber' ? '#92400e' : '#9f1239';
 
       const bodyRows = rows.map(r => {
+        const invAmt = invoiceAmount(r);
+        const openAmt = openAmount(r);
         const dueCell = (r.qboBalance || 0) > BALANCE_OWED_EPS
           ? `<div class="due-amount">${esc(fmtMoney(r.qboBalance || 0))}</div>${r.qboDocNumber ? `<div class="inv-num">inv ${esc(r.qboDocNumber)}</div>` : ''}`
           : '—';
@@ -800,6 +821,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           <td class="job-name">${esc(r.jobName || '—')}</td>
           <td>${esc(r.salesPerson || '—')}</td>
           <td class="num owed">${dueCell}</td>
+          <td class="num">${invAmt > BALANCE_OWED_EPS ? esc(fmtMoney(invAmt)) : '—'}</td>
+          <td class="num owed">${openAmt > BALANCE_OWED_EPS ? esc(fmtMoney(openAmt)) : '—'}</td>
           <td class="num">${esc(fmtMoney(r.outstandingBalance || 0))}</td>
           <td class="num">${(r.billableAmount || 0) > 0 ? esc(fmtMoney(r.billableAmount || 0)) : '—'}</td>
           <td>${esc(r.accountTerms || '—')}</td>
@@ -824,6 +847,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 <th>Job Name</th>
                 <th>Responsible</th>
                 <th class="num">Due</th>
+                <th class="num">Amount</th>
+                <th class="num">Open</th>
                 <th class="num">All</th>
                 <th class="num">Billed</th>
                 <th>Terms</th>
@@ -1020,6 +1045,8 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 ['salesPerson', 'Responsible'],
                 ['status', 'Status'],
                 ['qboBalance', 'Due'],
+                ['qboInvoiceTotal', 'Amount'],
+                ['openAmount', 'Open'],
                 ['outstandingBalance', 'All'],
                 ['billableAmount', 'Billed'],
                 ['accountTerms', 'Terms'],
@@ -1088,15 +1115,15 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                       )}
                     </span>
                   </td>
-                  {/* DUE — QuickBooks open invoice balance (the figure Accounts is chasing). */}
+                  {/* DUE — QuickBooks open invoice balance (primary chase figure). */}
                   <td
                     className={`px-4 py-3 font-bold whitespace-nowrap ${
                       j.qboBalance > BALANCE_OWED_EPS ? 'text-rose-500' : textSecondary
                     }`}
                     title={
                       j.qboDocNumber
-                        ? `QuickBooks invoice ${j.qboDocNumber} · open balance ${fmt(j.qboBalance)}`
-                        : 'No matching open invoice found in QuickBooks (matched by job # or PO #)'
+                        ? `QuickBooks invoice ${j.qboDocNumber} · balance due ${fmt(j.qboBalance)}`
+                        : 'No matching open invoice in QuickBooks (matched by job # or PO #)'
                     }
                   >
                     {j.qboBalance > BALANCE_OWED_EPS ? (
@@ -1112,7 +1139,49 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                       <span className="text-xs italic opacity-60">—</span>
                     )}
                   </td>
-                  {/* ALL — current Deco outstanding (still includes open / un-invoiced orders). */}
+                  {/* AMOUNT — full invoice total (QBO TotalAmt when matched). */}
+                  <td
+                    className={`px-4 py-3 whitespace-nowrap ${textPrimary}`}
+                    title={
+                      j.qboInvoiceTotal > BALANCE_OWED_EPS
+                        ? `QuickBooks invoice total ${fmt(j.qboInvoiceTotal)}`
+                        : `Deco order total ${fmt(invoiceAmount(j))}`
+                    }
+                  >
+                    {(() => {
+                      const total = invoiceAmount(j);
+                      if (total <= BALANCE_OWED_EPS) {
+                        return <span className="text-xs italic opacity-60">—</span>;
+                      }
+                      const paid = total - openAmount(j);
+                      return (
+                        <span className="flex flex-col leading-tight">
+                          <span className="font-semibold">{fmt(total)}</span>
+                          {paid > BALANCE_OWED_EPS && openAmount(j) > BALANCE_OWED_EPS && (
+                            <span className={`text-[10px] ${textSecondary}`}>
+                              {fmt(paid)} paid
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  {/* OPEN — amount still outstanding (QBO balance when invoiced, else Deco). */}
+                  <td
+                    className={`px-4 py-3 font-bold whitespace-nowrap ${
+                      openAmount(j) > BALANCE_OWED_EPS ? 'text-rose-500' : textSecondary
+                    }`}
+                    title={
+                      j.qboDocNumber
+                        ? `Open on QuickBooks invoice ${j.qboDocNumber}`
+                        : 'Open per Deco (no matching QBO invoice yet)'
+                    }
+                  >
+                    {openAmount(j) > BALANCE_OWED_EPS ? fmt(openAmount(j)) : (
+                      <span className="text-xs italic opacity-60">—</span>
+                    )}
+                  </td>
+                  {/* ALL — Deco outstanding (includes not-yet-invoiced in QuickBooks). */}
                   <td className={`px-4 py-3 ${
                     j.isZeroPriced
                       ? 'text-amber-400 font-semibold'
