@@ -404,6 +404,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // Bulk shipped-status check: given a list of order numbers, report whether
+  // each order has been shipped (has a date_shipped). Used by the payment
+  // reminder cron so we never chase payment for goods the customer doesn't
+  // have yet. One date-window scan covers all requested IDs.
+  if (action === 'shipped-status') {
+    const ids = Array.isArray(req.body?.orderIds)
+      ? req.body.orderIds.map((x: any) => String(x).trim()).filter(Boolean)
+      : [];
+    if (!ids.length) return res.status(400).json({ error: 'orderIds required' });
+    try {
+      const results = await fetchOrdersByIds(ids, false, 365);
+      const statuses: Record<string, { found: boolean; shipped: boolean; date_shipped: string | null }> = {};
+      for (const { jobId, order } of results) {
+        const ds = order ? (order.date_shipped || null) : null;
+        statuses[jobId] = { found: Boolean(order), shipped: Boolean(ds), date_shipped: ds };
+      }
+      return res.status(200).json({ ok: true, statuses });
+    } catch (e: any) {
+      return res.status(500).json({ error: 'shipped-status failed', details: e.message });
+    }
+  }
+
   // Fetch the customer-facing invoice PDF (DecoNetwork "quote/invoice" PDF)
   // for a single order and return it as base64. Used by the payment-reminder
   // cron to attach the real branded invoice to reminder emails.

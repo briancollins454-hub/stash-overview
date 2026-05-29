@@ -235,6 +235,33 @@ async function qbPost(base: string, action: string, extra: Record<string, unknow
   return { ok: r.ok, data } as { ok: boolean; data: any };
 }
 
+/**
+ * Ask Deco which of the given order numbers have shipped. Returns a map of
+ * orderNo → shipped(boolean). On any failure the map is empty, which means
+ * nothing is treated as shipped and no reminders go out — failing safe.
+ */
+async function fetchShippedStatus(base: string, orderNos: string[]): Promise<Map<string, boolean>> {
+  const map = new Map<string, boolean>();
+  if (orderNos.length === 0) return map;
+  try {
+    const r = await fetch(`${base}/api/deco`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'shipped-status', orderIds: orderNos }),
+      signal: AbortSignal.timeout(55000),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data?.ok && data.statuses && typeof data.statuses === 'object') {
+      for (const [orderNo, info] of Object.entries(data.statuses as Record<string, { shipped?: boolean }>)) {
+        map.set(orderNo, Boolean(info?.shipped));
+      }
+    }
+  } catch {
+    /* fail safe: empty map → nothing treated as shipped */
+  }
+  return map;
+}
+
 interface EmailAttachment { filename: string; content: string }
 
 /**
@@ -353,9 +380,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const results = {
     mode: config.mode as 'preview' | 'live',
     invoicesConsidered: invoices.length,
-    reminders: { sent: 0, failed: 0, skippedNoEmail: 0, alreadySent: 0 },
+    reminders: { sent: 0, failed: 0, skippedNoEmail: 0, alreadySent: 0, skippedNotShipped: 0 },
     statements: { sent: 0, failed: 0, skippedNoEmail: 0, alreadySent: 0, ran: isFirstOfMonth },
   };
+
+  // ── Shipped gate ────────────────────────────────────────────────────────
+  // We only chase payment once the goods have shipped. Gather the order
+  // numbers for every invoice that's a reminder candidate and ask Deco which
+  // have a date_shipped, in one bulk lookup.
+  const candidateOrderNos = new Set<string>();
+  for (const inv of invoices) {
+    if (inv.balance <= 0.005 || !inv.docNumber) continue;
+    const rid = selectRuleForInvoice({ dueDate: inv.dueDate }, config) as ReminderRuleId | null;
+    if (!rid || rid === 'statement') continue;
+    if (sentKeys.has(`inv:${inv.id}:${rid}`)) continue;
+    candidateOrderNos.add(inv.docNumber);
+  }
+  const shippedMap = await fetchShippedStatus(base, Array.from(candidateOrderNos));
 
   let sendBudget = MAX_SENDS_PER_RUN;
 
@@ -374,6 +415,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const dedupeKey = `inv:${inv.id}:${ruleId}`;
     if (sentKeys.has(dedupeKey)) { results.reminders.alreadySent++; continue; }
+
+    // Only chase payment once the job has shipped. If we can't confirm the
+    // order shipped (no Deco link, not found, or no date_shipped), hold off —
+    // do NOT dedupe, so it's reconsidered automatically once it ships.
+    if (!inv.docNumber || !shippedMap.get(inv.docNumber)) {
+      results.reminders.skippedNotShipped++;
+      continue;
+    }
 
     const cust = customerById.get(inv.customerId);
     const recipient = cust?.email || null;
