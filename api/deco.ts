@@ -419,9 +419,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // worst-case time, run with bounded concurrency.
       const lookupShipped = async (orderId: string): Promise<{ found: boolean; shipped: boolean; date_shipped: string | null }> => {
         const id = orderId.trim();
+        // field=3/cond=1 reliably matches the order number on this tenant
+        // (field=1 is an internal id that does NOT match the displayed number).
         const strats = [
+          { field: '3', condition: '1' },
           { field: '1', condition: '1' },
-          { field: '0', condition: '0' },
         ];
         for (const strat of strats) {
           try {
@@ -472,10 +474,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const targetId = String((req.body?.orderId ?? (Array.isArray(jobIds) ? jobIds[0] : '')) ?? '').trim();
     if (!targetId) return res.status(400).json({ error: 'orderId required' });
     try {
-      // Find the order (skip_login_token=1 is required for search to work on
-      // this tenant). The returned quote_pdf_url then has no token, so we
-      // authorise the download by appending credentials.
-      const order = await fetchOrderById(targetId, false);
+      // Find the order reliably by its number (field=3/cond=1). The returned
+      // quote_pdf_url carries no token (skip_login_token=1), so we authorise
+      // the download below by appending credentials.
+      let order: any = null;
+      for (const strat of [{ field: '3', condition: '1' }, { field: '1', condition: '1' }]) {
+        const qp = new URLSearchParams({
+          username, password,
+          field: strat.field, condition: strat.condition,
+          string: targetId, criteria: targetId, limit: '5', skip_login_token: '1',
+        });
+        const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+        try {
+          const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(12000) });
+          const findText = await findRes.text();
+          if (findText.startsWith('<')) continue;
+          const findData = JSON.parse(findText);
+          const hit = (findData.orders || []).find((o: any) => orderMatchesId(o, targetId));
+          if (hit) { order = hit; break; }
+        } catch { /* next strategy */ }
+      }
       if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
       const pdfUrl = String(order.quote_pdf_url || '');
       if (!pdfUrl) return res.status(404).json({ error: 'No quote_pdf_url on this order' });
