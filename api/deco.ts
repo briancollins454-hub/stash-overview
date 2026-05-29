@@ -414,11 +414,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : [];
     if (!ids.length) return res.status(400).json({ error: 'orderIds required' });
     try {
-      const results = await fetchOrdersByIds(ids, false, 365);
+      // Reliable per-order direct lookup (the date-window scan misses orders
+      // intermittently). Lean 2-strategy probe with a short timeout to bound
+      // worst-case time, run with bounded concurrency.
+      const lookupShipped = async (orderId: string): Promise<{ found: boolean; shipped: boolean; date_shipped: string | null }> => {
+        const id = orderId.trim();
+        const strats = [
+          { field: '1', condition: '1' },
+          { field: '0', condition: '0' },
+        ];
+        for (const strat of strats) {
+          try {
+            const qp = new URLSearchParams({
+              username, password,
+              field: strat.field, condition: strat.condition,
+              string: id, criteria: id, limit: '5', skip_login_token: '1',
+            });
+            const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+            const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+            const text = await resp.text();
+            if (text.startsWith('<')) continue;
+            const data = JSON.parse(text);
+            const orders = data.orders || [];
+            const hit = orders.find((o: any) => orderMatchesId(o, id));
+            if (hit) {
+              const ds = hit.date_shipped || null;
+              return { found: true, shipped: Boolean(ds), date_shipped: ds };
+            }
+          } catch { /* next strategy */ }
+        }
+        return { found: false, shipped: false, date_shipped: null };
+      };
+
       const statuses: Record<string, { found: boolean; shipped: boolean; date_shipped: string | null }> = {};
-      for (const { jobId, order } of results) {
-        const ds = order ? (order.date_shipped || null) : null;
-        statuses[jobId] = { found: Boolean(order), shipped: Boolean(ds), date_shipped: ds };
+      const CONCURRENCY = 8;
+      for (let i = 0; i < ids.length; i += CONCURRENCY) {
+        const slice = ids.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(slice.map((id: string) => lookupShipped(id)));
+        settled.forEach((r, idx) => {
+          statuses[slice[idx]] = r.status === 'fulfilled' ? r.value : { found: false, shipped: false, date_shipped: null };
+        });
       }
       return res.status(200).json({ ok: true, statuses });
     } catch (e: any) {
