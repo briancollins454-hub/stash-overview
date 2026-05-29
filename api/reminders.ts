@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { normalizeReminderConfig, type ReminderConfig } from '../utils/reminderRules';
+import { normalizeReminderConfig, type ReminderConfig } from './_lib/reminders';
 
 // ─── Automated payment reminders — settings + log API (browser-facing) ──────
 // GET-style actions for the Finance page Reminder Settings panel:

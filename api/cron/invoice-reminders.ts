@@ -4,16 +4,13 @@ import {
   selectRuleForInvoice,
   renderTemplate,
   bodyToHtml,
+  daysPastDue,
+  buildStatementText,
   type ReminderConfig,
   type ReminderRuleId,
   type ReminderTemplateVars,
-} from '../../utils/reminderRules';
-import {
-  daysPastDue,
-  buildOpenItemStatement,
-  formatStatementText,
-  type OpenItemInvoice,
-} from '../../utils/openItemStatement';
+  type StatementInvoice,
+} from '../_lib/reminders';
 
 // ─── Nightly cron: automated QuickBooks payment reminders ───────────────────
 // Replaces QuickBooks' paid "workflow automation". Each morning it pulls
@@ -296,12 +293,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const customerName = custInvoices[0]?.customerName || cust?.name || 'Customer';
       const recipient = cust?.email || null;
 
-      const openItems: OpenItemInvoice[] = custInvoices.map(i => ({
-        id: i.id, docNumber: i.docNumber, customerName, customerId,
-        balance: i.balance, totalAmount: i.totalAmount, dueDate: i.dueDate, txnDate: i.txnDate,
+      const statementInvoices: StatementInvoice[] = custInvoices.map(i => ({
+        docNumber: i.docNumber, balance: i.balance, dueDate: i.dueDate, txnDate: i.txnDate,
       }));
-      const statement = buildOpenItemStatement(customerName, customerId, openItems, today);
-      const statementText = statement ? formatStatementText(statement) : '';
+      const statementText = buildStatementText(customerName, statementInvoices, today);
 
       const vars: ReminderTemplateVars = {
         customer: customerName,
