@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Loader2, Save, Bell, CheckCircle2, AlertTriangle, Eye, Send, History } from 'lucide-react';
+import { X, Loader2, Save, Bell, CheckCircle2, AlertTriangle, Eye, Send, History, MailCheck } from 'lucide-react';
 import {
   REMINDER_RULES,
   TEMPLATE_PLACEHOLDERS,
@@ -39,6 +39,9 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
   const [tab, setTab] = useState<'rules' | 'log'>('rules');
   const [log, setLog] = useState<LogRow[]>([]);
   const [logLoading, setLogLoading] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [testingRule, setTestingRule] = useState<ReminderRuleId | null>(null);
+  const [testMsg, setTestMsg] = useState<{ id: ReminderRuleId; ok: boolean; text: string } | null>(null);
 
   const post = (payload: Record<string, unknown>) =>
     fetch('/api/reminders', {
@@ -101,6 +104,27 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
 
   const updateRule = (id: ReminderRuleId, patch: Partial<ReminderConfig['rules'][ReminderRuleId]>) => {
     setConfig(c => (c ? { ...c, rules: { ...c.rules, [id]: { ...c.rules[id], ...patch } } } : c));
+  };
+
+  const sendTest = async (id: ReminderRuleId) => {
+    if (!config) return;
+    setTestMsg(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail.trim())) {
+      setTestMsg({ id, ok: false, text: 'Enter a valid email address above first.' });
+      return;
+    }
+    setTestingRule(id);
+    try {
+      const rule = config.rules[id];
+      const r = await post({ action: 'send-test', to: testEmail.trim(), subject: rule.subject, body: rule.body });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d?.ok) throw new Error(d?.error || 'Send failed');
+      setTestMsg({ id, ok: true, text: `Test sent to ${testEmail.trim()}` });
+    } catch (e) {
+      setTestMsg({ id, ok: false, text: e instanceof Error ? e.message : 'Send failed' });
+    } finally {
+      setTestingRule(null);
+    }
   };
 
   const panel = isDark ? 'bg-slate-800 border-slate-700 text-gray-200' : 'bg-white border-gray-200 text-gray-800';
@@ -169,6 +193,17 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
                 ))}
               </div>
 
+              {/* Test email */}
+              <div className={`rounded-xl border p-3 ${isDark ? 'border-indigo-800 bg-indigo-900/20' : 'border-indigo-200 bg-indigo-50/50'}`}>
+                <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-indigo-500 mb-1.5">
+                  <MailCheck className="w-3.5 h-3.5" /> Test before going live
+                </div>
+                <p className={`text-[11px] mb-2 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Enter your email, then use the <span className="font-bold">Send test</span> button on any rule below. It sends that message with sample data from accounts@marxcorporate.com — real customers are not affected.
+                </p>
+                <input type="email" placeholder="you@marxcorporate.com" value={testEmail} onChange={e => setTestEmail(e.target.value)} className={inputCls} />
+              </div>
+
               {/* Rules */}
               {REMINDER_RULES.map(def => {
                 const rule = config.rules[def.id];
@@ -195,6 +230,15 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
                         <label className={labelCls}>Message</label>
                         <textarea className={`${inputCls} font-mono leading-relaxed`} rows={def.isStatement ? 5 : 4} value={rule.body} disabled={!rule.enabled}
                           onChange={e => updateRule(def.id, { body: e.target.value })} />
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <button type="button" onClick={() => sendTest(def.id)} disabled={testingRule === def.id}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors disabled:opacity-50 ${isDark ? 'bg-slate-700 text-indigo-300 border-slate-600 hover:bg-slate-600' : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}>
+                          {testingRule === def.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <MailCheck className="w-3 h-3" />} Send test
+                        </button>
+                        {testMsg?.id === def.id && (
+                          <span className={`text-[11px] font-bold ${testMsg.ok ? 'text-emerald-500' : 'text-red-500'}`}>{testMsg.text}</span>
+                        )}
                       </div>
                     </div>
                   </div>

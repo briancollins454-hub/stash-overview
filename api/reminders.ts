@@ -80,6 +80,53 @@ function supabaseCreds() {
   return { url, key };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function selfBaseUrl(req: VercelRequest): string {
+  const envUrl = process.env.APP_URL?.trim();
+  if (envUrl) return envUrl.replace(/\/$/, '');
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel}`;
+  const host = req.headers.host;
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+  return `${proto}://${host}`;
+}
+
+function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => (key in vars ? vars[key] : match));
+}
+
+function bodyToHtml(text: string): string {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;white-space:pre-wrap;line-height:1.5">${escaped}</div>`;
+}
+
+/** Realistic sample data so a test email looks like the real thing. */
+function sampleVars(): Record<string, string> {
+  const sampleStatement = [
+    'OPEN ITEM STATEMENT — Marx Corporate',
+    'Customer: Sample Customer Ltd',
+    '',
+    'Date        Invoice       Due         Open Amount',
+    '------------------------------------------------------',
+    '01/04/2026  INV-1042      01/05/2026  450.00',
+    '15/04/2026  INV-1051      15/05/2026  780.50 *',
+    '------------------------------------------------------',
+    'TOTAL DUE GBP                         1,230.50',
+    '',
+    '* = past due',
+  ].join('\n');
+  return {
+    customer: 'Sample Customer Ltd',
+    invoice: 'INV-1051',
+    amount: '£780.50',
+    due_date: '15/05/2026',
+    days_overdue: '14',
+    balance: '£1,230.50',
+    statement: sampleStatement,
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   cors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -123,6 +170,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(500).json({ error: `Save failed (${r.status})`, detail: text.slice(0, 300) });
       }
       return res.status(200).json({ ok: true, config });
+    }
+
+    if (action === 'send-test') {
+      const to = typeof body.to === 'string' ? body.to.trim().toLowerCase() : '';
+      const subjectIn = typeof body.subject === 'string' ? body.subject : '';
+      const bodyIn = typeof body.body === 'string' ? body.body : '';
+      if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'Enter a valid test email address' });
+      if (!subjectIn || !bodyIn) return res.status(400).json({ error: 'Subject and message are required' });
+
+      const vars = sampleVars();
+      const subject = `[TEST] ${renderTemplate(subjectIn, vars)}`;
+      const text = renderTemplate(bodyIn, vars);
+      const html = bodyToHtml(text);
+
+      const sendRes = await fetch(`${selfBaseUrl(req)}/api/send-digest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, subject, html, text, kind: 'statement' }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!sendRes.ok) {
+        const d = await sendRes.json().catch(() => ({}));
+        return res.status(502).json({ error: d?.error || `Send failed (${sendRes.status})` });
+      }
+      return res.status(200).json({ ok: true });
     }
 
     if (action === 'get-log') {
