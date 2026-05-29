@@ -417,17 +417,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       // Look up the order WITHOUT skip_login_token so the returned
       // quote_pdf_url carries a valid login token and downloads directly.
-      const qp = new URLSearchParams({
-        username, password,
-        field: '1', condition: '1', string: targetId, criteria: targetId, limit: '5',
-      });
-      const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-      const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(15000) });
-      const findText = await findRes.text();
-      if (findText.startsWith('<')) return res.status(502).json({ error: 'Deco order lookup returned HTML' });
-      const findData = JSON.parse(findText);
-      const orders = findData.orders || [];
-      const order = orders.find((o: any) => orderMatchesId(o, targetId)) || orders[0];
+      // Mirror fetchOrderById's multi-strategy search (which is proven to
+      // locate orders on this tenant), just omitting skip_login_token.
+      const strategies = [
+        { field: '1', condition: '1' },
+        { field: '1', condition: '0' },
+        { field: '0', condition: '0' },
+        { field: '2', condition: '1' },
+        { field: '7', condition: '1' },
+      ];
+      let order: any = null;
+      for (const strat of strategies) {
+        const qp = new URLSearchParams({
+          username, password,
+          field: strat.field, condition: strat.condition,
+          string: targetId, criteria: targetId, limit: '5',
+          include_workflow_data: '1',
+        });
+        const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+        try {
+          const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(12000) });
+          const findText = await findRes.text();
+          if (findText.startsWith('<')) continue;
+          const findData = JSON.parse(findText);
+          const orders = findData.orders || [];
+          const hit = orders.find((o: any) => orderMatchesId(o, targetId));
+          if (hit) { order = hit; break; }
+        } catch { /* try next strategy */ }
+      }
       if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
       const pdfUrl = String(order.quote_pdf_url || '');
       if (!pdfUrl) return res.status(404).json({ error: 'No quote_pdf_url on this order' });
