@@ -34,7 +34,7 @@ interface Props {
   onNavigateToOrder?: (orderNumber: string) => void;
 }
 
-type SortField = 'customer' | 'balance' | 'dueTotal' | 'age' | 'terms' | 'billable' | 'invoiced' | 'jobCount';
+type SortField = 'customer' | 'balance' | 'overdue' | 'qbBalance' | 'age' | 'terms' | 'billable' | 'invoiced' | 'jobCount';
 type SortDir = 'asc' | 'desc';
 type ViewMode = 'customers' | 'orders' | 'aging' | 'payables' | 'credits';
 type AgingBucket = '0-30' | '31-60' | '61-90' | '90+';
@@ -455,14 +455,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
 
   const normCustomerName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
-  const qbDueTotalForCustomer = useCallback((customerName: string): number | null => {
+  /** Sum QB open balances for a customer. onlyPastDue=true limits to invoices past their due date. */
+  const sumQbForCustomer = useCallback((customerName: string, onlyPastDue: boolean): number | null => {
     if (qbInvoices.length === 0) return null;
     const target = normCustomerName(customerName);
     const matchedIds = new Set<string>();
     let total = 0;
     for (const inv of qbInvoices) {
       if (inv.balance <= 0.005) continue;
-      if (daysPastDue(inv.dueDate) <= 0) continue;
+      if (onlyPastDue && daysPastDue(inv.dueDate) <= 0) continue;
       const invName = normCustomerName(inv.customerName);
       const matches = invName === target || invName.includes(target) || target.includes(invName);
       if (!matches) continue;
@@ -472,6 +473,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     }
     return total;
   }, [qbInvoices]);
+
+  /** QB open balance on invoices PAST their due date (overdue). */
+  const qbOverdueForCustomer = useCallback((customerName: string) => sumQbForCustomer(customerName, true), [sumQbForCustomer]);
+  /** Total QB open balance regardless of due date. */
+  const qbBalanceForCustomer = useCallback((customerName: string) => sumQbForCustomer(customerName, false), [sumQbForCustomer]);
 
   const qbEmailByCustomerName = useMemo(() => {
     const map = new Map<string, string>();
@@ -971,10 +977,16 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       switch (sortField) {
         case 'customer': cmp = a.name.localeCompare(b.name); break;
         case 'balance': cmp = a.totalOutstanding - b.totalOutstanding; break;
-        case 'dueTotal': {
-          const aDue = qbDueTotalForCustomer(a.name) ?? 0;
-          const bDue = qbDueTotalForCustomer(b.name) ?? 0;
+        case 'overdue': {
+          const aDue = qbOverdueForCustomer(a.name) ?? 0;
+          const bDue = qbOverdueForCustomer(b.name) ?? 0;
           cmp = aDue - bDue;
+          break;
+        }
+        case 'qbBalance': {
+          const aBal = qbBalanceForCustomer(a.name) ?? 0;
+          const bBal = qbBalanceForCustomer(b.name) ?? 0;
+          cmp = aBal - bBal;
           break;
         }
         case 'age': cmp = a.agingDays - b.agingDays; break;
@@ -987,7 +999,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     });
 
     return list;
-  }, [customerAccounts, searchTerm, paymentFilter, agingFilter, sortField, sortDir, qbDueTotalForCustomer]);
+  }, [customerAccounts, searchTerm, paymentFilter, agingFilter, sortField, sortDir, qbOverdueForCustomer, qbBalanceForCustomer]);
 
   // All individual orders (for order view)
   const filteredOrders = useMemo(() => {
@@ -1060,15 +1072,17 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
 
   // Export functions
   const exportCSV = useCallback(() => {
-    const headers = ['Customer', 'Outstanding Balance', 'QB Due Total', 'Total Billed', 'Total Paid', 'Account Terms', 'Aging Days', 'Aging Bucket', 'Oldest Unpaid Date', 'Last Payment', 'Jobs', 'Outstanding Jobs', 'Notes'];
+    const headers = ['Customer', 'QB Over Due', 'QB Due (Balance)', 'Outstanding Balance', 'Total Billed', 'Total Paid', 'Account Terms', 'Aging Days', 'Aging Bucket', 'Oldest Unpaid Date', 'Last Payment', 'Jobs', 'Outstanding Jobs', 'Notes'];
     const escapeCell = (v: any) => {
       const s = String(v ?? '');
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = (selectedCustomers.size > 0 ? filteredAccounts.filter(a => selectedCustomers.has(a.customerId)) : filteredAccounts).map(a => {
-      const due = qbDueTotalForCustomer(a.name);
+      const overdue = qbOverdueForCustomer(a.name);
+      const qbBal = qbBalanceForCustomer(a.name);
       return [
-      a.name, a.totalOutstanding.toFixed(2), due == null ? '' : due.toFixed(2),
+      a.name, overdue == null ? '' : overdue.toFixed(2), qbBal == null ? '' : qbBal.toFixed(2),
+      a.totalOutstanding.toFixed(2),
       a.totalBillable.toFixed(2), a.totalPaid.toFixed(2),
       a.accountTerms, a.agingDays, agingBucketLabel[a.agingBucket],
       formatDate(a.oldestUnpaidDate), formatDate(a.lastPaymentDate),
@@ -1081,7 +1095,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     const a = document.createElement('a');
     a.href = url; a.download = `outstanding-balances-${new Date().toISOString().split('T')[0]}.csv`; a.click();
     URL.revokeObjectURL(url);
-  }, [filteredAccounts, selectedCustomers, priorityNotes]);
+  }, [filteredAccounts, selectedCustomers, priorityNotes, qbOverdueForCustomer, qbBalanceForCustomer]);
 
   const exportDetailedCSV = useCallback(async () => {
     const ExcelJS = await loadExcelJS();
@@ -1358,7 +1372,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
           {/* Deco vs QB Variance */}
           {qbInvoices.length > 0 && (
             <div className={`${card} p-4 border-l-4 border-l-orange-500`}>
-              <div className={headerText}>QB Due Total</div>
+              <div className={headerText}>QB Over Due</div>
               <div className="text-xl sm:text-2xl font-black text-orange-600 dark:text-orange-400 mt-1">{formatCurrency(qbDueARTotal)}</div>
               <div className="text-[10px] text-gray-400 mt-0.5">Open invoices past due date in QuickBooks</div>
             </div>
@@ -1581,13 +1595,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       {viewMode === 'customers' && (
         <div className={card}>
           {/* Table header */}
-          <div className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+          <div className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
             <div className="flex items-center">
               <input type="checkbox" checked={selectedCustomers.size === filteredAccounts.length && filteredAccounts.length > 0} onChange={selectAll}
                 className="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
             </div>
             <SortButton field="customer" label="Customer" />
-            <SortButton field="dueTotal" label="Due Total" title="QuickBooks balance on invoices past their due date" />
+            <SortButton field="overdue" label="Over Due" title="QuickBooks balance on invoices past their due date" />
+            <SortButton field="qbBalance" label="Due" title="Total QuickBooks open balance for this customer" />
             <SortButton field="balance" label="Outstanding" />
             <SortButton field="billable" label="Billed" />
             <SortButton field="terms" label="Terms" />
@@ -1605,11 +1620,12 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
           )}
 
           {filteredAccounts.map(account => {
-            const qbDue = qbDueTotalForCustomer(account.name);
+            const qbOverdue = qbOverdueForCustomer(account.name);
+            const qbBalance = qbBalanceForCustomer(account.name);
             return (
             <div key={account.customerId}>
               {/* Customer row */}
-              <div className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-3 border-b transition-colors cursor-pointer ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'} ${expandedCustomer === account.customerId ? (isDark ? 'bg-slate-700/40' : 'bg-indigo-50/50') : ''}`}
+              <div className={`grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-3 border-b transition-colors cursor-pointer ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'} ${expandedCustomer === account.customerId ? (isDark ? 'bg-slate-700/40' : 'bg-indigo-50/50') : ''}`}
                 onClick={() => setExpandedCustomer(e => e === account.customerId ? null : account.customerId)}>
                 <div className="flex items-center" onClick={e => e.stopPropagation()}>
                   <input type="checkbox" checked={selectedCustomers.has(account.customerId)} onChange={() => toggleSelect(account.customerId)}
@@ -1625,10 +1641,16 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                   </div>
                 </div>
                 <div
-                  className={`text-sm font-black text-right ${qbDue == null ? (isDark ? 'text-gray-600' : 'text-gray-300') : qbDue > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}
-                  title={qbDue == null ? 'Sync QuickBooks to show due totals' : 'QuickBooks open balance past invoice due date'}
+                  className={`text-sm font-black text-right ${qbOverdue == null ? (isDark ? 'text-gray-600' : 'text-gray-300') : qbOverdue > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}
+                  title={qbOverdue == null ? 'Sync QuickBooks to show overdue totals' : 'QuickBooks open balance past invoice due date'}
                 >
-                  {qbDue == null ? '—' : qbDue > 0 ? formatCurrency(qbDue) : '✓'}
+                  {qbOverdue == null ? '—' : qbOverdue > 0 ? formatCurrency(qbOverdue) : '✓'}
+                </div>
+                <div
+                  className={`text-sm font-black text-right ${qbBalance == null ? (isDark ? 'text-gray-600' : 'text-gray-300') : qbBalance > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}
+                  title={qbBalance == null ? 'Sync QuickBooks to show balance' : 'Total QuickBooks open balance for this customer'}
+                >
+                  {qbBalance == null ? '—' : qbBalance > 0 ? formatCurrency(qbBalance) : '✓'}
                 </div>
                 <div className={`text-sm font-black text-right ${account.totalOutstanding > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                   {account.totalOutstanding > 0 ? formatCurrency(account.totalOutstanding) : '✓ Clear'}
@@ -1696,8 +1718,11 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Total Billed:</span> <span className="font-bold">{formatCurrency(account.totalBillable)}</span></div>
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Paid:</span> <span className="font-bold text-green-600">{formatCurrency(account.totalPaid)}</span></div>
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Outstanding:</span> <span className="font-bold text-red-600">{formatCurrency(account.totalOutstanding)}</span></div>
-                    {qbDue != null && (
-                      <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>QB due:</span> <span className="font-bold text-orange-600">{formatCurrency(qbDue)}</span></div>
+                    {qbOverdue != null && (
+                      <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>QB over due:</span> <span className="font-bold text-orange-600">{formatCurrency(qbOverdue)}</span></div>
+                    )}
+                    {qbBalance != null && (
+                      <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>QB due (balance):</span> <span className="font-bold text-amber-600">{formatCurrency(qbBalance)}</span></div>
                     )}
                     {account.totalCreditUsed > 0 && <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Credits:</span> <span className="font-bold text-blue-600">{formatCurrency(account.totalCreditUsed)}</span></div>}
                     <div className="text-[10px]"><span className={isDark ? 'text-gray-500' : 'text-gray-400'}>Last Payment:</span> <span className="font-bold">{formatDate(account.lastPaymentDate)}</span></div>
