@@ -4,9 +4,10 @@ import {
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
   ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
-  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail
+  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail, Bell
 } from 'lucide-react';
 import OpenItemStatementModal from './OpenItemStatementModal';
+import ReminderSettingsModal from './ReminderSettingsModal';
 import { daysPastDue, qbCustomerIdFromInvoices } from '../utils/openItemStatement';
 // exceljs is ~800 KB and only used inside exportDetailedCSV. Import
 // it dynamically so it isn't part of this chunk's initial payload —
@@ -216,6 +217,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const [paymentDateTo, setPaymentDateTo] = useState('');
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  const [showReminders, setShowReminders] = useState(false);
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
   const [priorityNotes, setPriorityNotes] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('stash_finance_notes') || '{}'); } catch { return {}; }
@@ -1296,6 +1298,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
           <button onClick={exportDetailedCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700 dark:hover:bg-emerald-900/50 transition-colors">
             <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
           </button>
+          <button onClick={() => setShowReminders(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700 dark:hover:bg-rose-900/50 transition-colors">
+            <Bell className="w-3.5 h-3.5" /> Reminders
+          </button>
         </div>
       </div>
 
@@ -2206,6 +2211,9 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
         defaultEmail={openStatementDefaultEmail}
         isDark={isDark}
       />
+      {showReminders && (
+        <ReminderSettingsModal isDark={isDark} onClose={() => setShowReminders(false)} />
+      )}
     </div>
   );
 };
