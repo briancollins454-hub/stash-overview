@@ -424,31 +424,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!pdfUrl) return res.status(404).json({ error: 'No quote_pdf_url on this order' });
 
       const sep = pdfUrl.includes('?') ? '&' : '?';
-      // Try the documented/likely auth schemes in turn; return the first PDF.
-      const candidates = [
-        `${pdfUrl}${sep}user[login_token]=${encodeURIComponent(password)}`,
-        `${pdfUrl}${sep}user[password]=${encodeURIComponent(password)}`,
-        `${pdfUrl}${sep}user[email]=${encodeURIComponent(username)}&user[password]=${encodeURIComponent(password)}`,
-        `${pdfUrl}${sep}username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-        `${pdfUrl}${sep}login_token=${encodeURIComponent(password)}`,
-      ];
-      const attempts: { scheme: string; status: number; contentType: string; snippet?: string }[] = [];
-      for (const url of candidates) {
-        const scheme = url.slice(pdfUrl.length + 1, url.indexOf('=') + 1);
-        try {
-          const pdfRes = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(25000) });
-          const contentType = pdfRes.headers.get('content-type') || '';
-          const buf = Buffer.from(await pdfRes.arrayBuffer());
-          const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
-          if (pdfRes.ok && looksPdf) {
-            return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
-          }
-          attempts.push({ scheme, status: pdfRes.status, contentType, snippet: buf.subarray(0, 120).toString('latin1') });
-        } catch (e: any) {
-          attempts.push({ scheme, status: 0, contentType: '', snippet: e?.message });
-        }
+      // Authorise with the same username/password query params the rest of the
+      // Deco API uses. Deco renders the PDF on the fly, so this can be slow.
+      const authedUrl = `${pdfUrl}${sep}username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+      const pdfRes = await fetch(authedUrl, { method: 'GET', signal: AbortSignal.timeout(50000) });
+      const contentType = pdfRes.headers.get('content-type') || '';
+      if (!pdfRes.ok) {
+        const t = await pdfRes.text().catch(() => '');
+        return res.status(pdfRes.status).json({ error: `Deco PDF download failed (${pdfRes.status})`, contentType, snippet: t.slice(0, 200) });
       }
-      return res.status(502).json({ error: 'Deco PDF download failed for all auth schemes', pdfUrl, attempts });
+      const buf = Buffer.from(await pdfRes.arrayBuffer());
+      const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
+      if (!looksPdf) {
+        return res.status(502).json({ error: 'Deco returned non-PDF (auth likely failed)', contentType, bytes: buf.length, snippet: buf.subarray(0, 200).toString('latin1') });
+      }
+      return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
     } catch (e: any) {
       return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
     }
