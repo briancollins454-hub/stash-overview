@@ -404,6 +404,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // Fetch the customer-facing invoice PDF (DecoNetwork "quote/invoice" PDF)
+  // for a single order and return it as base64. Used by the payment-reminder
+  // cron to attach the real branded invoice to reminder emails.
+  //
+  // DecoNetwork returns `quote_pdf_url` on each order. Because we pass
+  // skip_login_token=1, that URL carries no auth token, so we append the
+  // API user's password (per the API docs) to authorise the download.
+  if (action === 'invoice-pdf') {
+    const targetId = String((req.body?.orderId ?? (Array.isArray(jobIds) ? jobIds[0] : '')) ?? '').trim();
+    if (!targetId) return res.status(400).json({ error: 'orderId required' });
+    try {
+      const order = await fetchOrderById(targetId, false);
+      if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
+      const pdfUrl = String(order.quote_pdf_url || '');
+      if (!pdfUrl) return res.status(404).json({ error: 'No quote_pdf_url on this order' });
+
+      const sep = pdfUrl.includes('?') ? '&' : '?';
+      const authedUrl = `${pdfUrl}${sep}user[password]=${encodeURIComponent(password)}`;
+      const pdfRes = await fetch(authedUrl, { method: 'GET', signal: AbortSignal.timeout(30000) });
+      const contentType = pdfRes.headers.get('content-type') || '';
+      if (!pdfRes.ok) {
+        const t = await pdfRes.text().catch(() => '');
+        return res.status(pdfRes.status).json({ error: `Deco PDF download failed (${pdfRes.status})`, contentType, snippet: t.slice(0, 200) });
+      }
+      const buf = Buffer.from(await pdfRes.arrayBuffer());
+      const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
+      if (!looksPdf) {
+        // Most likely an HTML login page → auth scheme is wrong.
+        return res.status(502).json({ error: 'Deco returned non-PDF (auth likely failed)', contentType, bytes: buf.length, snippet: buf.subarray(0, 200).toString('latin1') });
+      }
+      return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
+    } catch (e: any) {
+      return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
+    }
+  }
+
   // Bulk fetch: fetch multiple jobs by ID.
   //
   // Two-pass strategy so we catch BOTH recent and very-old orders:
