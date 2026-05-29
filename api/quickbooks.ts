@@ -389,6 +389,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ ok: true, invoices: results, count: results.length, totalOwed });
     }
 
+    // Fetch a single invoice's PDF (as QuickBooks renders it) and return base64.
+    // Used by the automated payment-reminder cron to attach the real invoice.
+    if (action === 'invoice-pdf') {
+      const invoiceId = String(body.invoiceId ?? '').trim();
+      if (!invoiceId || !/^\d+$/.test(invoiceId)) {
+        return res.status(400).json({ error: 'invoiceId required (numeric QuickBooks invoice Id)' });
+      }
+      const pdfUrl = `${config.baseUrl}/v3/company/${encodeURIComponent(config.realmId)}/invoice/${encodeURIComponent(invoiceId)}/pdf?minorversion=${encodeURIComponent(config.minorVersion)}`;
+      const pdfRes = await fetch(pdfUrl, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${config.accessToken}`, accept: 'application/pdf' },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!pdfRes.ok) {
+        const detail = await pdfRes.text().catch(() => '');
+        return res.status(pdfRes.status).json({ error: `QBO invoice PDF failed (${pdfRes.status})`, detail: detail.slice(0, 300) });
+      }
+      const buf = Buffer.from(await pdfRes.arrayBuffer());
+      return res.json({ ok: true, base64: buf.toString('base64'), bytes: buf.length });
+    }
+
     // Also support pulling customer credit balances (negative balances / overpayments)
     if (action === 'customer-credits') {
       const result = await runQuery("SELECT Id, DisplayName, Balance FROM Customer WHERE Balance < '0' MAXRESULTS 500");

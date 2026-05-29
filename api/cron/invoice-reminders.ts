@@ -224,15 +224,29 @@ async function insertLog(url: string, key: string, row: Record<string, unknown>)
   }
 }
 
-async function qbPost(base: string, action: string) {
+async function qbPost(base: string, action: string, extra: Record<string, unknown> = {}) {
   const r = await fetch(`${base}/api/quickbooks`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, ...extra }),
     signal: AbortSignal.timeout(35000),
   });
   const data = await r.json().catch(() => ({}));
   return { ok: r.ok, data } as { ok: boolean; data: any };
+}
+
+interface EmailAttachment { filename: string; content: string }
+
+/** Fetch a QuickBooks invoice PDF as a send-digest attachment, or null on failure. */
+async function fetchInvoicePdf(base: string, invoiceId: string, docNumber: string | null): Promise<EmailAttachment | null> {
+  try {
+    const r = await qbPost(base, 'invoice-pdf', { invoiceId });
+    if (!r.ok || !r.data?.ok || typeof r.data.base64 !== 'string') return null;
+    const safeNo = (docNumber || invoiceId).replace(/[^a-zA-Z0-9._-]+/g, '-');
+    return { filename: `Invoice-${safeNo}.pdf`, content: r.data.base64 };
+  } catch {
+    return null;
+  }
 }
 
 async function sendEmail(
@@ -241,13 +255,14 @@ async function sendEmail(
   subject: string,
   html: string,
   text: string,
+  attachments?: EmailAttachment[],
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const r = await fetch(`${base}/api/send-digest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, html, text, kind: 'statement' }),
-      signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ to, subject, html, text, kind: 'statement', ...(attachments && attachments.length ? { attachments } : {}) }),
+      signal: AbortSignal.timeout(30000),
     });
     if (r.ok) return { ok: true };
     const data = await r.json().catch(() => ({}));
@@ -365,13 +380,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    const sent = await sendEmail(base, recipient, subject, html, text);
+    // Attach the real QuickBooks invoice PDF to this reminder.
+    const invoicePdf = await fetchInvoicePdf(base, inv.id, inv.docNumber);
+    const attachments = invoicePdf ? [invoicePdf] : undefined;
+
+    const sent = await sendEmail(base, recipient, subject, html, text, attachments);
     if (sent.ok) results.reminders.sent++; else results.reminders.failed++;
     await insertLog(url, key, {
       dedupe_key: dedupeKey, rule_id: ruleId, mode: 'live', status: sent.ok ? 'sent' : 'failed',
       customer_id: inv.customerId, customer_name: vars.customer, invoice_id: inv.id,
       invoice_no: vars.invoice, recipient, amount: inv.balance, subject,
-      error: sent.ok ? null : sent.error,
+      error: sent.ok ? (invoicePdf ? null : 'sent without invoice PDF (QB PDF unavailable)') : sent.error,
     });
     sentKeys.add(dedupeKey);
     sendBudget--;
