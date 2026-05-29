@@ -168,14 +168,17 @@ function supabaseCreds() {
   return { url, key };
 }
 
+// Resolve a base URL for internal API calls. Must avoid the *.vercel.app
+// deployment URL (VERCEL_URL) because Vercel deployment protection returns 401
+// for server-to-server calls there. The public custom domain is not protected.
+const PROD_BASE_URL = 'https://www.stashoverview.co.uk';
 function selfBaseUrl(req: VercelRequest): string {
-  const envUrl = process.env.APP_URL?.trim();
-  if (envUrl) return envUrl.replace(/\/$/, '');
-  const vercel = process.env.VERCEL_URL?.trim();
-  if (vercel) return `https://${vercel}`;
   const host = req.headers.host;
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
-  return `${proto}://${host}`;
+  if (host && !host.endsWith('.vercel.app')) return `${proto}://${host}`;
+  const envUrl = process.env.APP_URL?.trim();
+  if (envUrl && !envUrl.includes('localhost')) return envUrl.replace(/\/$/, '');
+  return PROD_BASE_URL;
 }
 
 async function loadConfig(url: string, key: string): Promise<ReminderConfig> {
