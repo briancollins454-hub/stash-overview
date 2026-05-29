@@ -5,7 +5,7 @@
     "api/stock.ts": { "maxDuration": 60 },
     "api/shopify.ts": { "maxDuration": 60 },
     "api/cron/refresh-finance.ts": { "maxDuration": 60 },
-    "api/cron/invoice-reminders.ts": { "maxDuration": 60 },
+    "api/cron/invoice-reminders.ts": { "maxDuration": 300 },
     "api/qbo/callback.ts": { "maxDuration": 60 },
     "api/qbo-auth/index.ts": { "maxDuration": 60 }
   },

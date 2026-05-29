@@ -40,6 +40,7 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
   const [log, setLog] = useState<LogRow[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [testEmail, setTestEmail] = useState('');
+  const [testInvoiceNo, setTestInvoiceNo] = useState('');
   const [testingRule, setTestingRule] = useState<ReminderRuleId | null>(null);
   const [testMsg, setTestMsg] = useState<{ id: ReminderRuleId; ok: boolean; text: string } | null>(null);
 
@@ -116,10 +117,14 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
     setTestingRule(id);
     try {
       const rule = config.rules[id];
-      const r = await post({ action: 'send-test', to: testEmail.trim(), subject: rule.subject, body: rule.body });
+      const invoiceNo = testInvoiceNo.trim();
+      const r = await post({ action: 'send-test', to: testEmail.trim(), subject: rule.subject, body: rule.body, invoiceNo });
       const d = await r.json().catch(() => ({}));
       if (!r.ok || !d?.ok) throw new Error(d?.error || 'Send failed');
-      setTestMsg({ id, ok: true, text: `Test sent to ${testEmail.trim()}` });
+      let text = `Test sent to ${testEmail.trim()}`;
+      if (invoiceNo && d.attached) text += ` with invoice ${invoiceNo} attached`;
+      else if (invoiceNo && d.attachNote) text += ` — but ${d.attachNote}`;
+      setTestMsg({ id, ok: true, text });
     } catch (e) {
       setTestMsg({ id, ok: false, text: e instanceof Error ? e.message : 'Send failed' });
     } finally {
@@ -199,9 +204,12 @@ const ReminderSettingsModal: React.FC<Props> = ({ isDark, onClose, updatedBy }) 
                   <MailCheck className="w-3.5 h-3.5" /> Test before going live
                 </div>
                 <p className={`text-[11px] mb-2 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Enter your email, then use the <span className="font-bold">Send test</span> button on any rule below. It sends that message with sample data from accounts@marxcorporate.com — real customers are not affected.
+                  Enter your email, then use the <span className="font-bold">Send test</span> button on any rule below. It sends that message with sample data from accounts@marxcorporate.com — real customers are not affected. Add an invoice number to attach that real DecoNetwork invoice PDF so you can see the full email.
                 </p>
-                <input type="email" placeholder="you@marxcorporate.com" value={testEmail} onChange={e => setTestEmail(e.target.value)} className={inputCls} />
+                <div className="flex gap-2">
+                  <input type="email" placeholder="you@marxcorporate.com" value={testEmail} onChange={e => setTestEmail(e.target.value)} className={`${inputCls} flex-1`} />
+                  <input type="text" inputMode="numeric" placeholder="Invoice # (optional)" value={testInvoiceNo} onChange={e => setTestInvoiceNo(e.target.value)} className={`${inputCls} w-44`} />
+                </div>
               </div>
 
               {/* Rules */}

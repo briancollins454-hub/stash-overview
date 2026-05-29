@@ -186,18 +186,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const subject = `[TEST] ${renderTemplate(subjectIn, vars)}`;
       const text = renderTemplate(bodyIn, vars);
       const html = bodyToHtml(text);
+      const base = selfBaseUrl(req);
 
-      const sendRes = await fetch(`${selfBaseUrl(req)}/api/send-digest`, {
+      // Optional: attach a real DecoNetwork invoice PDF so the test shows
+      // exactly what the customer would receive, attachment and all.
+      let attachments: { filename: string; content: string }[] | undefined;
+      let attachNote: string | undefined;
+      const invoiceNo = typeof body.invoiceNo === 'string' ? body.invoiceNo.trim() : '';
+      if (invoiceNo) {
+        try {
+          const pdfRes = await fetch(`${base}/api/deco`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'invoice-pdf', orderId: invoiceNo }),
+            signal: AbortSignal.timeout(55000),
+          });
+          const pdfData = await pdfRes.json().catch(() => ({}));
+          if (pdfRes.ok && pdfData?.ok && typeof pdfData.base64 === 'string') {
+            const safeNo = invoiceNo.replace(/[^a-zA-Z0-9._-]+/g, '-');
+            attachments = [{ filename: `Invoice-${safeNo}.pdf`, content: pdfData.base64 }];
+          } else {
+            attachNote = pdfData?.error || `Could not fetch invoice ${invoiceNo} from DecoNetwork`;
+          }
+        } catch {
+          attachNote = `Could not fetch invoice ${invoiceNo} from DecoNetwork`;
+        }
+      }
+
+      const sendRes = await fetch(`${base}/api/send-digest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to, subject, html, text, kind: 'statement' }),
-        signal: AbortSignal.timeout(20000),
+        body: JSON.stringify({ to, subject, html, text, kind: 'statement', ...(attachments ? { attachments } : {}) }),
+        signal: AbortSignal.timeout(60000),
       });
       if (!sendRes.ok) {
         const d = await sendRes.json().catch(() => ({}));
         return res.status(502).json({ error: d?.error || `Send failed (${sendRes.status})` });
       }
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, attached: Boolean(attachments), attachNote });
     }
 
     if (action === 'get-log') {

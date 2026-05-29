@@ -134,7 +134,7 @@ function buildStatementText(customerName: string, invoices: StatementInvoice[], 
 // <CRON_SECRET>; anonymous calls are refused.
 
 const CONFIG_ROW_ID = 'reminder_config';
-const MAX_SENDS_PER_RUN = 200; // stay well within the 60s function cap
+const MAX_SENDS_PER_RUN = 200; // hard ceiling; the wall-clock budget below usually binds first
 
 interface QbInvoice {
   id: string;
@@ -237,16 +237,45 @@ async function qbPost(base: string, action: string, extra: Record<string, unknow
 
 interface EmailAttachment { filename: string; content: string }
 
-/** Fetch a QuickBooks invoice PDF as a send-digest attachment, or null on failure. */
-async function fetchInvoicePdf(base: string, invoiceId: string, docNumber: string | null): Promise<EmailAttachment | null> {
-  try {
-    const r = await qbPost(base, 'invoice-pdf', { invoiceId });
-    if (!r.ok || !r.data?.ok || typeof r.data.base64 !== 'string') return null;
-    const safeNo = (docNumber || invoiceId).replace(/[^a-zA-Z0-9._-]+/g, '-');
-    return { filename: `Invoice-${safeNo}.pdf`, content: r.data.base64 };
-  } catch {
-    return null;
+/**
+ * Fetch the customer-facing invoice PDF to attach to a reminder.
+ *
+ * Primary source is the DecoNetwork "quote/invoice" PDF (the branded invoice
+ * the customer expects), looked up by the QuickBooks invoice number which
+ * matches the Deco order number. Falls back to the QuickBooks-rendered PDF
+ * if Deco can't produce one.
+ */
+async function fetchInvoicePdf(base: string, qbInvoiceId: string, docNumber: string | null): Promise<EmailAttachment | null> {
+  const safeNo = (docNumber || qbInvoiceId).replace(/[^a-zA-Z0-9._-]+/g, '-');
+
+  // 1) DecoNetwork branded invoice (preferred). Deco renders on the fly, so allow plenty of time.
+  if (docNumber) {
+    try {
+      const r = await fetch(`${base}/api/deco`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'invoice-pdf', orderId: docNumber }),
+        signal: AbortSignal.timeout(55000),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data?.ok && typeof data.base64 === 'string') {
+        return { filename: `Invoice-${safeNo}.pdf`, content: data.base64 };
+      }
+    } catch {
+      /* fall through to QB */
+    }
   }
+
+  // 2) QuickBooks-rendered PDF fallback.
+  try {
+    const r = await qbPost(base, 'invoice-pdf', { invoiceId: qbInvoiceId });
+    if (r.ok && r.data?.ok && typeof r.data.base64 === 'string') {
+      return { filename: `Invoice-${safeNo}.pdf`, content: r.data.base64 };
+    }
+  } catch {
+    /* no PDF available */
+  }
+  return null;
 }
 
 async function sendEmail(
@@ -330,9 +359,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let sendBudget = MAX_SENDS_PER_RUN;
 
+  // Soft wall-clock budget: fetching Deco PDFs is slow, so stop sending
+  // before the function hits its hard limit. Anything not sent this run is
+  // picked up next run (dedupe keeps it idempotent).
+  const TIME_BUDGET_MS = 270000;
+
   // ── 1. Per-invoice due/overdue reminders ────────────────────────────────
   for (const inv of invoices) {
     if (sendBudget <= 0) break;
+    if (Date.now() - startedAt > TIME_BUDGET_MS) break;
     if (inv.balance <= 0.005) continue;
     const ruleId = selectRuleForInvoice({ dueDate: inv.dueDate }, config) as ReminderRuleId | null;
     if (!ruleId || ruleId === 'statement') continue;
@@ -380,7 +415,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       continue;
     }
 
-    // Attach the real QuickBooks invoice PDF to this reminder.
+    // Attach the real branded invoice PDF (DecoNetwork) to this reminder.
     const invoicePdf = await fetchInvoicePdf(base, inv.id, inv.docNumber);
     const attachments = invoicePdf ? [invoicePdf] : undefined;
 
