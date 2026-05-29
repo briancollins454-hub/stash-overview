@@ -1587,8 +1587,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                 className="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
             </div>
             <SortButton field="customer" label="Customer" />
-            <SortButton field="balance" label="Outstanding" />
             <SortButton field="dueTotal" label="Due Total" title="QuickBooks balance on invoices past their due date" />
+            <SortButton field="balance" label="Outstanding" />
             <SortButton field="billable" label="Billed" />
             <SortButton field="terms" label="Terms" />
             <SortButton field="age" label="Age" />
@@ -1624,14 +1624,14 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                     )}
                   </div>
                 </div>
-                <div className={`text-sm font-black text-right ${account.totalOutstanding > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                  {account.totalOutstanding > 0 ? formatCurrency(account.totalOutstanding) : '✓ Clear'}
-                </div>
                 <div
                   className={`text-sm font-black text-right ${qbDue == null ? (isDark ? 'text-gray-600' : 'text-gray-300') : qbDue > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400'}`}
                   title={qbDue == null ? 'Sync QuickBooks to show due totals' : 'QuickBooks open balance past invoice due date'}
                 >
                   {qbDue == null ? '—' : qbDue > 0 ? formatCurrency(qbDue) : '✓'}
+                </div>
+                <div className={`text-sm font-black text-right ${account.totalOutstanding > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                  {account.totalOutstanding > 0 ? formatCurrency(account.totalOutstanding) : '✓ Clear'}
                 </div>
                 <div className={`text-xs text-right ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{formatCurrency(account.totalBillable)}</div>
                 <div className={`text-[10px] font-medium px-2 py-0.5 rounded-full text-center ${isDark ? 'bg-slate-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>{account.accountTerms}</div>
