@@ -415,52 +415,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const targetId = String((req.body?.orderId ?? (Array.isArray(jobIds) ? jobIds[0] : '')) ?? '').trim();
     if (!targetId) return res.status(400).json({ error: 'orderId required' });
     try {
-      // Look up the order WITHOUT skip_login_token so the returned
-      // quote_pdf_url carries a valid login token and downloads directly.
-      // Mirror fetchOrderById's multi-strategy search (which is proven to
-      // locate orders on this tenant), just omitting skip_login_token.
-      const strategies = [
-        { field: '1', condition: '1' },
-        { field: '1', condition: '0' },
-        { field: '0', condition: '0' },
-        { field: '2', condition: '1' },
-        { field: '7', condition: '1' },
-      ];
-      let order: any = null;
-      for (const strat of strategies) {
-        const qp = new URLSearchParams({
-          username, password,
-          field: strat.field, condition: strat.condition,
-          string: targetId, criteria: targetId, limit: '5',
-          include_workflow_data: '1',
-        });
-        const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
-        try {
-          const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(12000) });
-          const findText = await findRes.text();
-          if (findText.startsWith('<')) continue;
-          const findData = JSON.parse(findText);
-          const orders = findData.orders || [];
-          const hit = orders.find((o: any) => orderMatchesId(o, targetId));
-          if (hit) { order = hit; break; }
-        } catch { /* try next strategy */ }
-      }
+      // Find the order (skip_login_token=1 is required for search to work on
+      // this tenant). The returned quote_pdf_url then has no token, so we
+      // authorise the download by appending credentials.
+      const order = await fetchOrderById(targetId, false);
       if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
       const pdfUrl = String(order.quote_pdf_url || '');
       if (!pdfUrl) return res.status(404).json({ error: 'No quote_pdf_url on this order' });
 
-      const pdfRes = await fetch(pdfUrl, { method: 'GET', signal: AbortSignal.timeout(30000) });
-      const contentType = pdfRes.headers.get('content-type') || '';
-      if (!pdfRes.ok) {
-        const t = await pdfRes.text().catch(() => '');
-        return res.status(pdfRes.status).json({ error: `Deco PDF download failed (${pdfRes.status})`, contentType, snippet: t.slice(0, 200) });
+      const sep = pdfUrl.includes('?') ? '&' : '?';
+      // Try the documented/likely auth schemes in turn; return the first PDF.
+      const candidates = [
+        `${pdfUrl}${sep}user[login_token]=${encodeURIComponent(password)}`,
+        `${pdfUrl}${sep}user[password]=${encodeURIComponent(password)}`,
+        `${pdfUrl}${sep}user[email]=${encodeURIComponent(username)}&user[password]=${encodeURIComponent(password)}`,
+        `${pdfUrl}${sep}username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+        `${pdfUrl}${sep}login_token=${encodeURIComponent(password)}`,
+      ];
+      const attempts: { scheme: string; status: number; contentType: string; snippet?: string }[] = [];
+      for (const url of candidates) {
+        const scheme = url.slice(pdfUrl.length + 1, url.indexOf('=') + 1);
+        try {
+          const pdfRes = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(25000) });
+          const contentType = pdfRes.headers.get('content-type') || '';
+          const buf = Buffer.from(await pdfRes.arrayBuffer());
+          const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
+          if (pdfRes.ok && looksPdf) {
+            return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
+          }
+          attempts.push({ scheme, status: pdfRes.status, contentType, snippet: buf.subarray(0, 120).toString('latin1') });
+        } catch (e: any) {
+          attempts.push({ scheme, status: 0, contentType: '', snippet: e?.message });
+        }
       }
-      const buf = Buffer.from(await pdfRes.arrayBuffer());
-      const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
-      if (!looksPdf) {
-        return res.status(502).json({ error: 'Deco returned non-PDF (auth likely failed)', contentType, bytes: buf.length, snippet: buf.subarray(0, 200).toString('latin1') });
-      }
-      return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
+      return res.status(502).json({ error: 'Deco PDF download failed for all auth schemes', pdfUrl, attempts });
     } catch (e: any) {
       return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
     }
