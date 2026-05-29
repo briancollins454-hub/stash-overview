@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -31,8 +32,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
+  // Prefer sending via the real Marx Corporate Google Workspace mailbox (SMTP) so emails come
+  // genuinely from accounts@marxcorporate.com. Falls back to Resend if SMTP isn't configured.
+  const smtpUser = process.env.SMTP_USER?.trim();
+  const smtpPass = process.env.SMTP_PASS?.trim();
+  const useSmtp = Boolean(smtpUser && smtpPass);
+
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'RESEND_API_KEY not configured' });
+  if (!useSmtp && !apiKey) {
+    return res.status(500).json({ error: 'No email transport configured (set SMTP_USER/SMTP_PASS or RESEND_API_KEY)' });
+  }
 
   const body = (req.body || {}) as Record<string, unknown>;
   const recipients = normalizeRecipients(body.to);
@@ -55,12 +64,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid replyTo address' });
   }
 
-  // Resend requires a VERIFIED sending domain. marxcorporate.com is not verified, so the
-  // email must physically send from stashoverview.co.uk. To let customers know who it's from
-  // we set the display name to "Marx Corporate" and route replies to accounts@marxcorporate.com.
-  // If marxcorporate.com is ever verified at https://resend.com/domains, set DIGEST_FROM_EMAIL
-  // / STATEMENT_FROM_EMAIL in Vercel to send from it directly.
-  const resolveFrom = (): string => {
+  // When sending via SMTP we use the authenticated Marx Corporate mailbox directly, so the
+  // From address must match the SMTP account (Gmail rejects mismatched From). When falling
+  // back to Resend, only a Resend-verified domain may be used (NOT marxcorporate.com).
+  const resolveSmtpFrom = (): string => {
+    const explicit = process.env.SMTP_FROM?.trim();
+    if (explicit) return explicit;
+    return `Marx Corporate <${smtpUser}>`;
+  };
+  const resolveResendFrom = (): string => {
     const candidates = [
       process.env.DIGEST_FROM_EMAIL,
       process.env.STATEMENT_FROM_EMAIL,
@@ -77,7 +89,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return 'Marx Corporate <accounts@stashoverview.co.uk>';
   };
 
-  const fromAddress = resolveFrom();
+  const fromAddress = useSmtp ? resolveSmtpFrom() : resolveResendFrom();
   // Default replies to the real Marx Corporate inbox for every email kind.
   const statementReplyTo =
     replyTo
@@ -101,15 +113,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  const validReplyTo = statementReplyTo && EMAIL_RE.test(statementReplyTo) ? statementReplyTo : undefined;
+
   try {
-    const resend = new Resend(apiKey);
+    if (useSmtp) {
+      const port = Number(process.env.SMTP_PORT) || 465;
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST?.trim() || 'smtp.gmail.com',
+        port,
+        secure: port === 465,
+        auth: { user: smtpUser, pass: smtpPass },
+      });
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to: recipients,
+        subject,
+        html,
+        ...(text ? { text } : {}),
+        ...(validReplyTo ? { replyTo: validReplyTo } : {}),
+        ...(attachments.length > 0
+          ? { attachments: attachments.map(a => ({ filename: a.filename, content: a.content, encoding: 'base64' as const })) }
+          : {}),
+      });
+      return res.status(200).json({ success: true, id: info.messageId });
+    }
+
+    const resend = new Resend(apiKey as string);
     const { data, error } = await resend.emails.send({
       from: fromAddress,
       to: recipients,
       subject,
       html,
       ...(text ? { text } : {}),
-      ...(statementReplyTo && EMAIL_RE.test(statementReplyTo) ? { replyTo: statementReplyTo } : {}),
+      ...(validReplyTo ? { replyTo: validReplyTo } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
     });
     if (error) return res.status(500).json({ error: error.message });
