@@ -195,10 +195,13 @@ async function loadConfig(url: string, key: string): Promise<ReminderConfig> {
   }
 }
 
-async function loadSentKeys(url: string, key: string): Promise<Set<string>> {
+async function loadSentKeys(url: string, key: string, mode: 'preview' | 'live'): Promise<Set<string>> {
   try {
+    // Only this mode's keys are relevant (keys are namespaced by mode), which
+    // keeps the payload small and avoids hitting any default row cap as the
+    // log grows. The explicit limit is a further safety margin.
     const r = await fetch(
-      `${url}/rest/v1/stash_reminder_log?select=dedupe_key`,
+      `${url}/rest/v1/stash_reminder_log?select=dedupe_key&mode=eq.${mode}&limit=100000`,
       { headers: { apikey: key, Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10000) },
     );
     const rows = r.ok ? await r.json() : [];
@@ -360,7 +363,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [arResult, dirResult, sentKeys] = await Promise.all([
     qbPost(base, 'ar-balance'),
     qbPost(base, 'customer-directory'),
-    loadSentKeys(url, key),
+    loadSentKeys(url, key, config.mode),
   ]);
 
   if (!arResult.ok || !arResult.data?.ok) {
@@ -393,7 +396,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (inv.balance <= 0.005 || !inv.docNumber) continue;
     const rid = selectRuleForInvoice({ dueDate: inv.dueDate }, config) as ReminderRuleId | null;
     if (!rid || rid === 'statement') continue;
-    if (sentKeys.has(`inv:${inv.id}:${rid}`)) continue;
+    if (sentKeys.has(`${config.mode}:inv:${inv.id}:${rid}`)) continue;
     candidateOrderNos.add(inv.docNumber);
   }
   const shippedMap = await fetchShippedStatus(base, Array.from(candidateOrderNos));
@@ -413,7 +416,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ruleId = selectRuleForInvoice({ dueDate: inv.dueDate }, config) as ReminderRuleId | null;
     if (!ruleId || ruleId === 'statement') continue;
 
-    const dedupeKey = `inv:${inv.id}:${ruleId}`;
+    // Dedupe key is namespaced by mode so a preview run never blocks the real
+    // send once you go live (preview and live track their sends independently).
+    const dedupeKey = `${config.mode}:inv:${inv.id}:${ruleId}`;
     if (sentKeys.has(dedupeKey)) { results.reminders.alreadySent++; continue; }
 
     // Only chase payment once the job has shipped. If we can't confirm the
@@ -442,13 +447,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!recipient) {
       results.reminders.skippedNoEmail++;
+      // Log under a distinct key (so it doesn't block the real send) and do
+      // NOT dedupe — if an email is later added in QuickBooks, we'll chase it.
       await insertLog(url, key, {
-        dedupe_key: dedupeKey, rule_id: ruleId, mode: config.mode, status: 'skipped',
+        dedupe_key: `${dedupeKey}:noemail`, rule_id: ruleId, mode: config.mode, status: 'skipped',
         customer_id: inv.customerId, customer_name: vars.customer, invoice_id: inv.id,
         invoice_no: vars.invoice, recipient: null, amount: inv.balance, subject,
         error: 'No customer email in QuickBooks',
       });
-      sentKeys.add(dedupeKey);
       continue;
     }
 
@@ -498,7 +504,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const balance = custInvoices.reduce((s, i) => s + i.balance, 0);
       if (balance <= 0.005) continue; // only when QB balance > £0
 
-      const dedupeKey = `stmt:${customerId}:${monthKey}`;
+      const dedupeKey = `${config.mode}:stmt:${customerId}:${monthKey}`;
       if (sentKeys.has(dedupeKey)) { results.statements.alreadySent++; continue; }
 
       const customerName = custInvoices[0]?.customerName || cust?.name || 'Customer';
@@ -521,12 +527,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!recipient) {
         results.statements.skippedNoEmail++;
         await insertLog(url, key, {
-          dedupe_key: dedupeKey, rule_id: 'statement', mode: config.mode, status: 'skipped',
+          dedupe_key: `${dedupeKey}:noemail`, rule_id: 'statement', mode: config.mode, status: 'skipped',
           customer_id: customerId, customer_name: customerName, invoice_id: null,
           invoice_no: null, recipient: null, amount: balance, subject,
           error: 'No customer email in QuickBooks',
         });
-        sentKeys.add(dedupeKey);
         continue;
       }
 

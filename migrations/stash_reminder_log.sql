@@ -1,9 +1,12 @@
 -- ─── Stash — automated payment-reminder send log (+ dedupe) ─────────────────
 -- One row per reminder the cron sends OR would send (preview mode). The
 -- unique `dedupe_key` is what guarantees a customer never gets the same
--- reminder twice:
---   invoice reminders : inv:<invoiceId>:<ruleId>
---   monthly statement : stmt:<customerId>:<YYYY-MM>
+-- reminder twice. Keys are namespaced by mode so a preview run never blocks
+-- the real send once you go live:
+--   invoice reminders : <mode>:inv:<invoiceId>:<ruleId>
+--   monthly statement : <mode>:stmt:<customerId>:<YYYY-MM>
+--   no-email skips     : <mode>:inv:<invoiceId>:<ruleId>:noemail   (does not
+--                        block a later real send if an email is added in QB)
 --
 -- `mode` records whether the row was a real send ('live') or a dry run
 -- ('preview'). Preview rows are logged so staff can review exactly what
