@@ -128,3 +128,63 @@
 .dark ::-webkit-scrollbar-thumb {
   background: #475569;
 }
+
+/* ─── Light-mode fixes for dark-authored admin surfaces ───────────────────
+ * A few admin panels (user management, sign-in allow-list) were built
+ * dark-first with hardcoded slate / white classes and no light variants, so
+ * in light mode they rendered as white text on muddy grey cards. Rather than
+ * rewrite every className, we remap that palette to readable light values,
+ * scoped to `.stash-admin-light` and only when the app is NOT in dark mode.
+ * In dark mode `:root:not(.dark)` fails to match, so nothing changes there. */
+:root:not(.dark) .stash-admin-light {
+  /* Card / surface backgrounds → white */
+  & .bg-slate-800,
+  & .bg-slate-800\/30,
+  & .bg-slate-800\/50,
+  & .bg-slate-800\/60 { background-color: #ffffff !important; }
+
+  /* Inputs & deep panels → white / very light */
+  & .bg-slate-900 { background-color: #ffffff !important; }
+  & .bg-slate-900\/40,
+  & .bg-slate-900\/50 { background-color: #f8fafc !important; }
+
+  /* Secondary buttons / chips → light grey */
+  & .bg-slate-700 { background-color: #e2e8f0 !important; }
+  & .bg-slate-600\/30 { background-color: #e2e8f0 !important; }
+  & .bg-slate-500\/10 { background-color: #f1f5f9 !important; }
+
+  /* Borders → light slate */
+  & .border-slate-600,
+  & .border-slate-700,
+  & .border-slate-800 { border-color: #e2e8f0 !important; }
+  & .border-slate-500,
+  & .border-slate-500\/20 { border-color: #cbd5e1 !important; }
+
+  /* Muted slate text → darker greys for contrast on white */
+  & .text-slate-300 { color: #334155 !important; }
+  & .text-slate-400 { color: #475569 !important; }
+  & .text-slate-500 { color: #64748b !important; }
+  & .text-slate-600 { color: #64748b !important; }
+
+  /* Accent text was -400 (too pale on white) → darken to ~-600/700 */
+  & .text-amber-400,
+  & .text-amber-500,
+  & .text-amber-200 { color: #b45309 !important; }
+  & .text-amber-100\/80 { color: #92400e !important; }
+  & .text-indigo-400 { color: #4f46e5 !important; }
+  & .text-indigo-500 { color: #4338ca !important; }
+  & .text-emerald-400 { color: #059669 !important; }
+  & .text-red-400 { color: #dc2626 !important; }
+  & .text-teal-400 { color: #0d9488 !important; }
+
+  /* Hover states that assumed dark surfaces */
+  & .hover\:bg-slate-600:hover,
+  & .hover\:bg-slate-700:hover { background-color: #cbd5e1 !important; }
+  & .hover\:text-white:hover { color: #0f172a !important; }
+
+  /* `text-white` was used for headings & input text on dark cards (flip to
+   * dark) — but NOT on solid coloured buttons, where white must stay. */
+  & .text-white:not([class*="bg-indigo-"]):not([class*="bg-amber-"]):not([class*="bg-emerald-"]):not([class*="bg-teal-"]):not([class*="bg-red-"]):not([class*="bg-blue-"]):not([class*="bg-purple-"]):not([class*="bg-green-"]) {
+    color: #0f172a !important;
+  }
+}

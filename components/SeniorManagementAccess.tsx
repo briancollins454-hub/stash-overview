@@ -130,14 +130,14 @@ const SeniorManagementAccess: React.FC<Props> = ({ token, firebaseIdToken, isSup
 
   if (!isSuperuser) {
     return (
-      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+      <div className="stash-admin-light bg-slate-800/50 border border-slate-700 rounded-xl p-4 text-[10px] text-slate-500 font-bold uppercase tracking-widest">
         Only superusers can manage senior-management access.
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 mt-10">
+    <div className="stash-admin-light space-y-4 mt-10">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
