@@ -1,6 +1,0 @@
-Handle,Title,Body (HTML),Vendor,Product Category,Type,Tags,Published,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Variant Taxable,Status,Image Src,Image Position,Cost per item
-mizuno-teamwear-hoodie-black,Mizuno - Teamwear Hoodie - Black,Sample description from B2B portal.,Mizuno,Apparel & Accessories,Teamwear,"mizuno-teamwear, style-12345, colour-blk, color-black, vat-exempt-junior",FALSE,Size,JS,12345-BLK-JS,50,,FALSE,draft,https://example.com/images/hoodie-black.jpg,1,25
-mizuno-teamwear-hoodie-black,,,,,,,FALSE,Size,JM,12345-BLK-JM,50,,FALSE,draft,,,25
-mizuno-teamwear-hoodie-black,,,,,,,FALSE,Size,S,12345-BLK-S,50,,TRUE,draft,,,25
-mizuno-teamwear-hoodie-black,,,,,,,FALSE,Size,M,12345-BLK-M,50,,TRUE,draft,,,25
-mizuno-teamwear-hoodie-black,,,,,,,FALSE,Size,L,12345-BLK-L,50,,TRUE,draft,,,25
