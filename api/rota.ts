@@ -3,9 +3,9 @@ import { Resend } from 'resend';
 
 // ─── /api/rota ─────────────────────────────────────────────────────────────
 // Server-side concerns for the Stash Rota module that *aren't* plain
-// Supabase CRUD (those go through /api/supabase-data). Today this is just
-// transactional email — manager pings when staff submit time-off, staff
-// pings when manager decides.
+// Supabase CRUD (rota reads go direct via the Supabase client; writes go
+// through /api/rota-data). Today this is just transactional email — manager
+// pings when staff submit time-off, staff pings when manager decides.
 //
 // Resend is reused from the digest feature (RESEND_API_KEY env). DIGEST_FROM_EMAIL
 // supplies the From header. ROTA_MANAGER_EMAIL is the single rota manager who

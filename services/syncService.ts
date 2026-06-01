@@ -153,6 +153,22 @@ export const fetchCloudData = async (settings: ApiSettings, opts?: { includeOrde
 };
 
 /**
+ * Targeted pulls of just one heavy blob table. Used by the realtime handler so
+ * a single order/deco change doesn't drag down every mapping/stock/returns
+ * table (those stay current via their own per-row realtime events). Returns
+ * null on failure so the caller can leave local state untouched.
+ */
+export const fetchCloudOrdersOnly = async (): Promise<ShopifyOrder[] | null> => {
+    const rows = await fetchAllFromCloud<any>('stash_orders', 'order_data');
+    return rows === null ? null : rows.map(r => r.order_data as ShopifyOrder);
+};
+
+export const fetchCloudDecoJobsOnly = async (): Promise<DecoJob[] | null> => {
+    const rows = await fetchAllFromCloud<any>('stash_deco_jobs', 'job_data');
+    return rows === null ? null : rows.map(r => r.job_data as DecoJob);
+};
+
+/**
  * Pushes the set of orders that belong in the cloud (typically unfulfilled /
  * partial). Also prunes the cloud of:
  *   1. Any row whose stored fulfillmentStatus is fulfilled/restocked (the

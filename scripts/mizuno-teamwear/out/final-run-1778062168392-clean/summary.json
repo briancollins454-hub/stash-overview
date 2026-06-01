@@ -1,0 +1,9 @@
+{
+  "inputProducts": 179,
+  "groupedProducts": 107,
+  "filteredOutProducts": 0,
+  "shopifyRows": 587,
+  "strictShopifyRows": 455,
+  "inventoryRows": 587,
+  "outputDirectory": "scripts/mizuno-teamwear/out/final-run-1778062168392-clean"
+}

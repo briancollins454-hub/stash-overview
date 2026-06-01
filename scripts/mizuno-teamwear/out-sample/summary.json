@@ -1,0 +1,7 @@
+{
+  "inputProducts": 1,
+  "groupedProducts": 1,
+  "shopifyRows": 5,
+  "inventoryRows": 5,
+  "outputDirectory": "scripts/mizuno-teamwear/out-sample"
+}

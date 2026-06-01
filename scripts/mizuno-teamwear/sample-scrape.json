@@ -1,0 +1,19 @@
+{
+  "products": [
+    {
+      "sourceUrl": "https://example.com/product/1",
+      "title": "TEAMWEAR HOODIE",
+      "description": "Sample description from B2B portal.",
+      "styleCode": "12345",
+      "colorCode": "BLK",
+      "colorName": "BLACK",
+      "listedPrice": 25,
+      "sizes": {
+        "junior": ["JS", "JM"],
+        "adult": ["S", "M", "L"],
+        "unknown": []
+      },
+      "imageUrls": ["https://example.com/images/hoodie-black.jpg"]
+    }
+  ]
+}

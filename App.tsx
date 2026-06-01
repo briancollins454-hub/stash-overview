@@ -18,7 +18,7 @@ import {
 } from './services/shopifyOrderStatus';
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { fetchCloudData, fetchCloudOrdersOnly, fetchCloudDecoJobsOnly, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { mergeCloudDecoFillOnly } from './services/decoJobSources';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
@@ -1308,59 +1308,49 @@ const App: React.FC = () => {
                         });
                       },
                       onDataChange: async (table) => {
-                        // Lightweight cloud pull when orders or deco jobs change on another device
+                        // Targeted pull of ONLY the changed blob table. Mappings /
+                        // links / patterns are kept current by their own per-row
+                        // realtime events, so we no longer drag those (plus stock /
+                        // returns / reference products) down on every order change.
                         try {
-                          const cloudData = await fetchCloudData(apiSettings, { includeOrders: table === 'stash_orders' });
-                          if (!cloudData) return;
-                          if (table === 'stash_orders' && cloudData.orders?.length) {
-                            setRawShopifyOrders(prev => {
-                              const orderMap = new Map(prev.map(o => [o.id, o]));
-                              // Only merge unfulfilled/partial cloud orders — skip stale fulfilled ones.
-                              // Critically: never downgrade a locally-fulfilled record back to
-                              // unfulfilled just because cloud is stale (cloud doesn't receive
-                              // fulfilled orders, so its copy of a reconciled fulfillment is
-                              // permanently out-of-date). Also skip if our local updatedAt is
-                              // newer than cloud's — local reconciliation is authoritative.
-                              cloudData.orders.forEach(o => {
-                                if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
-                                const existing = orderMap.get(o.id);
-                                if (existing) {
-                                  if (isShopifyOrderClosedForCloud(existing.fulfillmentStatus)) return;
-                                  const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
-                                  const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
-                                  if (localMs && cloudMs && localMs >= cloudMs) return;
-                                }
-                                orderMap.set(o.id, o);
+                          if (table === 'stash_orders') {
+                            const cloudOrders = await fetchCloudOrdersOnly();
+                            if (cloudOrders?.length) {
+                              setRawShopifyOrders(prev => {
+                                const orderMap = new Map(prev.map(o => [o.id, o]));
+                                // Only merge unfulfilled/partial cloud orders — skip stale fulfilled ones.
+                                // Critically: never downgrade a locally-fulfilled record back to
+                                // unfulfilled just because cloud is stale (cloud doesn't receive
+                                // fulfilled orders, so its copy of a reconciled fulfillment is
+                                // permanently out-of-date). Also skip if our local updatedAt is
+                                // newer than cloud's — local reconciliation is authoritative.
+                                cloudOrders.forEach(o => {
+                                  if (isShopifyOrderClosedForCloud(o.fulfillmentStatus)) return;
+                                  const existing = orderMap.get(o.id);
+                                  if (existing) {
+                                    if (isShopifyOrderClosedForCloud(existing.fulfillmentStatus)) return;
+                                    const localMs = existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+                                    const cloudMs = o.updatedAt ? new Date(o.updatedAt).getTime() : 0;
+                                    if (localMs && cloudMs && localMs >= cloudMs) return;
+                                  }
+                                  orderMap.set(o.id, o);
+                                });
+                                const merged = Array.from(orderMap.values());
+                                setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
+                                return merged;
                               });
-                              const merged = Array.from(orderMap.values());
-                              setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
-                              return merged;
-                            });
-                          }
-                          if (table === 'stash_deco_jobs' && cloudData.decoJobs?.length) {
-                            setRawDecoJobs(prev => {
-                              const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
-                              const merged = Array.from(jobMap.values());
-                              setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
-                              return merged;
-                            });
-                          }
-                          // Also pick up any new mappings/links from the same cloud pull,
-                          // with the pending-overlay respected so our own unconfirmed
-                          // writes aren't stomped by this intermediate fetch.
-                          const overlay = await getPendingOverlay();
-                          if (cloudData.mappings) {
-                            const merged: Record<string, string> = { ...cloudData.mappings, ...overlay.mappings };
-                            overlay.mappingDeletes.forEach(k => { delete merged[k]; });
-                            setConfirmedMatches(merged);
-                            setLocalItem('stash_confirmed_matches', merged).catch(console.error);
-                          }
-                          if (cloudData.links) {
-                            const merged: Record<string, string> = { ...cloudData.links, ...overlay.jobLinks };
-                            overlay.jobLinkDeletes.forEach(k => { delete merged[k]; });
-                            setItemJobLinks(merged);
-                            setLocalItem('stash_item_job_links', merged).catch(console.error);
+                            }
+                          } else if (table === 'stash_deco_jobs') {
+                            const cloudDecoJobs = await fetchCloudDecoJobsOnly();
+                            if (cloudDecoJobs?.length) {
+                              setRawDecoJobs(prev => {
+                                const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
+                                mergeCloudDecoFillOnly(jobMap, cloudDecoJobs);
+                                const merged = Array.from(jobMap.values());
+                                setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
+                                return merged;
+                              });
+                            }
                           }
                         } catch (e) {
                           console.warn('[Realtime] Cloud pull failed:', e);

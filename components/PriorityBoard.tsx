@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import type { DecoJob } from '../types';
 import { getItem, setItem } from '../services/localStore';
 import { isSupabaseReady } from '../services/supabase';
+import { isRealtimeConnected } from '../services/realtimeService';
 import { onPriorityNoteLiveUpdate } from '../services/priorityNotesBus';
 import {
   PRIORITY_NOTES_KEY,
@@ -667,8 +668,14 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   useEffect(() => {
     if (!isSupabaseReady()) return;
     let cancelled = false;
+    let tick = 0;
     const poll = async () => {
       if (document.visibilityState !== 'visible') return;
+      tick++;
+      // When realtime is live, note edits arrive instantly via the bus, so we
+      // only need an occasional safety pull (~every 32s) rather than every 4s.
+      // When realtime is down, fall back to the full 4s poll.
+      if (isRealtimeConnected() && tick % 8 !== 0) return;
       try {
         const fromCloud = await fetchAllPriorityNotesFromCloud();
         if (cancelled) return;
