@@ -3,7 +3,7 @@ import {
   CLAUDE_REDIRECT,
   isAllowedRedirectUri,
   signPayload,
-} from '../../../lib/mcp-oauth.js';
+} from '../../mcp-lib/oauth.js';
 
 function escapeHtml(s: string): string {
   return s

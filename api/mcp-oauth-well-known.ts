@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   authorizationServerMetadata,
   protectedResourceMetadata,
-} from '../lib/mcp-oauth.js';
+} from './mcp-lib/oauth.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const type = (req.query.type as string) || 'resource';

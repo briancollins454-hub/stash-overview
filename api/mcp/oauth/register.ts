@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { CLAUDE_REDIRECT, issueDynamicClient } from '../../../lib/mcp-oauth.js';
+import { CLAUDE_REDIRECT, issueDynamicClient } from '../../mcp-lib/oauth.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });

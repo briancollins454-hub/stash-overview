@@ -5,12 +5,16 @@ import {
   verifyOAuthClient,
   verifyPkceS256,
   verifySignedPayload,
-} from '../../../lib/mcp-oauth.js';
+} from '../../mcp-lib/oauth.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
-  const form = parseFormBody(req.body);
+  const raw =
+    typeof req.body === 'string' ? req.body
+      : Buffer.isBuffer(req.body) ? req.body.toString('utf8')
+        : undefined;
+  const form = parseFormBody(req.body, raw);
   const grantType = form.get('grant_type');
 
   try {
