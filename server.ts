@@ -117,6 +117,12 @@ async function startServer() {
   // route above so the raw-body parser wins for Shopify webhooks.
   app.use(express.json({ limit: '2mb' }));
 
+  if (process.env.MCP_HTTP === '1') {
+    const { mountStashMcpHttp } = await import('./mcp/mountHttp.js');
+    await mountStashMcpHttp(app);
+    log.info('Stash MCP HTTP enabled at /api/mcp (Bearer MCP_API_TOKEN)');
+  }
+
   // Health check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
