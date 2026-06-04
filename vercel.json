@@ -6,7 +6,7 @@
     "api/mcp/oauth/register.ts": { "maxDuration": 15 },
     "api/deco.ts": {
       "maxDuration": 60,
-      "includeFiles": "node_modules/@napi-rs/canvas/**"
+      "includeFiles": "node_modules/@napi-rs/canvas/**,node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
     },
     "api/inventory.ts": { "maxDuration": 60 },
     "api/stock.ts": { "maxDuration": 60 },

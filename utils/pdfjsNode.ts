@@ -31,6 +31,13 @@ async function ensurePdfJsNodeGlobals(): Promise<void> {
 export async function loadPdfJs() {
   if (!pdfjsModule) {
     await ensurePdfJsNodeGlobals();
+    // Vercel can't resolve dynamic import("./pdf.worker.mjs") from /var/task.
+    // Register the worker handler on globalThis before the main bundle loads.
+    const g = globalThis as { pdfjsWorker?: { WorkerMessageHandler?: unknown } };
+    if (!g.pdfjsWorker?.WorkerMessageHandler) {
+      const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+      g.pdfjsWorker = workerMod as { WorkerMessageHandler?: unknown };
+    }
     pdfjsModule = await import('pdfjs-dist/legacy/build/pdf.mjs');
   }
   return pdfjsModule;
