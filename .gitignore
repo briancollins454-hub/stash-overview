@@ -17,7 +17,9 @@ wipe_orders.ts
 # Throwaway browser profiles used by local scraping scripts. These hold
 # cookies / login data / caches and must NEVER be committed.
 **/.chrome-profile/
+.mcp-connect-password.local
 **/.shopify-profile/
 # Generated scraper output (large CSV/JSON artifacts, not source)
 scripts/mizuno-teamwear/out/
 scripts/mizuno-teamwear/out-*/
+.vercel

@@ -1,4 +1,33 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { normalizeInvoiceConfig, type InvoiceConfig } from '../utils/invoiceSettings.js';
+import { buildDecoInvoiceEurPdf, parseDecoOrderForEurInvoice } from '../utils/decoInvoiceEurPdf.js';
+
+const INVOICE_CONFIG_ROW_ID = 'invoice_config';
+
+async function loadInvoiceConfig(): Promise<InvoiceConfig> {
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = (
+    process.env.SUPABASE_SERVICE_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_ANON_KEY
+  )?.trim();
+  if (!url || !key) return normalizeInvoiceConfig(null);
+  try {
+    const r = await fetch(
+      `${url}/rest/v1/stash_invoice_settings?id=eq.${INVOICE_CONFIG_ROW_ID}&select=data`,
+      {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const rows = r.ok ? await r.json() : [];
+    const data = Array.isArray(rows) && rows.length > 0 ? rows[0].data : null;
+    return normalizeInvoiceConfig(data);
+  } catch {
+    return normalizeInvoiceConfig(null);
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
   if (origin === 'https://stashoverview.co.uk' || origin === 'https://www.stashoverview.co.uk' || origin === 'http://localhost:3000' || (origin.endsWith('.vercel.app') && origin.includes('stash-overview'))) {
@@ -516,6 +545,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
     } catch (e: any) {
       return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
+    }
+  }
+
+  // Stash-generated EUR invoice PDF (toggle in invoice settings).
+  if (action === 'invoice-pdf-eur') {
+    const targetId = String((req.body?.orderId ?? (Array.isArray(jobIds) ? jobIds[0] : '')) ?? '').trim();
+    if (!targetId) return res.status(400).json({ error: 'orderId required' });
+    try {
+      const config = await loadInvoiceConfig();
+      if (!config.eurInvoicesEnabled) {
+        return res.status(403).json({
+          error: 'EUR invoices are disabled. Enable them under Finance → Invoice settings.',
+        });
+      }
+      let order: any = null;
+      for (const strat of [{ field: '3', condition: '1' }, { field: '1', condition: '1' }]) {
+        const qp = new URLSearchParams({
+          username, password,
+          field: strat.field, condition: strat.condition,
+          string: targetId, criteria: targetId, limit: '5', skip_login_token: '1',
+          include_product_data: '1',
+          include_workflow_data: '1',
+        });
+        const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+        try {
+          const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(15000) });
+          const findText = await findRes.text();
+          if (findText.startsWith('<')) continue;
+          const findData = JSON.parse(findText);
+          const hit = (findData.orders || []).find((o: any) => orderMatchesId(o, targetId));
+          if (hit) { order = hit; break; }
+        } catch { /* next strategy */ }
+      }
+      if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
+      const parsed = parseDecoOrderForEurInvoice(order, config);
+      const pdfBytes = await buildDecoInvoiceEurPdf({ ...parsed, config });
+      return res.status(200).json({
+        ok: true,
+        orderId: targetId,
+        bytes: pdfBytes.length,
+        base64: Buffer.from(pdfBytes).toString('base64'),
+        rate: config.gbpToEurRate,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: 'EUR invoice PDF failed', details: e.message });
     }
   }
 

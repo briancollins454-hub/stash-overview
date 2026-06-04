@@ -4,10 +4,15 @@ import {
   Search, Filter, ArrowUpDown, Eye, FileText, CheckCircle2, XCircle,
   TrendingUp, Users, Calendar, CreditCard, Banknote, Receipt,
   ChevronRight, X, StickerIcon, SortAsc, SortDesc, Loader2, RefreshCw, DatabaseZap,
-  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail, Bell
+  FileSpreadsheet, Scale, Gift, Building2, CircleDollarSign, Mail, Bell, Settings2
 } from 'lucide-react';
 import OpenItemStatementModal from './OpenItemStatementModal';
 import ReminderSettingsModal from './ReminderSettingsModal';
+import InvoiceSettingsModal from './InvoiceSettingsModal';
+import DecoInvoiceDownloadButtons from './DecoInvoiceDownloadButtons';
+import { fetchInvoiceSettings } from '../services/decoInvoiceDownload';
+import type { InvoiceConfig } from '../utils/invoiceSettings';
+import { defaultInvoiceConfig } from '../utils/invoiceSettings';
 import { daysPastDue, qbCustomerIdFromInvoices } from '../utils/openItemStatement';
 // exceljs is ~800 KB and only used inside exportDetailedCSV. Import
 // it dynamically so it isn't part of this chunk's initial payload —
@@ -218,6 +223,8 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [showReminders, setShowReminders] = useState(false);
+  const [showInvoiceSettings, setShowInvoiceSettings] = useState(false);
+  const [invoiceConfig, setInvoiceConfig] = useState<InvoiceConfig>(defaultInvoiceConfig());
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
   const [priorityNotes, setPriorityNotes] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('stash_finance_notes') || '{}'); } catch { return {}; }
@@ -413,6 +420,10 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
     if (qbConfigured && !qbLastSynced && !qbLoading) fetchQBData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qbConfigured]);
+
+  useEffect(() => {
+    fetchInvoiceSettings().then(setInvoiceConfig).catch(() => {});
+  }, [showInvoiceSettings]);
 
   // --- A/P Aging by vendor ---
   const apVendorSummaries = useMemo<APVendorSummary[]>(() => {
@@ -1301,6 +1312,17 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
           <button onClick={() => setShowReminders(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700 dark:hover:bg-rose-900/50 transition-colors">
             <Bell className="w-3.5 h-3.5" /> Reminders
           </button>
+          <button
+            type="button"
+            onClick={() => setShowInvoiceSettings(true)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isDark ? 'bg-slate-700 text-gray-300 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
+            title="Deco PDF download and EUR invoice toggle"
+          >
+            <Settings2 className="w-3.5 h-3.5" /> Invoices
+            {invoiceConfig.eurInvoicesEnabled && (
+              <span className="text-emerald-500">EUR</span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1842,14 +1864,15 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       {/* Order View */}
       {viewMode === 'orders' && (
         <div className={card}>
-          <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
+          <div className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_minmax(140px,auto)] gap-2 px-4 py-2.5 border-b ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
             <SortButton field="customer" label="Customer / Job" />
             <SortButton field="balance" label="Outstanding" />
             <SortButton field="billable" label="Billable" />
             <div className={headerText}>Status</div>
             <div className={headerText}>Terms</div>
             <SortButton field="age" label="Age" />
-            <div className={headerText}>Invoice</div>
+            <div className={headerText}>Invoiced</div>
+            <div className={headerText}>PDF</div>
           </div>
 
           {filteredOrders.length === 0 && (
@@ -1863,7 +1886,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
             const jobAge = daysSince(job.dateInvoiced || job.dateOrdered);
             const bucket = getAgingBucket(jobAge);
             return (
-              <div key={job.jobNumber} className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
+              <div key={job.jobNumber} className={`grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_minmax(140px,auto)] gap-2 px-4 py-2.5 border-b transition-colors ${isDark ? 'border-slate-700/50 hover:bg-slate-700/30' : 'border-gray-50 hover:bg-gray-50'}`}>
                 <div className="min-w-0">
                   <div className={`text-xs font-bold truncate ${isDark ? 'text-white' : 'text-gray-900'}`}>
                     <span className={`font-mono ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>#{job.jobNumber}</span> · {job.customerName}
@@ -1884,6 +1907,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
                   ) : <span className="text-[10px] text-gray-400">—</span>}
                 </div>
                 <div className={`text-[10px] self-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{formatDate(job.dateInvoiced)}</div>
+                <div className="self-center">
+                  <DecoInvoiceDownloadButtons
+                    orderId={job.jobNumber}
+                    invoiceConfig={invoiceConfig}
+                    isDark={isDark}
+                  />
+                </div>
               </div>
             );
           })}
@@ -2213,6 +2243,13 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
       />
       {showReminders && (
         <ReminderSettingsModal isDark={isDark} onClose={() => setShowReminders(false)} />
+      )}
+      {showInvoiceSettings && (
+        <InvoiceSettingsModal
+          isDark={isDark}
+          onClose={() => setShowInvoiceSettings(false)}
+          onSaved={setInvoiceConfig}
+        />
       )}
     </div>
   );

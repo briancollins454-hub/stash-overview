@@ -2,8 +2,13 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   CircleDollarSign, Search, ArrowUpDown, AlertTriangle, ExternalLink, Download,
   RefreshCw, Check, Copy, ShieldAlert, ChevronDown, ChevronRight, ShieldCheck, Undo2,
-  Printer, UserRound, CloudDownload, CalendarRange,
+  Printer, UserRound, CloudDownload, CalendarRange, Settings2,
 } from 'lucide-react';
+import DecoInvoiceDownloadButtons from './DecoInvoiceDownloadButtons';
+import InvoiceSettingsModal from './InvoiceSettingsModal';
+import { fetchInvoiceSettings } from '../services/decoInvoiceDownload';
+import type { InvoiceConfig } from '../utils/invoiceSettings';
+import { defaultInvoiceConfig } from '../utils/invoiceSettings';
 import { DecoJob } from '../types';
 import { supabaseFetch, isSupabaseReady } from '../services/supabase';
 import { fetchDecoFinancials } from '../services/apiService';
@@ -147,6 +152,8 @@ const CopyableJobNum: React.FC<{ jobNumber: string; onNavigate?: () => void }> =
  * default (active work); Authorised starts collapsed (reference bucket).
  */
 const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateToOrder, currentUserEmail }) => {
+  const [invoiceConfig, setInvoiceConfig] = useState<InvoiceConfig>(defaultInvoiceConfig());
+  const [showInvoiceSettings, setShowInvoiceSettings] = useState(false);
   const [search, setSearch] = useState('');
   // Default sort — newest shipped first. Empty dateShipped values fall to
   // the bottom in descending order, which is what we want (unshipped rows
@@ -155,6 +162,10 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [allJobs, setAllJobs] = useState<DecoJob[]>(decoJobs);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    fetchInvoiceSettings().then(setInvoiceConfig).catch(() => {});
+  }, [showInvoiceSettings]);
   // Distinct from `isLoading` (which is a cache re-read) — `isPulling` covers
   // the "ask Deco for the last 60 days" path so the button can show a
   // dedicated state and we can guard against double-clicks.
@@ -1052,6 +1063,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                 ['accountTerms', 'Terms'],
                 ['dateShipped', 'Shipped'],
                 ['daysSince', 'Age'],
+                ['', 'Invoice'],
                 ['', ''],
               ] as [SortKey | '', string][]).map(([key, label], idx) => (
                 <th
@@ -1213,6 +1225,13 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
                       {j.daysSince > 30 && <AlertTriangle className="w-3 h-3" />}
                       {j.daysSince}d
                     </span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <DecoInvoiceDownloadButtons
+                      orderId={j.jobNumber}
+                      invoiceConfig={invoiceConfig}
+                      isDark={isDark}
+                    />
                   </td>
                   <td className="px-4 py-3">
                     {variant === 'zero' && (
@@ -1413,6 +1432,18 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setShowInvoiceSettings(true)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} hover:bg-white/10 transition-colors`}
+            title="EUR invoice toggle and exchange rate"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            Invoice settings
+            {invoiceConfig.eurInvoicesEnabled && (
+              <span className="text-[10px] text-emerald-500 font-bold">EUR on</span>
+            )}
+          </button>
           <button
             onClick={pullFreshFromDeco}
             disabled={isPulling || isLoading}
@@ -1645,6 +1676,15 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
               : 'All good — every active order has at least one payment recorded'}
           </p>
         </div>
+      )}
+
+      {showInvoiceSettings && (
+        <InvoiceSettingsModal
+          isDark={isDark}
+          onClose={() => setShowInvoiceSettings(false)}
+          onSaved={setInvoiceConfig}
+          currentUserEmail={currentUserEmail}
+        />
       )}
 
       {/* Explanatory footer */}
