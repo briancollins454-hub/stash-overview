@@ -1436,7 +1436,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
             type="button"
             onClick={() => setShowInvoiceSettings(true)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border ${borderColor} ${cardBg} text-xs font-medium ${textSecondary} hover:bg-white/10 transition-colors`}
-            title="EUR invoice toggle and exchange rate"
+            title="Deco invoice EUR conversion toggle and exchange rate"
           >
             <Settings2 className="w-3.5 h-3.5" />
             Invoice settings

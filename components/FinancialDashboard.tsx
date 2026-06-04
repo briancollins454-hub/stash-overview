@@ -1316,7 +1316,7 @@ const FinancialDashboard: React.FC<Props> = ({ decoJobs, shopifyOrders = [], isD
             type="button"
             onClick={() => setShowInvoiceSettings(true)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest border transition-colors ${isDark ? 'bg-slate-700 text-gray-300 border-slate-600 hover:bg-slate-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'}`}
-            title="Deco PDF download and EUR invoice toggle"
+            title="Deco invoice download and EUR conversion toggle"
           >
             <Settings2 className="w-3.5 h-3.5" /> Invoices
             {invoiceConfig.eurInvoicesEnabled && (

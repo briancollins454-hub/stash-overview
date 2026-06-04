@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { normalizeInvoiceConfig, type InvoiceConfig } from '../utils/invoiceSettings.js';
-import { buildDecoInvoiceEurPdf, parseDecoOrderForEurInvoice } from '../utils/decoInvoiceEurPdf.js';
+import { amendDecoPdfToEur } from '../utils/decoPdfEurAmend.js';
 
 const INVOICE_CONFIG_ROW_ID = 'invoice_config';
 
@@ -537,59 +537,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const t = await pdfRes.text().catch(() => '');
         return res.status(pdfRes.status).json({ error: `Deco PDF download failed (${pdfRes.status})`, contentType, snippet: t.slice(0, 200) });
       }
-      const buf = Buffer.from(await pdfRes.arrayBuffer());
+      let buf = Buffer.from(await pdfRes.arrayBuffer());
       const looksPdf = contentType.includes('pdf') || buf.subarray(0, 5).toString('latin1') === '%PDF-';
       if (!looksPdf) {
         return res.status(502).json({ error: 'Deco returned non-PDF (auth likely failed)', contentType, bytes: buf.length, snippet: buf.subarray(0, 200).toString('latin1') });
       }
-      return res.status(200).json({ ok: true, orderId: targetId, bytes: buf.length, base64: buf.toString('base64') });
-    } catch (e: any) {
-      return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
-    }
-  }
 
-  // Stash-generated EUR invoice PDF (toggle in invoice settings).
-  if (action === 'invoice-pdf-eur') {
-    const targetId = String((req.body?.orderId ?? (Array.isArray(jobIds) ? jobIds[0] : '')) ?? '').trim();
-    if (!targetId) return res.status(400).json({ error: 'orderId required' });
-    try {
       const config = await loadInvoiceConfig();
-      if (!config.eurInvoicesEnabled) {
-        return res.status(403).json({
-          error: 'EUR invoices are disabled. Enable them under Finance → Invoice settings.',
-        });
-      }
-      let order: any = null;
-      for (const strat of [{ field: '3', condition: '1' }, { field: '1', condition: '1' }]) {
-        const qp = new URLSearchParams({
-          username, password,
-          field: strat.field, condition: strat.condition,
-          string: targetId, criteria: targetId, limit: '5', skip_login_token: '1',
-          include_product_data: '1',
-          include_workflow_data: '1',
-        });
-        const findUrl = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+      const forceGbp = req.body?.forceGbp === true;
+      const convertToEur = !forceGbp && config.eurInvoicesEnabled;
+      let currency: 'gbp' | 'eur' = 'gbp';
+      if (convertToEur) {
         try {
-          const findRes = await fetch(findUrl, { method: 'GET', signal: AbortSignal.timeout(15000) });
-          const findText = await findRes.text();
-          if (findText.startsWith('<')) continue;
-          const findData = JSON.parse(findText);
-          const hit = (findData.orders || []).find((o: any) => orderMatchesId(o, targetId));
-          if (hit) { order = hit; break; }
-        } catch { /* next strategy */ }
+          const amended = await amendDecoPdfToEur(buf, config.gbpToEurRate, config.rateNote);
+          buf = Buffer.from(amended);
+          currency = 'eur';
+        } catch (amendErr: any) {
+          return res.status(500).json({
+            error: 'Could not convert Deco PDF to EUR',
+            details: amendErr?.message || String(amendErr),
+            hint: 'Download GBP original with forceGbp, or check the PDF uses text-based £ amounts.',
+          });
+        }
       }
-      if (!order) return res.status(404).json({ error: `Deco order ${targetId} not found` });
-      const parsed = parseDecoOrderForEurInvoice(order, config);
-      const pdfBytes = await buildDecoInvoiceEurPdf({ ...parsed, config });
+
       return res.status(200).json({
         ok: true,
         orderId: targetId,
-        bytes: pdfBytes.length,
-        base64: Buffer.from(pdfBytes).toString('base64'),
-        rate: config.gbpToEurRate,
+        bytes: buf.length,
+        base64: buf.toString('base64'),
+        currency,
+        amended: currency === 'eur',
+        rate: convertToEur ? config.gbpToEurRate : undefined,
       });
     } catch (e: any) {
-      return res.status(500).json({ error: 'EUR invoice PDF failed', details: e.message });
+      return res.status(500).json({ error: 'Deco invoice PDF failed', details: e.message });
     }
   }
 

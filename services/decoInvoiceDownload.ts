@@ -45,13 +45,21 @@ export async function saveInvoiceSettings(
   return normalizeInvoiceConfig(data.config);
 }
 
-export async function downloadDecoInvoicePdf(orderId: string): Promise<void> {
+/** Download Deco invoice; converts to EUR in-place when enabled in invoice settings. */
+export async function downloadDecoInvoicePdf(
+  orderId: string,
+  options?: { forceGbp?: boolean },
+): Promise<void> {
   const id = String(orderId).trim();
   if (!id) throw new Error('Order number required');
   const res = await fetch('/api/deco', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'invoice-pdf', orderId: id }),
+    body: JSON.stringify({
+      action: 'invoice-pdf',
+      orderId: id,
+      forceGbp: options?.forceGbp === true,
+    }),
     signal: AbortSignal.timeout(60_000),
   });
   const data = await res.json().catch(() => ({}));
@@ -59,22 +67,6 @@ export async function downloadDecoInvoicePdf(orderId: string): Promise<void> {
     throw new Error(data?.error || data?.details || `Download failed (${res.status})`);
   }
   const safe = id.replace(/[^a-zA-Z0-9._-]+/g, '-');
-  triggerPdfDownload(data.base64, `Deco-Invoice-${safe}.pdf`);
-}
-
-export async function downloadDecoInvoiceEurPdf(orderId: string): Promise<void> {
-  const id = String(orderId).trim();
-  if (!id) throw new Error('Order number required');
-  const res = await fetch('/api/deco', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'invoice-pdf-eur', orderId: id }),
-    signal: AbortSignal.timeout(60_000),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data?.ok || typeof data.base64 !== 'string') {
-    throw new Error(data?.error || data?.details || `EUR invoice failed (${res.status})`);
-  }
-  const safe = id.replace(/[^a-zA-Z0-9._-]+/g, '-');
-  triggerPdfDownload(data.base64, `Invoice-EUR-${safe}.pdf`);
+  const suffix = data.currency === 'eur' ? '-EUR' : '';
+  triggerPdfDownload(data.base64, `Deco-Invoice${suffix}-${safe}.pdf`);
 }

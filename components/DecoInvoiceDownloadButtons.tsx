@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { FileText, Loader2, Euro } from 'lucide-react';
+import { FileText, Loader2 } from 'lucide-react';
 import type { InvoiceConfig } from '../utils/invoiceSettings';
-import { downloadDecoInvoicePdf, downloadDecoInvoiceEurPdf } from '../services/decoInvoiceDownload';
+import { downloadDecoInvoicePdf } from '../services/decoInvoiceDownload';
 
 interface Props {
   orderId: string;
@@ -16,8 +16,9 @@ const DecoInvoiceDownloadButtons: React.FC<Props> = ({
   isDark = true,
   compact = true,
 }) => {
-  const [loading, setLoading] = useState<'deco' | 'eur' | null>(null);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const eurOn = invoiceConfig.eurInvoicesEnabled;
 
   const btn = compact
     ? `inline-flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-medium transition-colors disabled:opacity-40 ${
@@ -31,48 +32,52 @@ const DecoInvoiceDownloadButtons: React.FC<Props> = ({
         : 'border-gray-300 text-gray-700 hover:bg-gray-100'
     }`;
 
-  const run = async (kind: 'deco' | 'eur') => {
-    setLoading(kind);
+  const link = `text-[10px] underline opacity-70 hover:opacity-100 ${isDark ? 'text-slate-400' : 'text-gray-500'}`;
+
+  const run = async (forceGbp: boolean) => {
+    setLoading(true);
     setErr(null);
     try {
-      if (kind === 'deco') await downloadDecoInvoicePdf(orderId);
-      else await downloadDecoInvoiceEurPdf(orderId);
+      await downloadDecoInvoicePdf(orderId, { forceGbp });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setLoading(null);
+      setLoading(false);
     }
   };
 
   return (
     <div className="flex flex-col items-start gap-0.5">
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
-          title="Download original DecoNetwork invoice (GBP PDF)"
-          disabled={!!loading}
-          onClick={() => run('deco')}
+          title={
+            eurOn
+              ? `Download Deco invoice with amounts converted to EUR (rate ${invoiceConfig.gbpToEurRate})`
+              : 'Download Deco invoice (GBP)'
+          }
+          disabled={loading}
+          onClick={() => run(false)}
           className={btn}
         >
-          {loading === 'deco' ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-          Deco PDF
+          {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+          Invoice{eurOn ? ' (EUR)' : ''}
         </button>
-        {invoiceConfig.eurInvoicesEnabled && (
+        {eurOn && (
           <button
             type="button"
-            title={`Download Stash EUR invoice (rate ${invoiceConfig.gbpToEurRate})`}
-            disabled={!!loading}
-            onClick={() => run('eur')}
-            className={btn}
+            title="Download original Deco PDF without EUR conversion"
+            disabled={loading}
+            onClick={() => run(true)}
+            className={link}
           >
-            {loading === 'eur' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Euro className="w-3 h-3" />}
-            EUR PDF
+            GBP original
           </button>
         )}
       </div>
       {err && (
-        <span className="text-[10px] text-red-500 max-w-[200px] leading-tight" title={err}>
-          {err.slice(0, 80)}
+        <span className="text-[10px] text-red-500 max-w-[220px] leading-tight" title={err}>
+          {err.slice(0, 100)}
         </span>
       )}
     </div>

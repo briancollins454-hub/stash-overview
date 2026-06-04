@@ -78,9 +78,9 @@ const InvoiceSettingsModal: React.FC<Props> = ({ isDark, onClose, onSaved, curre
                   onChange={(e) => setConfig((c) => ({ ...c, eurInvoicesEnabled: e.target.checked }))}
                 />
                 <span>
-                  <span className="font-semibold block">Enable EUR invoice PDF</span>
+                  <span className="font-semibold block">Convert Deco invoice to EUR on download</span>
                   <span className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Shows “Download EUR” on Finance and Unpaid Orders. Off by default.
+                    Same Deco PDF layout — Stash replaces £ amounts with €. Off by default. Use “GBP original” for the unconverted file.
                   </span>
                 </span>
               </label>
@@ -113,7 +113,7 @@ const InvoiceSettingsModal: React.FC<Props> = ({ isDark, onClose, onSaved, curre
                 />
               </div>
               <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                “Download Deco PDF” is always available — original branded invoice from DecoNetwork (GBP).
+                When off, downloads are the standard Deco GBP invoice. When on, one amended Deco invoice — not a separate Stash document.
               </p>
             </>
           )}
