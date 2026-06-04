@@ -40,17 +40,25 @@ type TextOverlay = {
   newText: string;
 };
 
+/** pdfjs v6 rejects Node Buffer (even though Buffer extends Uint8Array). */
+function toPdfBytes(input: Uint8Array | Buffer): Uint8Array {
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(input)) {
+    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  }
+  return input.slice();
+}
+
 /**
  * Amends a DecoNetwork invoice PDF in place: finds £ / GBP amounts via text
  * positions and overwrites with € equivalents. Layout and branding stay Deco’s.
  */
 export async function amendDecoPdfToEur(
-  pdfBytes: Uint8Array,
+  pdfBytes: Uint8Array | Buffer,
   rate: number,
   rateNote: string,
 ): Promise<Uint8Array> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const data = pdfBytes.slice();
+  const data = toPdfBytes(pdfBytes);
 
   const doc = await pdfjs.getDocument({
     data,
@@ -82,7 +90,7 @@ export async function amendDecoPdfToEur(
     }
   }
 
-  const libDoc = await PDFDocument.load(pdfBytes);
+  const libDoc = await PDFDocument.load(data);
   const font = await libDoc.embedFont(StandardFonts.Helvetica);
   const pages = libDoc.getPages();
 

@@ -64,7 +64,8 @@ export async function downloadDecoInvoicePdf(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.ok || typeof data.base64 !== 'string') {
-    throw new Error(data?.error || data?.details || `Download failed (${res.status})`);
+    const msg = [data?.error, data?.details].filter(Boolean).join(': ') || `Download failed (${res.status})`;
+    throw new Error(msg);
   }
   const safe = id.replace(/[^a-zA-Z0-9._-]+/g, '-');
   const suffix = data.currency === 'eur' ? '-EUR' : '';
