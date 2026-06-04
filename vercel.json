@@ -4,7 +4,10 @@
     "api/mcp/oauth/authorize.ts": { "maxDuration": 30 },
     "api/mcp/oauth/token.ts": { "maxDuration": 30 },
     "api/mcp/oauth/register.ts": { "maxDuration": 15 },
-    "api/deco.ts": { "maxDuration": 60 },
+    "api/deco.ts": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/@napi-rs/canvas/**"
+    },
     "api/inventory.ts": { "maxDuration": 60 },
     "api/stock.ts": { "maxDuration": 60 },
     "api/shopify.ts": { "maxDuration": 60 },

@@ -21,6 +21,7 @@
   "dependencies": {
     "@google/genai": "^1.37.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/canvas": "^1.0.0",
     "@supabase/supabase-js": "^2.103.3",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",

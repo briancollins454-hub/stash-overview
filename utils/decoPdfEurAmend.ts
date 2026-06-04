@@ -1,4 +1,5 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { loadPdfJs } from './pdfjsNode.js';
 
 const GBP_IN_POUND = /£\s*([\d,]+\.\d{2})/g;
 const GBP_SUFFIX = /([\d,]+\.\d{2})\s*GBP\b/gi;
@@ -57,7 +58,7 @@ export async function amendDecoPdfToEur(
   rate: number,
   rateNote: string,
 ): Promise<Uint8Array> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await loadPdfJs();
   const data = toPdfBytes(pdfBytes);
 
   const doc = await pdfjs.getDocument({
