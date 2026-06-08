@@ -15,6 +15,29 @@ export function shopifyLineRemainingQuantity(item: ShopifyLineItem): number {
   return Math.max(0, q - fulfilled);
 }
 
+/** Line fully shipped in Shopify (may still appear on partial orders). */
+export function isShopifyLineFullyShipped(item: ShopifyLineItem): boolean {
+  if ((item.itemStatus || '').toLowerCase() === 'fulfilled') return true;
+  const qty = Math.max(0, Number(item.quantity) || 0);
+  const fulfilled = Math.max(0, Number(item.fulfilledQuantity) || 0);
+  return qty > 0 && fulfilled >= qty;
+}
+
+/** Short product label for partial-shipment summaries. */
+export function shopifyLineShortName(name: string, maxLen = 32): string {
+  const base = (name || 'Item').split(' - ')[0]?.trim() || name || 'Item';
+  return base.length > maxLen ? `${base.slice(0, maxLen - 1)}…` : base;
+}
+
+/** Human-readable shipped qty, e.g. "2/4" or "1". */
+export function shopifyLineShippedQtyLabel(item: ShopifyLineItem): string {
+  const qty = Math.max(0, Number(item.quantity) || 0);
+  const shipped = Math.max(0, Number(item.fulfilledQuantity) || (isShopifyLineFullyShipped(item) ? qty : 0));
+  if (qty <= 0) return '';
+  if (shipped >= qty) return `${qty}`;
+  return `${shipped}/${qty}`;
+}
+
 /**
  * Line items that should appear on the dashboard, mapping UI, and picking sheets.
  * Excludes fulfilled, restocked, zero-current-qty, Shopify-removed lines, and lines

@@ -462,8 +462,8 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (100%) — Complete`);
 
     return allRawOrders.map((o: any) => {
-        const mappedItems = mapLineItemsFromOrderNode(o);
         const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: fStatus === 'partial' });
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
@@ -519,8 +519,8 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
             pageCount++;
         }
         return allRawOrders.map((o: any) => {
-            const mappedItems = mapLineItemsFromOrderNode(o);
             const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+            const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: fStatus === 'partial' });
             const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
             const sa = o.shippingAddress;
             const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
@@ -817,9 +817,9 @@ export const fetchSingleShopifyOrder = async (
         const o = json.data?.order;
         if (!o) return null;
 
-        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: opts.includeFulfilled });
-
         const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+        const includeFulfilled = opts.includeFulfilled ?? fStatus === 'partial';
+        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled });
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;

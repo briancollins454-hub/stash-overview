@@ -2,7 +2,12 @@ import React, { useMemo, useState, useEffect, useCallback, Suspense, lazy } from
 import { UnifiedOrder, DecoJob } from '../types';
 import { ApiSettings } from './SettingsModal';
 import { isEligibleForMapping } from '../services/apiService';
-import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
+import {
+  isShopifyLineFullyShipped,
+  isShopifyLineItemActiveForOps,
+  shopifyLineShippedQtyLabel,
+  shopifyLineShortName,
+} from '../services/shopifyLineItems';
 import { isHiddenFromDefaultDashboard } from '../services/shopifyOrderStatus';
 import { getTrackingUrl } from '../services/shipstationService';
 import { 
@@ -776,6 +781,14 @@ const OrderTable: React.FC<OrderTableProps> = ({
                     const mtoColor = getProgressColor(order.mtoDaysRemaining || 0);
 
                     const linkedPct = order.mappedPercentage ?? 0;
+                    const opsEligible = (item: (typeof order.shopify.items)[number]) =>
+                      isEligibleForMapping(item.name, item.productType);
+                    const shippedLines = order.shopify.items.filter(
+                      (i) => opsEligible(i) && isShopifyLineFullyShipped(i),
+                    );
+                    const openLines = order.shopify.items.filter(
+                      (i) => opsEligible(i) && isShopifyLineItemActiveForOps(i),
+                    );
 
                     // Check if any mapped items in this order were matched by EAN barcode
                     const hasEanMatch = eanIndex && eanIndex.size > 0 && order.shopify.items.some(sItem => {
@@ -932,6 +945,21 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                     {shopifyLink && <ExternalLink className="w-3 h-3 opacity-50" />}
                                 </span>
                              </div>
+                             {order.shopify.fulfillmentStatus === 'partial' && shippedLines.length > 0 && (
+                                <div className="mt-1.5 max-w-[220px] text-[9px] text-emerald-800 font-bold leading-snug">
+                                  <span className="inline-flex items-center gap-1 uppercase tracking-wide text-emerald-700">
+                                    <Truck className="w-3 h-3 shrink-0" /> Shipped
+                                  </span>
+                                  <span className="block mt-0.5 font-medium normal-case text-emerald-900/90">
+                                    {shippedLines.map((i) => `${shopifyLineShortName(i.name)} (${shopifyLineShippedQtyLabel(i)})`).join(' · ')}
+                                  </span>
+                                  {openLines.length > 0 && (
+                                    <span className="block mt-0.5 text-amber-800 font-bold uppercase tracking-wide text-[8px]">
+                                      {openLines.length} line{openLines.length === 1 ? '' : 's'} still open
+                                    </span>
+                                  )}
+                                </div>
+                             )}
                              {order.shipStationTracking && (
                                 <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase tracking-widest bg-blue-100 text-blue-700 rounded border border-blue-200">
                                     <Package className="w-2.5 h-2.5" /> {order.shipStationTracking.carrier}
@@ -1061,7 +1089,39 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100">
-                                                {order.shopify.items.filter(item => isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item)).map((item, idx) => {
+                                                {shippedLines.length > 0 && (
+                                                  <tr className="bg-emerald-50/60">
+                                                    <td colSpan={9} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-emerald-800">
+                                                      <span className="inline-flex items-center gap-1.5">
+                                                        <Truck className="w-3.5 h-3.5" /> Already shipped in Shopify
+                                                      </span>
+                                                    </td>
+                                                  </tr>
+                                                )}
+                                                {shippedLines.map((item, idx) => (
+                                                  <tr key={`shipped-${idx}`} className="bg-emerald-50/30 text-gray-500">
+                                                    <td className="px-4 py-2.5">
+                                                      <div className="font-bold text-sm text-gray-600 line-through decoration-gray-400">{item.name}</div>
+                                                      <div className="text-[10px] text-emerald-700 font-bold uppercase tracking-widest">{item.sku}</div>
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-center text-sm font-bold text-emerald-700">
+                                                      {shopifyLineShippedQtyLabel(item)}
+                                                    </td>
+                                                    <td colSpan={7} className="px-4 py-2.5">
+                                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-200 bg-emerald-100 text-[9px] font-black uppercase tracking-widest text-emerald-800">
+                                                        <CheckCircle2 className="w-3 h-3" /> Shipped
+                                                      </span>
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                                {openLines.length > 0 && shippedLines.length > 0 && (
+                                                  <tr className="bg-amber-50/50">
+                                                    <td colSpan={9} className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-amber-900">
+                                                      Still to fulfill
+                                                    </td>
+                                                  </tr>
+                                                )}
+                                                {openLines.map((item, idx) => {
                                                     const isPartialItem = item.fulfilledQuantity !== undefined && item.fulfilledQuantity > 0 && item.fulfilledQuantity < item.quantity;
                                                     const isFullItem = item.fulfilledQuantity === item.quantity;
                                                     const isMtoItem = item.name.toLowerCase().includes('mto');
