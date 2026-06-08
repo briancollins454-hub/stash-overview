@@ -42,6 +42,9 @@ export const ITEM_READINESS_LABEL: Record<ItemReadiness, string> = {
   fulfilled: 'Fulfilled',
 };
 
+/** Deco statuses where production is done and the job is waiting to leave — not Shipped yet. */
+export const DECO_READY_TO_DISPATCH = new Set(['Ready for Shipping', 'Completed']);
+
 export type OrderReadinessSummary = {
   label: string;
   awaitingStockCount: number;
@@ -70,11 +73,10 @@ export function deriveOrderProductionStatus(
   const trackedCount = tracked.length;
 
   const allDispatchReady = trackedCount > 0 && tracked.every((i) => isItemReadyForDispatch(i));
-  /** Ready to ship = needs dispatch now — not already Shipped/Completed in Deco. */
   const isReadyToShip =
     allDispatchReady &&
     awaitingStockCount === 0 &&
-    decoJobStatus === 'Ready for Shipping';
+    DECO_READY_TO_DISPATCH.has(decoJobStatus);
 
   if (trackedCount === 0) {
     return {
@@ -83,7 +85,7 @@ export function deriveOrderProductionStatus(
       inProductionCount: 0,
       readyToShipCount: 0,
       trackedCount: 0,
-      isReadyToShip: decoJobStatus === 'Ready for Shipping',
+      isReadyToShip: DECO_READY_TO_DISPATCH.has(decoJobStatus),
     };
   }
 
@@ -158,7 +160,7 @@ export function deriveOrderProductionStatus(
     inProductionCount,
     readyToShipCount,
     trackedCount,
-    isReadyToShip: decoJobStatus === 'Ready for Shipping',
+    isReadyToShip: DECO_READY_TO_DISPATCH.has(decoJobStatus),
   };
 }
 
