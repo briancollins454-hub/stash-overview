@@ -70,20 +70,20 @@ export function deriveOrderProductionStatus(
   const trackedCount = tracked.length;
 
   const allDispatchReady = trackedCount > 0 && tracked.every((i) => isItemReadyForDispatch(i));
+  /** Ready to ship = needs dispatch now — not already Shipped/Completed in Deco. */
   const isReadyToShip =
     allDispatchReady &&
     awaitingStockCount === 0 &&
-    ['Ready for Shipping', 'Shipped', 'Completed', 'Invoiced'].includes(decoJobStatus);
+    decoJobStatus === 'Ready for Shipping';
 
   if (trackedCount === 0) {
-    const fallbackReady = ['Ready for Shipping', 'Shipped', 'Completed', 'Invoiced'].includes(decoJobStatus);
     return {
       label: decoJobStatus,
       awaitingStockCount: 0,
       inProductionCount: 0,
       readyToShipCount: 0,
       trackedCount: 0,
-      isReadyToShip: fallbackReady,
+      isReadyToShip: decoJobStatus === 'Ready for Shipping',
     };
   }
 
@@ -121,12 +121,12 @@ export function deriveOrderProductionStatus(
       };
     }
     return {
-      label: isReadyToShip ? decoJobStatus : 'Ready for Shipping',
+      label: isReadyToShip ? 'Ready for Shipping' : decoJobStatus,
       awaitingStockCount,
       inProductionCount,
       readyToShipCount,
       trackedCount,
-      isReadyToShip: isReadyToShip || decoJobStatus === 'Ready for Shipping',
+      isReadyToShip,
     };
   }
 
@@ -158,7 +158,7 @@ export function deriveOrderProductionStatus(
     inProductionCount,
     readyToShipCount,
     trackedCount,
-    isReadyToShip: ['Ready for Shipping', 'Shipped', 'Completed', 'Invoiced'].includes(decoJobStatus),
+    isReadyToShip: decoJobStatus === 'Ready for Shipping',
   };
 }
 
