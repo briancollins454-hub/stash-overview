@@ -3,8 +3,10 @@ import { UnifiedOrder, DecoJob } from '../types';
 import { ApiSettings } from './SettingsModal';
 import { isEligibleForMapping } from '../services/apiService';
 import {
+  isPersonalizationAddonLine,
   isShopifyLineFullyShipped,
   isShopifyLineItemActiveForOps,
+  isShopifyLinePickable,
   shopifyLineShippedQtyLabel,
   shopifyLineShortName,
 } from '../services/shopifyLineItems';
@@ -786,8 +788,9 @@ const OrderTable: React.FC<OrderTableProps> = ({
                     const shippedLines = order.shopify.items.filter(
                       (i) => opsEligible(i) && isShopifyLineFullyShipped(i),
                     );
-                    const openLines = order.shopify.items.filter(
-                      (i) => opsEligible(i) && isShopifyLineItemActiveForOps(i),
+                    const openLines = order.shopify.items.filter((i) => opsEligible(i) && isShopifyLinePickable(i));
+                    const addonOpenLines = order.shopify.items.filter(
+                      (i) => opsEligible(i) && isPersonalizationAddonLine(i) && isShopifyLineItemActiveForOps(i),
                     );
 
                     // Check if any mapped items in this order were matched by EAN barcode
@@ -956,6 +959,11 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                   {openLines.length > 0 && (
                                     <span className="block mt-0.5 text-amber-800 font-bold uppercase tracking-wide text-[8px]">
                                       {openLines.length} line{openLines.length === 1 ? '' : 's'} still open
+                                    </span>
+                                  )}
+                                  {openLines.length === 0 && addonOpenLines.length > 0 && (
+                                    <span className="block mt-0.5 text-slate-600 font-bold tracking-wide text-[8px]">
+                                      Garment shipped — {addonOpenLines.map((i) => shopifyLineShortName(i.name)).join(', ')} is a personalization add-on in Shopify only
                                     </span>
                                   )}
                                 </div>

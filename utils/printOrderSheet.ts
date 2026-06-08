@@ -1,7 +1,11 @@
 import { UnifiedOrder } from '../types';
 import { getNotesForOrder } from '../services/notesService';
 import {
+  isEligibleForMapping,
+  isPersonalizationAddonLine,
+  isShopifyLineFullyShipped,
   isShopifyLineItemActiveForOps,
+  isShopifyLinePickable,
   shopifyLineRemainingQuantity,
 } from '../services/shopifyLineItems';
 
@@ -81,8 +85,13 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
   const notes = getNotesForOrder(order.shopify.id);
   const daysLeft = order.daysRemaining;
   const isOverdue = daysLeft < 0;
-  const unfulfilledItems = items.filter(i => isShopifyLineItemActiveForOps(i));
-  const fulfilledItems = items.filter(i => !isShopifyLineItemActiveForOps(i));
+  const unfulfilledItems = items.filter((i) => isShopifyLinePickable(i));
+  const fulfilledItems = items.filter(
+    (i) => isShopifyLineFullyShipped(i) && isEligibleForMapping(i.name, i.productType),
+  );
+  const addonOnlyOpen = items.filter(
+    (i) => isPersonalizationAddonLine(i) && isShopifyLineItemActiveForOps(i),
+  );
 
   const css = [
     '* { margin: 0; padding: 0; box-sizing: border-box; }',
@@ -207,10 +216,19 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
       itemTableHead + '<tbody>' + fulfilledItems.map(i => renderItemRow(i, 'fulfilled')).join('') + '</tbody></table>';
   }
 
-  // Fallback: show all items if none matched either filter
-  if (unfulfilledItems.length === 0 && fulfilledItems.length === 0) {
+  let addonNote = '';
+  if (unfulfilledItems.length === 0 && addonOnlyOpen.length > 0) {
+    addonNote =
+      '<div class="section-title" style="color:#64748b;border-color:#94a3b8;">Personalization add-on open in Shopify only (do not pick) — ' +
+      addonOnlyOpen.map((i) => escapeHtml(i.name)).join(', ') +
+      '. Mark fulfilled in Shopify with the garment.</div>';
+  }
+
+  // Fallback: show all pickable items if none matched either filter
+  if (unfulfilledItems.length === 0 && fulfilledItems.length === 0 && addonOnlyOpen.length === 0) {
+    const pickable = items.filter((i) => isEligibleForMapping(i.name, i.productType));
     unfulfilledSection = '<div class="section-title">Line Items</div><table class="items-table">' +
-      itemTableHead + '<tbody>' + items.map(i => renderItemRow(i, 'unfulfilled')).join('') + '</tbody></table>';
+      itemTableHead + '<tbody>' + pickable.map((i) => renderItemRow(i, 'unfulfilled')).join('') + '</tbody></table>';
   }
 
   // Payment Details
@@ -250,6 +268,7 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     countdownHtml +
     unfulfilledSection +
     fulfilledSection +
+    addonNote +
     paymentHtml +
     noteHtml +
     savedNotesHtml +

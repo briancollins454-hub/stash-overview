@@ -38,6 +38,35 @@ export function shopifyLineShippedQtyLabel(item: ShopifyLineItem): string {
   return `${shipped}/${qty}`;
 }
 
+/** Personalization / add-on lines (ADD NAME, initials, etc.) — not physical pick lines. */
+export function isEligibleForMapping(itemName: string, productType?: string): boolean {
+  const name = itemName.toLowerCase();
+  const type = (productType || '').toLowerCase();
+  if (type.includes('service')) return false;
+  const exclusions = [
+    'add name',
+    'add initials',
+    'add squad number',
+    'free initials',
+    'personalisation',
+    'personalization',
+    'customisation',
+    'customization',
+    'printing service',
+    'embroidery service',
+  ];
+  return !exclusions.some((exc) => name.includes(exc));
+}
+
+export function isPersonalizationAddonLine(item: ShopifyLineItem): boolean {
+  return !isEligibleForMapping(item.name, item.productType);
+}
+
+/** Physical lines warehouse should pick, map, and track — excludes personalization add-ons. */
+export function isShopifyLinePickable(item: ShopifyLineItem): boolean {
+  return isEligibleForMapping(item.name, item.productType) && isShopifyLineItemActiveForOps(item);
+}
+
 /**
  * Line items that should appear on the dashboard, mapping UI, and picking sheets.
  * Excludes fulfilled, restocked, zero-current-qty, Shopify-removed lines, and lines

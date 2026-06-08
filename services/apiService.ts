@@ -2,7 +2,9 @@ import { DecoJob, ShopifyOrder, DecoItem } from '../types';
 import { normalizeDecoCancelStatusString } from './decoJobFilters';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
-import { mapLineItemsFromOrderNode } from './shopifyLineItems';
+import { isEligibleForMapping, mapLineItemsFromOrderNode } from './shopifyLineItems';
+
+export { isEligibleForMapping };
 import { mapShopifyFulfillmentStatusForStash } from './shopifyOrderStatus';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
@@ -20,14 +22,6 @@ export const standardizeSize = (size: string): string => {
       '4xl': '4XL', 'xs': 'XS', 'xsmall': 'XS', 'one': 'ONE', 'onesize': 'ONE'
     };
     return map[s] || size.toUpperCase();
-};
-
-export const isEligibleForMapping = (itemName: string, productType?: string): boolean => {
-    const name = itemName.toLowerCase();
-    const type = (productType || '').toLowerCase();
-    if (type.includes('service')) return false;
-    const exclusions = ['add name', 'add initials', 'personalisation', 'personalization', 'customisation', 'customization', 'printing service', 'embroidery service'];
-    return !exclusions.some(exc => name.includes(exc));
 };
 
 const mapDecoStatus = (status: string | number): string => {

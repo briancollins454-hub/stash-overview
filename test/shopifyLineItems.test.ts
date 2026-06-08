@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isEligibleForMapping,
+  isPersonalizationAddonLine,
   isShopifyLineFullyShipped,
+  isShopifyLinePickable,
   mapGraphQLLineItemNode,
   shopifyLineShippedQtyLabel,
   shopifyLineShortName,
@@ -23,6 +26,21 @@ describe('shopifyLineItems partial fulfillment', () => {
     );
     expect(line?.itemStatus).toBe('fulfilled');
     expect(isShopifyLineFullyShipped(line!)).toBe(true);
+  });
+
+  it('excludes personalization add-ons from pick lists', () => {
+    expect(isEligibleForMapping('ADD NAME - AJG')).toBe(false);
+    const addon = {
+      id: '1',
+      name: 'ADD NAME - AJG',
+      quantity: 1,
+      sku: '',
+      itemStatus: 'unfulfilled' as const,
+      fulfillableQuantity: 1,
+      fulfilledQuantity: 0,
+    };
+    expect(isPersonalizationAddonLine(addon as any)).toBe(true);
+    expect(isShopifyLinePickable(addon as any)).toBe(false);
   });
 
   it('formats shipped qty labels', () => {
