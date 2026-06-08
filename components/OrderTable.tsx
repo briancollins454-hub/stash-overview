@@ -19,6 +19,8 @@ const OrderMappingModal = lazy(() => import('./OrderMappingModal'));
 import JobIdBadge from './JobIdBadge';
 import { printOrderSheet, printOrderSheets } from '../utils/printOrderSheet';
 import { enrichOrderForPrint } from '../utils/enrichOrderForPrint';
+import { ITEM_READINESS_LABEL, getItemReadinessBadgeClass } from '../utils/orderReadiness';
+import type { ItemReadiness } from '../types';
 
 // --- Types ---
 
@@ -535,7 +537,9 @@ const OrderTable: React.FC<OrderTableProps> = ({
       if (s === 'unknown') return 'bg-gray-50 text-gray-400 border-gray-200 italic font-medium';
       if (s === 'awaiting deco data...' || s === 'awaiting deco detail...') return 'bg-indigo-50 text-indigo-400 border-indigo-100 italic animate-pulse-sync';
       if (s === 'cancelled' || s === 'canceled' || s === 'on hold') return 'bg-red-100 text-red-700 border-red-300';
+      if (s.includes('partial')) return 'bg-amber-50 text-amber-900 border-amber-300';
       if (s.includes('awaiting stock')) return 'bg-amber-100 text-amber-800 border-amber-200';
+      if (s.includes('pending deco check-in')) return 'bg-emerald-50 text-emerald-800 border-emerald-200';
       if (s.includes('quote') || s.includes('artwork') || s.includes('po')) return 'bg-orange-50 text-orange-800 border-orange-200';
       if (s.includes('production') || s.includes('awaiting processing') || s.includes('quality') || s.includes('process')) return 'bg-blue-50 text-blue-800 border-blue-200';
       if (s.includes('shipped') || s.includes('completed') || s.includes('ready')) return 'bg-green-100 text-green-800 border-green-200';
@@ -756,7 +760,9 @@ const OrderTable: React.FC<OrderTableProps> = ({
               <tbody className="divide-y divide-gray-200">
                 {ordersInGroup.map((order) => {
                     const liveProductionStatus = order.productionStatus;
-                    const isReadyToShip = ['Ready for Shipping', 'Shipped', 'Completed'].includes(liveProductionStatus);
+                    const isReadyToShip = !!order.isOrderReadyToShip;
+                    const hasPartialReadiness =
+                      (order.awaitingStockCount ?? 0) > 0 && (order.readyToShipItemCount ?? 0) > 0;
                     const isLate = order.daysRemaining < 0;
                     const shopifyLink = shopifyDomain ? `https://${shopifyDomain}/admin/orders/${order.shopify.id.split('/').pop()}` : '';
                     
@@ -933,10 +939,22 @@ const OrderTable: React.FC<OrderTableProps> = ({
                              )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                             <span className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-full border uppercase tracking-widest ${statusBadgeClass}`}>
-                                {isReadyToShip && <Truck className="w-3 h-3" />}
-                                {liveProductionStatus}
-                            </span>
+                             <div className="flex flex-col gap-0.5">
+                               <span className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold rounded-full border uppercase tracking-widest w-fit ${statusBadgeClass}`}>
+                                  {isReadyToShip && <Truck className="w-3 h-3" />}
+                                  {liveProductionStatus}
+                               </span>
+                               {hasPartialReadiness && (
+                                 <span className="text-[9px] text-amber-700 font-bold tracking-wide">
+                                   {order.readyToShipItemCount} ready · {order.awaitingStockCount} awaiting stock
+                                 </span>
+                               )}
+                               {order.decoJobStatus && order.decoJobStatus !== liveProductionStatus && (
+                                 <span className="text-[8px] text-gray-400 font-medium tracking-wide" title="Raw Deco job status">
+                                   Deco: {order.decoJobStatus}
+                                 </span>
+                               )}
+                             </div>
                         </td>
                          <td className="px-6 py-4 whitespace-nowrap w-56">
                             <div className="flex flex-col gap-2">
@@ -1015,6 +1033,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                     <th className="px-4 py-2 text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest">Qty</th>
                                                     <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest">SKU & Individual Job</th>
                                                     <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest">Shopify Status</th>
+                                                    <th className="px-4 py-2 text-left text-[10px] font-bold text-gray-500 uppercase tracking-widest">Deco Readiness</th>
                                                     <th className="px-4 py-2 text-center w-20">
                                                         <div className="flex flex-col items-center gap-1">
                                                             <ClipboardList className="w-4 h-4 text-gray-500" />
@@ -1048,6 +1067,7 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                     const isMtoItem = item.name.toLowerCase().includes('mto');
                                                     const isNoMap = item.linkedDecoItemId === '__NO_MAP__';
                                                     const isFulfilled = item.itemStatus === 'fulfilled';
+                                                    const readiness = (item.readinessStatus || 'unmapped') as ItemReadiness;
                                                     
                                                     return (
                                                     <tr key={idx} className={`transition-colors ${isFulfilled ? 'bg-emerald-50/20 opacity-70' : 'hover:bg-gray-50'}`}>
@@ -1125,6 +1145,11 @@ const OrderTable: React.FC<OrderTableProps> = ({
                                                                     <div className="text-gray-400 mt-0.5 border-t border-indigo-100/50 pt-0.5">Date: {new Date(item.tracking.date).toLocaleDateString()}</div>
                                                                 </div>
                                                             )}
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span className={`inline-block px-2 py-1 text-[9px] font-bold rounded border uppercase tracking-widest ${getItemReadinessBadgeClass(readiness)}`}>
+                                                                {ITEM_READINESS_LABEL[readiness]}
+                                                            </span>
                                                         </td>
                                                         <td className="px-4 py-3 text-center bg-gray-50/50">
                                                             {isNoMap || isFulfilled ? <span className="text-[8px] font-black text-slate-400">N/A</span> : <WorkflowStatusCell type="ordered" status={item.procurementStatus || (item.decoStatus ? 60 : 0)} />}

@@ -1,3 +1,11 @@
+export type ItemReadiness =
+  | 'unmapped'
+  | 'no_map'
+  | 'awaiting_stock'
+  | 'in_production'
+  | 'ready_to_ship'
+  | 'shipped'
+  | 'fulfilled';
 
 export interface PhysicalStockItem {
   id: string;
@@ -124,6 +132,8 @@ export interface ShopifyOrder {
       url: string;
       date: string;
     };
+    /** Derived from mapped Deco workflow — awaiting stock vs ready to ship, etc. */
+    readinessStatus?: ItemReadiness;
   }[];
   tags: string[]; // Used for Club Shop identification
 }
@@ -208,6 +218,13 @@ export interface UnifiedOrder {
   deco?: DecoJob;
   matchStatus: 'linked' | 'unlinked';
   productionStatus: ProductionStatus;
+  /** Raw Deco job status before item-level refinement. */
+  decoJobStatus?: string;
+  awaitingStockCount?: number;
+  readyToShipItemCount?: number;
+  inProductionItemCount?: number;
+  /** True when every mapped line is dispatch-ready and none are awaiting stock. */
+  isOrderReadyToShip?: boolean;
   completionPercentage: number;
   stockCompletionPercentage: number;
   mtoCompletionPercentage: number;

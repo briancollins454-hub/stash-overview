@@ -28,6 +28,11 @@ import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getItem as getLocalItem, setItem as setLocalItem, clearAll as clearLocalDB } from './services/localStore';
 import { UnifiedOrder, DecoJob, DecoItem, ShopifyOrder, PhysicalStockItem, ReturnStockItem, ReferenceProduct } from './types';
+import {
+  deriveOrderProductionStatus,
+  getMappedItemReadiness,
+  isItemReadyForDispatch,
+} from './utils/orderReadiness';
 import { autoMatch } from './services/autoMatchService';
 import OrderTable from './components/OrderTable';
 import SettingsModal, { ApiSettings, HolidayRange } from './components/SettingsModal';
@@ -321,7 +326,7 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
  * the dashboard double-counts.
  */
 const isReadyToShip = (o: UnifiedOrder): boolean =>
-    !!((o.decoJobId && (o.eligibleCount ?? 0) > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
+    !!(o.isOrderReadyToShip || o.isStockDispatchReady);
 
 const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
@@ -1795,7 +1800,7 @@ const App: React.FC = () => {
                   }
               }
 
-              return {
+              const enriched = {
                   ...item,
                   itemDecoJobId: effectiveJobId,
                   itemDecoData: effectiveJob,
@@ -1807,15 +1812,16 @@ const App: React.FC = () => {
                   procurementStatus: matchedDeco?.procurementStatus,
                   productionStatus: matchedDeco?.productionStatus,
                   shippingStatus: matchedDeco?.shippingStatus,
-                  candidateDecoItems: effectiveJob?.items || []
+                  candidateDecoItems: effectiveJob?.items || [],
               };
+              return { ...enriched, readinessStatus: getMappedItemReadiness(enriched) };
           });
 
           const eligibleItems = mappedItems.filter(i => isEligibleForMapping(i.name, i.productType) && isShopifyLineItemActiveForOps(i));
           const stockItems = eligibleItems.filter(i => !i.name.toLowerCase().includes('mto'));
           const mtoItems = eligibleItems.filter(i => i.name.toLowerCase().includes('mto'));
           
-          const isReady = (i: any) => i.decoProduced || i.decoShipped || i.linkedDecoItemId === '__NO_MAP__';
+          const isReady = (i: typeof mappedItems[number]) => isItemReadyForDispatch(i);
           
           // Refined "Stock Ready" logic:
           // Must have at least one unfulfilled stock item, AND all such stock items must be ready,
@@ -1856,11 +1862,18 @@ const App: React.FC = () => {
               : order.fulfillmentStatus;
           const effectiveClosedAt = isPhysicallyShipped && !order.closedAt ? (decoJob?.productionDueDate || order.date) : order.closedAt;
 
+          const readiness = deriveOrderProductionStatus(currentStatus, eligibleItems);
+
           return {
               shopify: { ...order, fulfillmentStatus: effectiveFulfillmentStatus, items: mappedItems },
               deco: decoJob,
               matchStatus: (decoJob || resolvedDecoJobId) ? 'linked' : 'unlinked',
-              productionStatus: currentStatus,
+              productionStatus: readiness.label,
+              decoJobStatus: currentStatus,
+              awaitingStockCount: readiness.awaitingStockCount,
+              readyToShipItemCount: readiness.readyToShipCount,
+              inProductionItemCount: readiness.inProductionCount,
+              isOrderReadyToShip: readiness.isReadyToShip,
               completionPercentage: eligibleItems.length > 0 ? Math.round((eligibleItems.filter(i => i.itemStatus === 'fulfilled' || isReady(i)).length / eligibleItems.length) * 100) : 100,
               stockCompletionPercentage: stockItems.length > 0 ? Math.round((stockItems.filter(i => i.itemStatus === 'fulfilled' || isReady(i)).length / stockItems.length) * 100) : 100,
               mtoCompletionPercentage: mtoItems.length > 0 ? Math.round((mtoItems.filter(i => i.itemStatus === 'fulfilled' || i.readyMtoCount || isReady(i)).length / mtoItems.length) * 100) : 100,
