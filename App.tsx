@@ -9,7 +9,7 @@ import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
 import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
-import { isShopifyLineItemActiveForOps, isShopifyLinePickable } from './services/shopifyLineItems';
+import { isShopifyLineItemActiveForOps } from './services/shopifyLineItems';
 import {
   canTreatOrderAsFulfilledFromProduction,
   isShopifyOrderClosedForCloud,
@@ -327,17 +327,11 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
  */
 const isReadyToShip = (o: UnifiedOrder): boolean => {
     const fs = (o.shopify.fulfillmentStatus || '').toLowerCase();
+    // Shopify fulfilled = actually left. Deco "Shipped" often means production done, not parcel sent.
     if (fs === 'fulfilled' || fs === 'refunded') return false;
-    const deco = o.decoJobStatus || '';
-    // Completed = production done, still needs dispatch. Shipped/Invoiced = already gone.
-    if (['Shipped', 'Invoiced'].includes(deco)) return false;
-    if (o.isStockDispatchReady || o.isOrderReadyToShip) return true;
-    // All mapped lines dispatch-ready (same bar as Order Complete) but not shipped out yet.
     return !!(
-        o.decoJobId &&
-        (o.eligibleCount ?? 0) > 0 &&
-        o.completionPercentage === 100 &&
-        (o.awaitingStockCount ?? 0) === 0
+        o.isStockDispatchReady ||
+        (o.decoJobId && (o.eligibleCount ?? 0) > 0 && o.completionPercentage === 100)
     );
 };
 
@@ -1862,12 +1856,9 @@ const App: React.FC = () => {
           // Segregate fully produced / dispatched orders out of the live queue.
           const hasShippingTracking = shipStationData.has(order.orderNumber);
           const isRefunded = order.fulfillmentStatus === 'refunded';
-          const pickableOpenCount = mappedItems.filter((i) => isShopifyLinePickable(i)).length;
-          const isDecoShippedOut = ['Shipped', 'Invoiced'].includes(currentStatus);
           const isPhysicallyShipped =
             !isRefunded && (
               order.fulfillmentStatus === 'fulfilled' ||
-              (isDecoShippedOut && pickableOpenCount === 0) ||
               (canTreatOrderAsFulfilledFromProduction(order.fulfillmentStatus) &&
                 (currentStatus === 'Shipped' ||
                   currentStatus === 'Invoiced' ||
