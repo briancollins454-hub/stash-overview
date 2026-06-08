@@ -3,6 +3,11 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import fetch, { RequestInit as FetchRequestInit } from "node-fetch";
 import crypto from "crypto";
+import {
+  fetchOrderByQuery,
+  labelPrinterCorsAllowed,
+  mapOrderToJob,
+} from "./utils/labelPrinter.js";
 
 // --- Structured Logger ---
 const log = {
@@ -266,6 +271,44 @@ async function startServer() {
       log.error('Deco API Error', { endpoint, error: error.message });
       res.status(500).json({ error: "Deco API call failed", details: error.message });
     }
+  });
+
+  app.post("/api/label-printer", async (req, res) => {
+    const origin = req.headers.origin || "";
+    if (labelPrinterCorsAllowed(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    const domain = process.env.DECO_DOMAIN?.trim();
+    const username = process.env.DECO_USERNAME?.trim();
+    const password = process.env.DECO_PASSWORD?.trim();
+    if (!domain || !username || !password) {
+      return res.status(500).json({ error: "Deco credentials not configured on server" });
+    }
+
+    const query = String(req.body?.query || "").trim();
+    if (!query) return res.status(400).json({ error: "Query is required" });
+
+    try {
+      const order = await fetchOrderByQuery(domain, username, password, query);
+      if (!order) return res.status(200).json({ job: null });
+      return res.status(200).json({ job: mapOrderToJob(order) });
+    } catch (error: any) {
+      log.error("Label printer lookup failed", { error: error.message });
+      return res.status(502).json({ error: "Failed to reach Deco API" });
+    }
+  });
+
+  app.options("/api/label-printer", (req, res) => {
+    const origin = req.headers.origin || "";
+    if (labelPrinterCorsAllowed(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.status(200).end();
   });
 
   // Domain allowlist for proxy (SSRF protection)

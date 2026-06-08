@@ -8,6 +8,7 @@
       "maxDuration": 60,
       "includeFiles": "node_modules/@napi-rs/canvas/**,node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
     },
+    "api/label-printer.ts": { "maxDuration": 30 },
     "api/inventory.ts": { "maxDuration": 60 },
     "api/stock.ts": { "maxDuration": 60 },
     "api/shopify.ts": { "maxDuration": 60 },

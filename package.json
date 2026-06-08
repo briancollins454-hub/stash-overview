@@ -16,7 +16,9 @@
     "mizuno:refresh-stock": "node scripts/mizuno-teamwear/refresh-scrape-stock.mjs",
     "mizuno:shopify-import": "node scripts/mizuno-teamwear/import-shopify-csv.mjs",
     "mizuno:syncx-xlsx": "python3 scripts/mizuno-teamwear/build-syncx-xlsx-from-shopify-export.py",
-    "mcp:stash": "tsx mcp/stash-stdio.ts"
+    "mcp:stash": "tsx mcp/stash-stdio.ts",
+    "label-printer:build": "npm install --prefix label-printer && npm run build --prefix label-printer",
+    "label-printer:dev": "npm install --prefix label-printer && npm run dev --prefix label-printer"
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
