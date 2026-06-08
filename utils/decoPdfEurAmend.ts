@@ -41,12 +41,12 @@ type TextOverlay = {
   newText: string;
 };
 
-/** pdfjs v6 rejects Node Buffer (even though Buffer extends Uint8Array). */
+/** Owned copy — pdfjs getDocument() can zero/transfer the buffer it receives. */
 function toPdfBytes(input: Uint8Array | Buffer): Uint8Array {
   if (typeof Buffer !== 'undefined' && Buffer.isBuffer(input)) {
-    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    return Uint8Array.from(input);
   }
-  return input.slice();
+  return Uint8Array.from(input);
 }
 
 /**
@@ -59,10 +59,13 @@ export async function amendDecoPdfToEur(
   rateNote: string,
 ): Promise<Uint8Array> {
   const pdfjs = await loadPdfJs();
-  const data = toPdfBytes(pdfBytes);
+  const original = toPdfBytes(pdfBytes);
+  if (original.byteLength < 5 || String.fromCharCode(...original.slice(0, 4)) !== '%PDF') {
+    throw new Error('Invalid PDF bytes (missing %PDF header)');
+  }
 
   const doc = await pdfjs.getDocument({
-    data,
+    data: original.slice(),
     useSystemFonts: true,
     disableFontFace: true,
   }).promise;
@@ -91,7 +94,7 @@ export async function amendDecoPdfToEur(
     }
   }
 
-  const libDoc = await PDFDocument.load(data);
+  const libDoc = await PDFDocument.load(original);
   const font = await libDoc.embedFont(StandardFonts.Helvetica);
   const pages = libDoc.getPages();
 
