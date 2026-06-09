@@ -97,6 +97,7 @@ const SalesAnalytics = lazyRetry(() => import('./components/SalesAnalytics'));
 const ShippedNotInvoiced = lazyRetry(() => import('./components/ShippedNotInvoiced'));
 const CreditBlockList = lazyRetry(() => import('./components/CreditBlockList'));
 const UnpaidOrders = lazyRetry(() => import('./components/UnpaidOrders'));
+const QuoteConverter = lazyRetry(() => import('./components/QuoteConverter'));
 const UserManagement = lazyRetry(() => import('./components/UserManagement'));
 const CommandCenter = lazyRetry(() => import('./components/CommandCenter'));
 const MorningBriefing = lazyRetry(() => import('./components/MorningBriefing'));
@@ -310,7 +311,7 @@ const GoogleUserManagement: React.FC<{ user: any }> = ({ user }) => {
     username: user.email || '',
     role: 'superuser',
     displayName: user.displayName || user.email || 'Admin',
-    allowedTabs: ['dashboard','command','kanban','intelligence','production','shop-floor','reports','operations','stock','inventory','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','sales','users','manual','alerts','settings','briefing','priority','digest','shipped-not-invoiced','credit-block','unpaid-orders'],
+    allowedTabs: ['dashboard','command','kanban','intelligence','production','shop-floor','reports','operations','stock','inventory','efficiency','mto','deco','revenue','autolink','fulfill','analyst','finance','sales','users','manual','alerts','settings','briefing','priority','digest','shipped-not-invoiced','credit-block','unpaid-orders','quotes'],
   };
 
   return <UserManagement currentUser={googleUser} firebaseIdToken={firebaseIdToken} />;
@@ -339,7 +340,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'cloud-health', 'issues', 'wholesale', 'rota'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'quotes', 'cloud-health', 'issues', 'wholesale', 'rota'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -2856,7 +2857,7 @@ const App: React.FC = () => {
                   { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'production-pack', label: 'Production pack' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                   { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
-                  { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
+                  { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'quotes', label: 'Quotes' }, { id: 'digest', label: 'Email Digest' }] },
                   { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
                   { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                 ].map(group => {
@@ -2953,7 +2954,7 @@ const App: React.FC = () => {
                       { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'production-pack', label: 'Production pack' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
                       { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
-                      { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'digest', label: 'Email Digest' }] },
+                      { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'quotes', label: 'Quotes' }, { id: 'digest', label: 'Email Digest' }] },
                       { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
                       { group: 'ADMIN', tabs: [{ id: 'users', label: 'User Management' }, { id: 'cloud-health', label: 'Cloud Health' }] },
                     ].map(group => {
@@ -3641,6 +3642,18 @@ const App: React.FC = () => {
                     isDark={isDark}
                     settings={apiSettings}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('deco'); }}
+                    currentUserEmail={isCustomUser ? (customUserData?.username || '') : (user?.email || '')}
+                  />
+                </ErrorBoundary>
+              </Suspense>
+            )}
+
+            {/* Quotes Tab */}
+            {activeTab === 'quotes' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <ErrorBoundary fallbackTitle="Quotes Error">
+                  <QuoteConverter
+                    isDark={isDark}
                     currentUserEmail={isCustomUser ? (customUserData?.username || '') : (user?.email || '')}
                   />
                 </ErrorBoundary>
