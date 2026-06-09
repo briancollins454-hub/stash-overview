@@ -5,6 +5,7 @@ import {
   Printer, UserRound, CloudDownload, CalendarRange, Settings2,
 } from 'lucide-react';
 import DecoInvoiceDownloadButtons from './DecoInvoiceDownloadButtons';
+import DecoQuoteLookup from './DecoQuoteLookup';
 import InvoiceSettingsModal from './InvoiceSettingsModal';
 import { fetchInvoiceSettings } from '../services/decoInvoiceDownload';
 import type { InvoiceConfig } from '../utils/invoiceSettings';
@@ -1432,6 +1433,7 @@ const UnpaidOrders: React.FC<Props> = ({ decoJobs, isDark, settings, onNavigateT
           )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <DecoQuoteLookup invoiceConfig={invoiceConfig} isDark={isDark} />
           <button
             type="button"
             onClick={() => setShowInvoiceSettings(true)}

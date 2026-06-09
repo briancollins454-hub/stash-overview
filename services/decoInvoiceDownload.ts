@@ -45,10 +45,10 @@ export async function saveInvoiceSettings(
   return normalizeInvoiceConfig(data.config);
 }
 
-/** Download Deco invoice; converts to EUR in-place when enabled in invoice settings. */
+/** Download Deco invoice/quote; converts to EUR in-place when enabled in invoice settings. */
 export async function downloadDecoInvoicePdf(
   orderId: string,
-  options?: { forceGbp?: boolean },
+  options?: { forceGbp?: boolean; filenamePrefix?: string },
 ): Promise<void> {
   const id = String(orderId).trim();
   if (!id) throw new Error('Order number required');
@@ -69,5 +69,6 @@ export async function downloadDecoInvoicePdf(
   }
   const safe = id.replace(/[^a-zA-Z0-9._-]+/g, '-');
   const suffix = data.currency === 'eur' ? '-EUR' : '';
-  triggerPdfDownload(data.base64, `Deco-Invoice${suffix}-${safe}.pdf`);
+  const prefix = (options?.filenamePrefix || 'Deco-Invoice').replace(/[^a-zA-Z0-9._-]+/g, '-');
+  triggerPdfDownload(data.base64, `${prefix}${suffix}-${safe}.pdf`);
 }
