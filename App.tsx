@@ -436,7 +436,7 @@ const App: React.FC = () => {
   const { notify } = useNotifications();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [activeQuickFilter, setActiveQuickFilter] = useState<'missing_po' | 'ready' | 'order_complete' | 'stock_ready' | 'partially_ready' | 'late' | 'mapping_gap' | 'overdue5' | 'overdue10' | 'production_after_dispatch' | 'due_soon' | null>(null);
+  const [activeQuickFilter, setActiveQuickFilter] = useState<'missing_po' | 'ready' | 'order_complete' | 'stock_ready' | 'stock_items_complete' | 'partially_ready' | 'late' | 'mapping_gap' | 'mto_to_map' | 'stock_to_map' | 'overdue5' | 'overdue10' | 'production_after_dispatch' | 'due_soon' | null>(null);
   const [partialThreshold, setPartialThreshold] = useState<number>(1);
 
   const [rawShopifyOrders, setRawShopifyOrders] = useState<ShopifyOrder[]>([]);
@@ -1834,7 +1834,14 @@ const App: React.FC = () => {
           // Must have at least one unfulfilled stock item, AND all such stock items must be ready,
           // AND the order must contain at least one unfulfilled MTO item (which is why the order is still open).
           const isStockDispatchReady = stockItems.length > 0 && stockItems.every(isReady) && mtoItems.length > 0;
-          
+
+          // Broader than isStockDispatchReady: every stock line ready, whether or
+          // not the order also has MTO lines. Drives the "Stock Items Complete" toggle.
+          const isStockItemsComplete = stockItems.length > 0 && stockItems.every(isReady);
+
+          const unmappedStockCount = stockItems.filter(i => !i.linkedDecoItemId).length;
+          const unmappedMtoCount = mtoItems.filter(i => !i.linkedDecoItemId).length;
+
           const mappedCount = eligibleItems.filter(i => !!i.linkedDecoItemId).length;
           const itemJobIds = Array.from(new Set(mappedItems.map(i => i.itemDecoJobId).filter(Boolean)));
           const resolvedDecoJobId = mainJobId || itemJobIds[0];
@@ -1893,6 +1900,8 @@ const App: React.FC = () => {
               totalStockCount: stockItems.length,
               readyMtoCount: mtoItems.filter(i => i.itemStatus === 'fulfilled' || i.readyMtoCount || isReady(i)).length,
               totalMtoCount: mtoItems.length,
+              unmappedStockCount,
+              unmappedMtoCount,
               daysInProduction: 20 - sla.daysRemaining,
               daysRemaining: sla.daysRemaining,
               slaTargetDate: sla.targetDateStr,
@@ -1901,6 +1910,7 @@ const App: React.FC = () => {
               isMto: isMtoOrder,
               hasStockItems: stockItems.length > 0,
               isStockDispatchReady, 
+              isStockItemsComplete,
               fulfillmentDate: effectiveClosedAt,
               fulfillmentDuration: effectiveClosedAt ? calculateWorkingDays(order.date, effectiveClosedAt, holidaySet) : undefined,
               productionDueDate: decoJob?.productionDueDate,
@@ -2529,6 +2539,7 @@ const App: React.FC = () => {
           notOnDeco10Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 10).length,
           orderComplete: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100).length,
           stockReady: active.filter(o => o.isStockDispatchReady).length,
+          stockItemsComplete: active.filter(o => o.isStockItemsComplete).length,
           partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
           late: active.filter(o => o.daysRemaining < 0).length,
           dueSoon: active.filter(o => o.daysRemaining >= 0 && o.daysRemaining <= 5).length,
@@ -2539,6 +2550,8 @@ const App: React.FC = () => {
           productionAfterDispatch: active.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000).length,
           fulfilled7d: fulfilled7d.length,
           mappingGap: active.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100).length,
+          mtoToMap: active.filter(o => !!o.decoJobId && (o.unmappedMtoCount ?? 0) > 0).length,
+          stockToMap: active.filter(o => !!o.decoJobId && (o.unmappedStockCount ?? 0) > 0).length,
           // Partial fulfillments whose latest fulfillment landed in the last 7
           // days, so this matches the "FULFILLED (7D)" parent card.
           partiallyFulfilled7d: baseSet.filter(o =>
@@ -2575,9 +2588,12 @@ const App: React.FC = () => {
               else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
               else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
               else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
+              else if (activeQuickFilter === 'stock_items_complete') filtered = filtered.filter(o => o.isStockItemsComplete);
               else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
               else if (activeQuickFilter === 'late') filtered = filtered.filter(o => o.daysRemaining < 0);
               else if (activeQuickFilter === 'mapping_gap') filtered = filtered.filter(o => !!o.decoJobId && (o.mappedPercentage ?? 0) < 100);
+              else if (activeQuickFilter === 'mto_to_map') filtered = filtered.filter(o => !!o.decoJobId && (o.unmappedMtoCount ?? 0) > 0);
+              else if (activeQuickFilter === 'stock_to_map') filtered = filtered.filter(o => !!o.decoJobId && (o.unmappedStockCount ?? 0) > 0);
               else if (activeQuickFilter === 'overdue5') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 5);
               else if (activeQuickFilter === 'overdue10') filtered = filtered.filter(o => !o.decoJobId && o.daysInProduction >= 10);
               else if (activeQuickFilter === 'production_after_dispatch') filtered = filtered.filter(o => o.decoJobId && o._rawProductionDate && o._rawDispatchDate && o._rawProductionDate.getTime() > o._rawDispatchDate.getTime() + 12 * 60 * 60 * 1000);
@@ -3075,7 +3091,14 @@ const App: React.FC = () => {
                         </div>
                     </StatsCard>
                     <StatsCard title="MAPPING GAPS" value={stats.mappingGap} icon={<Link2 />} colorClass="bg-amber-500" onClick={() => setActiveQuickFilter(prev => prev === 'mapping_gap' ? null : 'mapping_gap')} isActive={activeQuickFilter === 'mapping_gap'}>
-                        <div className="space-y-1.5 pt-1"><p className="text-[9px] font-bold text-amber-700 uppercase leading-tight">Job ID exists but items need mapping to track progress.</p></div>
+                        <div className="space-y-1.5 pt-1">
+                            <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'mto_to_map' ? null : 'mto_to_map'); }} className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest hover:text-purple-700 cursor-pointer transition-colors ${activeQuickFilter === 'mto_to_map' ? 'text-purple-700' : 'text-purple-500'}`}>
+                                <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'mto_to_map' ? 'fill-purple-500 text-purple-500' : ''}`} /> MTO TO BE MAPPED ({stats.mtoToMap})
+                            </div>
+                            <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'stock_to_map' ? null : 'stock_to_map'); }} className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest hover:text-blue-700 cursor-pointer transition-colors ${activeQuickFilter === 'stock_to_map' ? 'text-blue-700' : 'text-blue-500'}`}>
+                                <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'stock_to_map' ? 'fill-blue-500 text-blue-500' : ''}`} /> STOCK TO BE MAPPED ({stats.stockToMap})
+                            </div>
+                        </div>
                     </StatsCard>
                     <StatsCard title="READY TO SHIP" value={stats.readyForShipping} icon={<Package />} colorClass="bg-emerald-500" onClick={() => { setPartialThreshold(1); setActiveQuickFilter(prev => prev === 'ready' ? null : 'ready'); }} isActive={activeQuickFilter === 'ready'}>
                          <div className="space-y-1.5 pt-1">
@@ -3084,6 +3107,9 @@ const App: React.FC = () => {
                             </div>
                             <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'stock_ready' ? null : 'stock_ready'); }} className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest hover:text-blue-700 cursor-pointer transition-colors ${activeQuickFilter === 'stock_ready' ? 'text-blue-700' : 'text-blue-500'}`}>
                                 <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'stock_ready' ? 'fill-blue-500 text-blue-500' : ''}`} /> STOCK READY ({stats.stockReady})
+                            </div>
+                            <div onClick={(e) => { e.stopPropagation(); setActiveQuickFilter(prev => prev === 'stock_items_complete' ? null : 'stock_items_complete'); }} className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest hover:text-teal-700 cursor-pointer transition-colors ${activeQuickFilter === 'stock_items_complete' ? 'text-teal-700' : 'text-teal-600'}`}>
+                                <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'stock_items_complete' ? 'fill-teal-500 text-teal-500' : ''}`} /> STOCK ITEMS COMPLETE ({stats.stockItemsComplete})
                             </div>
                             <div onClick={(e) => { e.stopPropagation(); const isOpening = activeQuickFilter !== 'partially_ready'; setPartialThreshold(1); setActiveQuickFilter(prev => prev === 'partially_ready' ? null : 'partially_ready'); }} className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest hover:text-indigo-700 cursor-pointer transition-colors ${activeQuickFilter === 'partially_ready' ? 'text-indigo-700 font-black' : 'text-gray-400'}`}>
                                 <Square className={`w-3.5 h-3.5 ${activeQuickFilter === 'partially_ready' ? 'fill-indigo-500 text-indigo-500' : ''}`} /> PARTIALLY READY ({stats.partiallyReady})

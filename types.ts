@@ -236,6 +236,10 @@ export interface UnifiedOrder {
   totalStockCount?: number;
   readyMtoCount?: number;
   totalMtoCount?: number;
+  /** Eligible stock (non-MTO) lines still missing a Deco mapping. */
+  unmappedStockCount?: number;
+  /** Eligible MTO lines still missing a Deco mapping. */
+  unmappedMtoCount?: number;
   daysInProduction: number;
   daysRemaining: number; 
   slaTargetDate: string;
@@ -249,6 +253,8 @@ export interface UnifiedOrder {
   isMto: boolean;
   hasStockItems: boolean;
   isStockDispatchReady: boolean; // Flag for unfulfilled stock items produced in Deco
+  /** True when the order has stock lines and ALL of them are produced/ready to ship (regardless of MTO presence). */
+  isStockItemsComplete: boolean;
   hasEmailEnquiry?: boolean;
   shipStationTracking?: {
     trackingNumber: string;
