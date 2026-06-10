@@ -6,15 +6,24 @@ import {
 } from './orderReadiness';
 
 describe('orderReadiness', () => {
-  it('marks awaiting stock when procurement is below check-in', () => {
+  it('marks stock ordered when PO is raised but stock not checked in', () => {
     const r = getMappedItemReadiness({
       linkedDecoItemId: 'SKU@@@0',
       procurementStatus: 20,
       productionStatus: 80,
       decoProduced: true,
     });
-    expect(r).toBe('awaiting_stock');
+    expect(r).toBe('stock_ordered');
     expect(isItemReadyForDispatch({ linkedDecoItemId: 'SKU@@@0', procurementStatus: 20, decoProduced: true })).toBe(false);
+  });
+
+  it('marks awaiting stock when nothing is on order yet', () => {
+    const r = getMappedItemReadiness({
+      linkedDecoItemId: 'SKU@@@0',
+      procurementStatus: 0,
+    });
+    expect(r).toBe('awaiting_stock');
+    expect(isItemReadyForDispatch({ linkedDecoItemId: 'SKU@@@0', procurementStatus: 0 })).toBe(false);
   });
 
   it('marks produced lines ready when stock is checked in', () => {

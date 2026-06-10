@@ -19,7 +19,8 @@ export function getMappedItemReadiness(item: MappedItemLike): ItemReadiness {
   if (item.decoShipped) return 'shipped';
 
   const proc = item.procurementStatus ?? (item.decoReceived ? 60 : 0);
-  if (proc < 60) return 'awaiting_stock';
+  // Deco procurement: 20 = PO raised with supplier (goods on the way), 60+ = checked in.
+  if (proc < 60) return proc >= 20 ? 'stock_ordered' : 'awaiting_stock';
 
   const prod = item.productionStatus ?? 0;
   if (item.decoProduced || prod >= 80) return 'ready_to_ship';
@@ -36,6 +37,7 @@ export const ITEM_READINESS_LABEL: Record<ItemReadiness, string> = {
   unmapped: 'Unmapped',
   no_map: 'No map required',
   awaiting_stock: 'Awaiting Stock',
+  stock_ordered: 'Stock Ordered',
   in_production: 'In Production',
   ready_to_ship: 'Ready to Ship',
   shipped: 'Shipped',
@@ -64,7 +66,11 @@ export function deriveOrderProductionStatus(
     return r !== 'unmapped' && r !== 'no_map';
   });
 
-  const awaitingStockCount = tracked.filter((i) => getMappedItemReadiness(i) === 'awaiting_stock').length;
+  // Stock Ordered (PO raised, goods inbound) still blocks dispatch — count it with awaiting stock.
+  const awaitingStockCount = tracked.filter((i) => {
+    const r = getMappedItemReadiness(i);
+    return r === 'awaiting_stock' || r === 'stock_ordered';
+  }).length;
   const inProductionCount = tracked.filter((i) => getMappedItemReadiness(i) === 'in_production').length;
   const readyToShipCount = tracked.filter((i) => {
     const r = getMappedItemReadiness(i);
@@ -168,6 +174,8 @@ export function getItemReadinessBadgeClass(readiness: ItemReadiness): string {
   switch (readiness) {
     case 'awaiting_stock':
       return 'bg-amber-100 text-amber-800 border-amber-200';
+    case 'stock_ordered':
+      return 'bg-sky-100 text-sky-800 border-sky-200';
     case 'in_production':
       return 'bg-blue-50 text-blue-800 border-blue-200';
     case 'ready_to_ship':

@@ -2,6 +2,7 @@ export type ItemReadiness =
   | 'unmapped'
   | 'no_map'
   | 'awaiting_stock'
+  | 'stock_ordered'
   | 'in_production'
   | 'ready_to_ship'
   | 'shipped'
