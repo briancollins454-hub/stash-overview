@@ -2538,7 +2538,7 @@ const App: React.FC = () => {
           notOnDeco: active.filter(o => !o.decoJobId).length,
           notOnDeco5Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 5).length,
           notOnDeco10Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 10).length,
-          orderComplete: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100).length,
+          orderComplete: active.filter(o => (o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady).length,
           stockReady: active.filter(o => o.isStockDispatchReady).length,
           stockItemsComplete: active.filter(o => o.isStockItemsComplete).length,
           partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
@@ -2587,7 +2587,7 @@ const App: React.FC = () => {
               });
               if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
               else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
-              else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100);
+              else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => (o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
               else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
               else if (activeQuickFilter === 'stock_items_complete') filtered = filtered.filter(o => o.isStockItemsComplete);
               else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
