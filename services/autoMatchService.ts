@@ -58,6 +58,18 @@ function normalizeSku(sku: string): string {
 }
 
 /**
+ * Extracts supplier style codes embedded in a product name, e.g.
+ * "Core Polo - H57487", "Icon Tee - JG3552", "Rugby Short - WD2B16NGM".
+ * Deco freeform products often carry the style code only in the name while
+ * the Shopify SKU starts with that same code (IS1302-CM, H57662-NRP...).
+ * Requires letters AND digits, length >= 4, to avoid sizes/years/words.
+ */
+function extractStyleCodes(name: string): string[] {
+  const tokens = String(name || '').toUpperCase().match(/\b(?=[A-Z0-9]*\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{4,}\b/g) || [];
+  return [...new Set(tokens.map(t => t.toLowerCase()))];
+}
+
+/**
  * Extracts size tokens from a string.
  */
 function extractSize(str: string): string | null {
@@ -213,6 +225,21 @@ export function autoMatch(
           continue;
         }
 
+        // Style code embedded in the Deco product name vs the Shopify SKU.
+        // Deco club-shop garments usually have no SKU/EAN of their own, but
+        // staff put the supplier style code in the name; the Shopify SKU is
+        // built from that same code.
+        let styleCodeHit = false;
+        const skuAlnum = (item.sku || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (skuAlnum.length >= 4) {
+          const decoCodes = extractStyleCodes(decoItem.name);
+          styleCodeHit = decoCodes.some(c => skuAlnum.includes(c));
+          if (styleCodeHit) {
+            score += 0.65;
+            reasons.push('Style code');
+          }
+        }
+
         // Word-level name matching (better than pure bigram for product names)
         const sWords = shopifyName.split(/\s+/).filter(w => w.length > 1);
         const dWords = decoName.split(/\s+/).filter(w => w.length > 1);
@@ -240,12 +267,14 @@ export function autoMatch(
           score -= 0.15;
         }
 
-        // Colour match bonus
+        // Colour match bonus. A conflict hits style-code candidates harder so
+        // the same style in the wrong colour can never outrank the right one.
         if (shopifyColour && decoColour && shopifyColour === decoColour) {
           score += 0.1;
           reasons.push('Colour match');
         } else if (shopifyColour && decoColour && shopifyColour !== decoColour) {
-          score -= 0.05;
+          score -= styleCodeHit ? 0.3 : 0.05;
+          reasons.push('Colour conflict');
         }
 
         // Vendor match
@@ -262,7 +291,10 @@ export function autoMatch(
         }
 
         if (score > 0.3) {
-          candidates.push({ decoItem, score: Math.min(1, score), reason: reasons.join(', '), decoId: `${decoId}@@@${idx}`, isEanMatch });
+          // Keep the raw score for ranking — capping here makes strong
+          // candidates tie at 1.0 and the wrong size/colour row can win on
+          // insertion order. Confidence is capped at display time instead.
+          candidates.push({ decoItem, score, reason: reasons.join(', '), decoId: `${decoId}@@@${idx}`, isEanMatch });
         }
       }
 
@@ -270,8 +302,13 @@ export function autoMatch(
       candidates.sort((a, b) => b.score - a.score);
       if (candidates.length > 0 && candidates[0].score >= 0.4) {
         const best = candidates[0];
-        // High-confidence fuzzy match: if score >= 0.85 AND size matches AND qty matches, auto-apply
-        const isHighConfidence = best.score >= 0.85 && best.reason.includes('Size match') && best.reason.includes('Qty match');
+        // High-confidence fuzzy match auto-applies: score >= 0.85 AND size
+        // matches AND (qty matches OR the supplier style code lines up) AND
+        // the colours don't disagree.
+        const isHighConfidence = best.score >= 0.85
+          && best.reason.includes('Size match')
+          && (best.reason.includes('Qty match') || best.reason.includes('Style code'))
+          && !best.reason.includes('Colour conflict');
         results.push({
           orderNumber: order.shopify.orderNumber,
           itemId: item.id,
@@ -279,7 +316,7 @@ export function autoMatch(
           suggestedJobId: order.decoJobId,
           suggestedDecoItemId: best.decoId,
           suggestedDecoItemName: best.decoItem.name,
-          confidence: Math.round(best.score * 100),
+          confidence: Math.round(Math.min(1, best.score) * 100),
           reason: best.reason,
           isEanMatch: best.isEanMatch || isHighConfidence,
         });
