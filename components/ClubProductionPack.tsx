@@ -89,6 +89,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
   const [view, setView] = useState<'pivot' | 'orders'>('pivot');
   const [doneIds, setDoneIds] = useState<Set<string>>(() => new Set());
   const [copyHint, setCopyHint] = useState<string | null>(null);
+  const [productQuery, setProductQuery] = useState('');
 
   const setPackModePersisted = useCallback((mode: ProductionPackMode) => {
     setPackMode(mode);
@@ -131,10 +132,58 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
     return fullReport.batchBaskets.find(b => b.basketKey === basketSelection) ?? null;
   }, [fullReport, basketSelection]);
 
-  const report: ProductionPackReport | null = useMemo(
+  const baseReport: ProductionPackReport | null = useMemo(
     () => (fullReport ? resolveActivePackReport(fullReport, basketSelection) : null),
     [fullReport, basketSelection]
   );
+
+  // Distinct product names in the active basket, for the product filter dropdown.
+  const productOptions = useMemo(() => {
+    if (!baseReport) return [];
+    const names = new Set<string>();
+    for (const l of baseReport.lines) {
+      if (l.itemName.trim()) names.add(l.itemName.trim());
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [baseReport]);
+
+  // Narrow the whole pack (pivot, orders, stats, print, CSVs) to one product.
+  const report: ProductionPackReport | null = useMemo(() => {
+    if (!baseReport) return null;
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return baseReport;
+    const match = (itemName: string, lineName: string) =>
+      itemName.toLowerCase().includes(q) || lineName.toLowerCase().includes(q);
+    const lines = baseReport.lines.filter(l => match(l.itemName, l.lineName));
+    const pivotBundles = baseReport.pivotBundles.filter(b => match(b.itemName, b.lineName));
+    const orders = baseReport.orders
+      .map(o => {
+        const orderLines = o.lines.filter(l => match(l.itemName, l.lineName));
+        return {
+          ...o,
+          lines: orderLines,
+          totalUnits: orderLines.reduce((sum, l) => sum + l.quantity, 0),
+        };
+      })
+      .filter(o => o.lines.length > 0);
+    return {
+      ...baseReport,
+      lines,
+      pivotBundles,
+      orders,
+      stats: {
+        orderCount: orders.length,
+        lineCount: lines.length,
+        totalUnits: lines.reduce((sum, l) => sum + l.quantity, 0),
+        productCount: pivotBundles.length,
+      },
+    };
+  }, [baseReport, productQuery]);
+
+  // Product filter is club-specific — clear it when the tag changes.
+  useEffect(() => {
+    setProductQuery('');
+  }, [tag]);
 
   const storageKey = useMemo(
     () =>
@@ -382,7 +431,7 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           />
         </div>
 
-        <div className="p-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 border-b border-gray-100">
+        <div className="p-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5 border-b border-gray-100">
           <label className="block sm:col-span-2">
             <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">
               Shopify tag
@@ -462,6 +511,39 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               className="mt-1 w-full py-2 px-2 rounded-lg border border-gray-200 text-[12px] font-bold"
             />
           </label>
+          <label className="block">
+            <span className="text-[9px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+              <Package className="w-3 h-3" /> Product
+            </span>
+            <div className="relative mt-1">
+              <input
+                value={productQuery}
+                onChange={e => setProductQuery(e.target.value)}
+                placeholder="All products"
+                list="production-pack-products"
+                className={`w-full py-2 pl-2 pr-7 rounded-lg border text-[12px] font-bold focus:ring-1 focus:ring-violet-500 outline-none ${
+                  productQuery.trim()
+                    ? 'border-violet-400 bg-violet-50/60'
+                    : 'border-gray-200'
+                }`}
+              />
+              <datalist id="production-pack-products">
+                {productOptions.slice(0, 80).map(p => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
+              {productQuery.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setProductQuery('')}
+                  title="Clear product filter"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-full bg-violet-200 text-violet-900 text-[10px] font-black hover:bg-violet-300"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </label>
         </div>
 
         {fullReport && fullReport.batchBaskets.length > 0 && (
@@ -498,11 +580,27 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
 
         {report && (
           <>
-            <div className="px-4 py-3 bg-slate-50 border-b border-gray-100 flex flex-wrap gap-3">
+            <div className="px-4 py-3 bg-slate-50 border-b border-gray-100 flex flex-wrap items-center gap-3">
               <Stat label="Orders" value={report.stats.orderCount} />
               <Stat label="Lines" value={report.stats.lineCount} />
               <Stat label="Units" value={report.stats.totalUnits} highlight />
               <Stat label="Products" value={report.stats.productCount} />
+              {productQuery.trim() && baseReport && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-violet-100 border border-violet-200 text-[10px] font-black uppercase tracking-widest text-violet-900">
+                  Filtered: {productQuery.trim()}
+                  <span className="font-bold normal-case tracking-normal text-violet-700">
+                    ({report.stats.totalUnits} of {baseReport.stats.totalUnits} units)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setProductQuery('')}
+                    className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-violet-200 hover:bg-violet-300 text-violet-900"
+                    title="Clear product filter"
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
             </div>
             {activeBasket && (
               <p className="px-4 py-2 text-[11px] font-bold text-amber-900 bg-amber-50 border-b border-amber-100">
@@ -534,9 +632,11 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
 
         {tag && fullReport && report && report.stats.lineCount === 0 && (
           <p className="p-8 text-center text-[11px] font-bold text-amber-700 uppercase tracking-widest max-w-lg mx-auto">
-            {basketSelection === 'standard' && fullReport.batchBaskets.length > 0
-              ? 'No standard unfulfilled lines — select a batch job above'
-              : 'No remaining pick lines in this basket'}
+            {productQuery.trim()
+              ? `No lines match "${productQuery.trim()}" — clear the product filter`
+              : basketSelection === 'standard' && fullReport.batchBaskets.length > 0
+                ? 'No standard unfulfilled lines — select a batch job above'
+                : 'No remaining pick lines in this basket'}
           </p>
         )}
 
