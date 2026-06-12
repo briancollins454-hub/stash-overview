@@ -835,17 +835,14 @@ export function buildProductionPackReport(
 ): ProductionPackReport {
   const inRange = filterOrdersForPackFilters(orders, filters, { unfulfilledOnly: false });
 
-  const batchOrders: UnifiedOrder[] = [];
-  const standardCandidates: UnifiedOrder[] = [];
+  const batchOrders: UnifiedOrder[] = inRange.filter(isClubBatchOrder);
 
-  for (const o of inRange) {
-    if (isClubBatchOrder(o)) batchOrders.push(o);
-    else standardCandidates.push(o);
-  }
-
+  // Standard pick = every unfulfilled eligible line, batch note or not.
+  // A line only leaves the pick when Shopify marks it fulfilled/refunded.
+  // Batch baskets below are reference views of each Deco batch job, not exclusions.
   const standardFiltered = filters.unfulfilledOnly
-    ? standardCandidates.filter(isOrderUnfulfilledForPack)
-    : standardCandidates;
+    ? inRange.filter(isOrderUnfulfilledForPack)
+    : inRange;
 
   const standardLines: ProductionPackLine[] = [];
   for (const o of standardFiltered) {

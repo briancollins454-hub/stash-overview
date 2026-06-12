@@ -553,15 +553,15 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
               Batch jobs (Shopify note · on Deco · not fully done)
             </p>
             <p className="text-[10px] text-amber-800/90 mt-1 max-w-3xl">
-              Orders with a club batch note are in a separate basket from the standard pick.
-              Fulfilled Shopify orders stay listed until the Deco job is complete.
+              Standard pick shows every unfulfilled line — nothing is hidden by a batch note.
+              Chips below filter to one Deco batch job; its orders stay listed until the job is complete.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
               <BasketChip
                 active={basketSelection === 'standard'}
                 onClick={() => setBasketSelectionPersisted('standard')}
                 label="Standard pick"
-                detail="No batch note"
+                detail="All unfulfilled lines"
               />
               {fullReport.batchBaskets.map(b => (
                 <BasketChip
@@ -634,8 +634,8 @@ const ClubProductionPack: React.FC<ClubProductionPackProps> = ({ orders, exclude
           <p className="p-8 text-center text-[11px] font-bold text-amber-700 uppercase tracking-widest max-w-lg mx-auto">
             {productQuery.trim()
               ? `No lines match "${productQuery.trim()}" — clear the product filter`
-              : basketSelection === 'standard' && fullReport.batchBaskets.length > 0
-                ? 'No standard unfulfilled lines — select a batch job above'
+              : basketSelection === 'standard'
+                ? 'No unfulfilled lines for this tag in the date range'
                 : 'No remaining pick lines in this basket'}
           </p>
         )}
