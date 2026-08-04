@@ -20,6 +20,7 @@ import { refreshReadyAtForJobs, type ReadyAtMap } from '../services/readyAtStore
 import { displayStaffName } from '../services/staffDisplay';
 import { isDecoJobCancelled } from '../services/decoJobFilters';
 import { mergeFinanceAndDecoJobs } from '../services/decoJobSources';
+import { getGoneDecoJobs, filterOutGoneDecoJobs } from '../services/decoGoneJobs';
 
 interface Props {
   decoJobs: DecoJob[];
@@ -33,6 +34,10 @@ interface Props {
   // cloud save is the critical bit — without it, a follow-up sync would
   // read stale cloud data and resurrect rows we just cleared.
   //
+  // `removed` = jobs CONFIRMED no longer in Deco (deleted there) that have
+  // been pruned from the caches. `failed` = jobs whose lookups errored —
+  // those stay put until Deco can be reached again.
+  //
   // Optional progress callback fires after each chunk so the UI can show
   // "Checked 50 / 150" rather than a blind spinner that looks frozen on
   // long boards.
@@ -43,6 +48,7 @@ interface Props {
     checked: number;
     shipped: number;
     cancelled: number;
+    removed: number;
     failed: number;
   }>;
   lastSyncTime?: number | null;
@@ -614,9 +620,11 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   notesByJobRef.current = notesByJobNumber;
 
   useEffect(() => {
-    getItem<DecoJob[]>('stash_finance_jobs').then(cached => {
-      if (cached) setFinanceJobs(cached);
-    });
+    // The finance cache keeps historical rows, including jobs since deleted
+    // in Deco — filter those tombstones out or they resurrect on the board.
+    Promise.all([getItem<DecoJob[]>('stash_finance_jobs'), getGoneDecoJobs()]).then(([cached, gone]) => {
+      if (cached) setFinanceJobs(filterOutGoneDecoJobs(cached, gone));
+    }).catch(console.error);
   }, [lastSyncTime]);
 
   const pullNotesFromCloud = useCallback(async () => {
@@ -812,7 +820,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
   // Banner shown briefly after a clear-completed run so the user can see
   // exactly what happened (X checked, Y removed). Auto-dismisses.
   const [clearResult, setClearResult] = useState<{
-    checked: number; shipped: number; cancelled: number; failed: number;
+    checked: number; shipped: number; cancelled: number; removed: number; failed: number;
   } | null>(null);
 
   // Plain sync — same as the dashboard's quick sync. Useful for picking
@@ -857,7 +865,7 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       window.setTimeout(() => setClearResult(null), 8000);
     } catch (e) {
       console.error('[PriorityBoard] Clear completed failed:', e);
-      setClearResult({ checked: 0, shipped: 0, cancelled: 0, failed: capped.length });
+      setClearResult({ checked: 0, shipped: 0, cancelled: 0, removed: 0, failed: capped.length });
       window.setTimeout(() => setClearResult(null), 8000);
     } finally {
       setClearing(false);
@@ -1142,31 +1150,39 @@ export default function PriorityBoard({ decoJobs, onNavigateToOrder, onRefresh, 
       </div>
 
       {/* Clear-completed result banner. Auto-dismisses after 8s. */}
-      {clearResult && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${
-          clearResult.failed > 0
-            ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
-            : (clearResult.shipped + clearResult.cancelled) > 0
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-              : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
-        }`}>
-          {clearResult.failed > 0 ? (
-            <>Couldn&apos;t reach Deco for {clearResult.failed} job{clearResult.failed === 1 ? '' : 's'}. Try again in a moment.</>
-          ) : (clearResult.shipped + clearResult.cancelled) > 0 ? (
-            <>
-              Cleared <span className="font-bold">{clearResult.shipped + clearResult.cancelled}</span>{' '}
-              completed job{(clearResult.shipped + clearResult.cancelled) === 1 ? '' : 's'} from {clearResult.checked} checked
-              {' — '}
-              {clearResult.shipped > 0 && <>{clearResult.shipped} shipped</>}
-              {clearResult.shipped > 0 && clearResult.cancelled > 0 && ', '}
-              {clearResult.cancelled > 0 && <>{clearResult.cancelled} cancelled</>}.
-              <span className="text-white/50"> Saved to cloud — won&apos;t come back on next sync.</span>
-            </>
-          ) : (
-            <>Re-checked {clearResult.checked} job{clearResult.checked === 1 ? '' : 's'}. Nothing&apos;s flipped to shipped or cancelled in Deco yet.</>
-          )}
-        </div>
-      )}
+      {clearResult && (() => {
+        const cleared = clearResult.shipped + clearResult.cancelled + clearResult.removed;
+        return (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${
+            clearResult.failed > 0
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+              : cleared > 0
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
+          }`}>
+            {cleared > 0 ? (
+              <>
+                Cleared <span className="font-bold">{cleared}</span>{' '}
+                job{cleared === 1 ? '' : 's'} from {clearResult.checked} checked
+                {' — '}
+                {[
+                  clearResult.shipped > 0 ? `${clearResult.shipped} shipped` : null,
+                  clearResult.cancelled > 0 ? `${clearResult.cancelled} cancelled` : null,
+                  clearResult.removed > 0 ? `${clearResult.removed} deleted in Deco` : null,
+                ].filter(Boolean).join(', ')}.
+                <span className="text-white/50"> Saved to cloud — won&apos;t come back on next sync.</span>
+                {clearResult.failed > 0 && (
+                  <span className="text-amber-200"> Couldn&apos;t reach Deco for {clearResult.failed} job{clearResult.failed === 1 ? '' : 's'} — try again in a moment.</span>
+                )}
+              </>
+            ) : clearResult.failed > 0 ? (
+              <>Couldn&apos;t reach Deco for {clearResult.failed} job{clearResult.failed === 1 ? '' : 's'}. Try again in a moment.</>
+            ) : (
+              <>Re-checked {clearResult.checked} job{clearResult.checked === 1 ? '' : 's'}. Nothing&apos;s flipped to shipped or cancelled in Deco yet.</>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Status sections */}
       {sections.map(sec => (

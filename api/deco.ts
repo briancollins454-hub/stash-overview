@@ -433,6 +433,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ─── Deletion verification ───────────────────────────────────────────
+  // Given jobs that other fetch paths could not retrieve, answer — reliably —
+  // whether each one is truly ABSENT from Deco (deleted/archived) or whether
+  // we simply failed to look it up. The distinction matters because callers
+  // prune confirmed-gone jobs from local + cloud caches; pruning on a flaky
+  // lookup would delete real jobs.
+  //
+  // Per job we probe the proven direct-lookup strategies. A job is only
+  // `reliable: true, found: false` when EVERY probe completed with a valid
+  // Deco JSON response and none of them matched. Any timeout / HTML / parse
+  // failure marks the job unreliable so the caller leaves it alone.
+  if (action === 'verify' && Array.isArray(req.body?.jobs)) {
+    const jobs: { jobNumber: string; id: string }[] = req.body.jobs
+      .map((j: any) => ({
+        jobNumber: String(j?.jobNumber ?? '').trim(),
+        id: j?.id ? String(j.id).trim() : '',
+      }))
+      .filter((j: { jobNumber: string }) => j.jobNumber)
+      .slice(0, 60);
+    if (jobs.length === 0) return res.status(400).json({ error: 'jobs required' });
+
+    // Soft deadline: whatever we haven't probed by then is reported
+    // unreliable rather than risking a 504 that loses ALL verdicts.
+    const deadline = Date.now() + 45_000;
+
+    const verifyOne = async (job: { jobNumber: string; id: string }) => {
+      // field=3/cond=1 matches the displayed order number on this tenant;
+      // field=0/cond=0 is the order-number fallback; field=1/cond=1 is the
+      // internal order_id (use the stored id when we have one).
+      const probes = [
+        { field: '3', condition: '1', value: job.jobNumber },
+        { field: '0', condition: '0', value: job.jobNumber },
+        { field: '1', condition: '1', value: job.id && job.id !== job.jobNumber ? job.id : job.jobNumber },
+      ];
+      let errors = 0;
+      let hit: any = null;
+      for (const p of probes) {
+        if (Date.now() > deadline) { errors++; break; }
+        try {
+          const qp = new URLSearchParams({
+            username, password,
+            field: p.field, condition: p.condition,
+            string: p.value, criteria: p.value, limit: '5',
+            include_workflow_data: '1', skip_login_token: '1',
+          });
+          const url = `https://${domain}/api/json/manage_orders/find?${qp.toString()}`;
+          const resp = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(8000) });
+          const text = await resp.text();
+          if (!resp.ok || text.startsWith('<')) { errors++; continue; }
+          const data = JSON.parse(text);
+          const orders = Array.isArray(data.orders) ? data.orders : null;
+          if (orders === null) {
+            // No orders array — only a clean "success, zero results" status
+            // counts as a valid empty answer.
+            const code = parseInt(data?.response_status?.code);
+            if (code !== 10001) errors++;
+            continue;
+          }
+          const match = orders.find((o: any) =>
+            orderMatchesId(o, job.jobNumber) || (job.id && orderMatchesId(o, job.id))
+          );
+          if (match) { hit = match; break; }
+        } catch {
+          errors++;
+        }
+      }
+      return {
+        jobNumber: job.jobNumber,
+        found: !!hit,
+        reliable: !!hit || errors === 0,
+        order: hit,
+      };
+    };
+
+    try {
+      const results: any[] = [];
+      const CONCURRENCY = 6;
+      for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+        const slice = jobs.slice(i, i + CONCURRENCY);
+        const settled = await Promise.allSettled(slice.map(j => verifyOne(j)));
+        settled.forEach((r, idx) => {
+          results.push(
+            r.status === 'fulfilled'
+              ? r.value
+              : { jobNumber: slice[idx].jobNumber, found: false, reliable: false, order: null }
+          );
+        });
+      }
+      const gone = results.filter(r => !r.found && r.reliable).length;
+      console.log(`[Deco API] verify: ${jobs.length} jobs → ${results.filter(r => r.found).length} found, ${gone} confirmed gone, ${results.filter(r => !r.reliable).length} unreliable`);
+      return res.status(200).json({ results });
+    } catch (error: any) {
+      return res.status(500).json({ error: 'Verify failed', details: error.message });
+    }
+  }
+
   // Bulk shipped-status check: given a list of order numbers, report whether
   // each order has been shipped (has a date_shipped). Used by the payment
   // reminder cron so we never chase payment for goods the customer doesn't

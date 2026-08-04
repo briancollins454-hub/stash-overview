@@ -274,6 +274,32 @@ export const saveCloudDecoJobs = async (settings: ApiSettings, jobs: DecoJob[]) 
     });
 };
 
+/**
+ * Remove Deco jobs from the cloud cache. Used when jobs are CONFIRMED gone
+ * from Deco (deleted/archived there) — without this, `stash_deco_jobs` rows
+ * kept their last open status forever and every device resurrected the
+ * ghost on its next cloud merge.
+ */
+export const deleteCloudDecoJobs = async (jobNumbers: string[]): Promise<void> => {
+    const unique = Array.from(new Set(jobNumbers.map(n => String(n || '').trim()).filter(Boolean)));
+    if (unique.length === 0) return;
+    return trackSave('stash_deco_jobs', unique.length, async () => {
+        const BATCH = 50;
+        for (let i = 0; i < unique.length; i += BATCH) {
+            const batch = unique.slice(i, i + BATCH);
+            const list = batch.map(n => `"${n.replace(/"/g, '\\"')}"`).join(',');
+            const res = await fetchWithProxy(
+                `stash_deco_jobs?job_number=in.(${encodeURIComponent(list)})`,
+                'DELETE'
+            );
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error(`Deco job cloud delete failed: ${res.status} - ${err}`);
+            }
+        }
+    }, 'delete');
+};
+
 export const savePhysicalStockItem = async (settings: ApiSettings, item: PhysicalStockItem) => {
     return trackSave('stash_stock', 1, async () => {
         try {

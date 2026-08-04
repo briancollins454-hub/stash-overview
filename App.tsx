@@ -8,7 +8,7 @@ import { exportOrdersToCSV } from './services/exportService';
 import { evaluateAlerts, loadAlertRules } from './services/alertService';
 import { loadReorderPoints, saveReorderPoints, ReorderPoint } from './components/StockAlerts';
 import { getNoteCounts } from './services/notesService';
-import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch } from './services/apiService';
+import { fetchShopifyOrders, fetchAllUnfulfilledOrders, fetchDecoJobs, fetchSingleDecoJob, fetchBulkDecoJobs, fetchSingleShopifyOrder, fetchOrderTimeline, searchDecoByName, isEligibleForMapping, standardizeSize, enrichDecoStitchBatch, verifyDecoJobsGone } from './services/apiService';
 import { isShopifyLineItemActiveForOps } from './services/shopifyLineItems';
 import {
   canTreatOrderAsFulfilledFromProduction,
@@ -18,8 +18,9 @@ import {
 } from './services/shopifyOrderStatus';
 import { isDecoJobCancelled } from './services/decoJobFilters';
 import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrackingUrl } from './services/shipstationService';
-import { fetchCloudData, fetchCloudOrdersOnly, fetchCloudDecoJobsOnly, saveCloudOrders, saveCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
+import { fetchCloudData, fetchCloudOrdersOnly, fetchCloudDecoJobsOnly, saveCloudOrders, saveCloudDecoJobs, deleteCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { mergeCloudDecoFillOnly } from './services/decoJobSources';
+import { getGoneDecoJobs, recordGoneDecoJobs, clearGoneDecoJobs, filterOutGoneDecoJobs } from './services/decoGoneJobs';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
 import { releaseAllCameraStreams } from './utils/cameraRelease';
@@ -722,8 +723,10 @@ const App: React.FC = () => {
                 // Cloud fills **missing** job numbers only — never overwrite an
                 // existing local row (Supabase can lag; overwrite caused stale
                 // "Not Ordered" to win over fresher IndexedDB every sync).
+                // Jobs confirmed deleted in Deco (tombstoned) never re-enter.
                 if (cloudData.decoJobs && cloudData.decoJobs.length > 0) {
-                  mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
+                  const goneMap = await getGoneDecoJobs();
+                  mergeCloudDecoFillOnly(jobMap, filterOutGoneDecoJobs(cloudData.decoJobs, goneMap));
                 }
               }
             } catch {}
@@ -829,14 +832,15 @@ const App: React.FC = () => {
             dRecentJobs.forEach(j => jobMap.set(j.jobNumber, j));
 
             // Tail refresh: manage_orders/find is date-gated (see fetchDecoJobs lookback).
-            // Jobs older than that window never appear in dRecentJobs, so local/cloud
-            // copies can stay wrong forever (e.g. still "Not Ordered" after cancel in Deco).
-            // Re-fetch by internal order id (when known) or job # for a capped set of older "open" jobs so status tracks reality.
-            const decoLookbackDays = isDeepSync ? 180 : 120;
-            const decoLookbackCutoff = new Date();
-            decoLookbackCutoff.setDate(decoLookbackCutoff.getDate() - decoLookbackDays);
-            decoLookbackCutoff.setHours(0, 0, 0, 0);
-
+            // Any cached "open" job the main pull did NOT return needs a per-ID re-check:
+            //   - jobs older than the lookback window (never in dRecentJobs),
+            //   - jobs INSIDE the window that the MAX_JOBS cap truncated, and
+            //   - jobs deleted in Deco (find stops returning them at any age).
+            // Previously only the first group was swept, so capped/deleted jobs kept
+            // their stale open status forever and haunted the Priority Board.
+            // Only runs when the main Deco pull succeeded — a failed pull would make
+            // EVERY cached job look missing.
+            const decoFetchOk = decoResult.status === 'fulfilled';
             const recentSyncedNums = new Set(dRecentJobs.map(j => j.jobNumber));
             const OPEN_DECO_TAIL_REFRESH = new Set([
                 'Not Ordered', 'Awaiting PO', 'Awaiting Stock', 'Awaiting Processing', 'Awaiting Artwork',
@@ -844,18 +848,19 @@ const App: React.FC = () => {
             ]);
 
             /** Deco manage_orders/find field=1 is internal order_id on many tenants — prefer it over display job # when they differ. */
-            const staleRows: { jobNumber: string; apiLookupId: string }[] = [];
-            for (const j of jobMap.values()) {
-                if (recentSyncedNums.has(j.jobNumber)) continue;
-                if (isDecoJobCancelled(j)) continue;
-                if (!OPEN_DECO_TAIL_REFRESH.has(j.status || '')) continue;
-                const ord = j.dateOrdered ? new Date(j.dateOrdered) : null;
-                if (!ord || Number.isNaN(ord.getTime())) continue;
-                if (ord >= decoLookbackCutoff) continue;
-                const synthetic = (j.id || '').startsWith('unknown-');
-                const apiLookupId =
-                    !synthetic && j.id?.trim() && j.id !== j.jobNumber ? j.id.trim() : j.jobNumber;
-                staleRows.push({ jobNumber: j.jobNumber, apiLookupId });
+            const staleRows: { jobNumber: string; apiLookupId: string; id?: string }[] = [];
+            if (decoFetchOk) {
+                for (const j of jobMap.values()) {
+                    if (recentSyncedNums.has(j.jobNumber)) continue;
+                    if (isDecoJobCancelled(j)) continue;
+                    if (!OPEN_DECO_TAIL_REFRESH.has(j.status || '')) continue;
+                    const ord = j.dateOrdered ? new Date(j.dateOrdered) : null;
+                    if (!ord || Number.isNaN(ord.getTime())) continue;
+                    const synthetic = (j.id || '').startsWith('unknown-');
+                    const apiLookupId =
+                        !synthetic && j.id?.trim() && j.id !== j.jobNumber ? j.id.trim() : j.jobNumber;
+                    staleRows.push({ jobNumber: j.jobNumber, apiLookupId, id: synthetic ? undefined : j.id?.trim() });
+                }
             }
 
             const STALE_DECO_CAP = 200;
@@ -868,6 +873,7 @@ const App: React.FC = () => {
             const staleLookupIds = staleSlice.map(r => r.apiLookupId);
 
             let decoStaleRefreshed: DecoJob[] = [];
+            let decoGoneJobNumbers: string[] = [];
             if (staleSlice.length > 0) {
                 setSyncStatusMsg(`Refreshing ${staleSlice.length} older open Deco job${staleSlice.length === 1 ? '' : 's'}…`);
                 try {
@@ -900,9 +906,42 @@ const App: React.FC = () => {
                             });
                         }
                     }
+
+                    // Anything STILL missing after bulk + per-ID retries is either
+                    // deleted in Deco or a flaky lookup. Ask the verify endpoint to
+                    // tell them apart; prune only the confirmed-gone ones so they
+                    // stop haunting the Priority Board / Production views.
+                    const refreshedNumsFinal = new Set(decoStaleRefreshed.map(j => j.jobNumber));
+                    const stillMissing = staleSlice.filter(r => !refreshedNumsFinal.has(r.jobNumber));
+                    if (stillMissing.length > 0) {
+                        setSyncStatusMsg(`Verifying ${stillMissing.length} unreachable Deco job${stillMissing.length === 1 ? '' : 's'}…`);
+                        const verdict = await verifyDecoJobsGone(
+                            apiSettings,
+                            stillMissing.map(r => ({ jobNumber: r.jobNumber, id: r.id })),
+                        );
+                        verdict.found.forEach(j => {
+                            jobMap.set(j.jobNumber, j);
+                            decoStaleRefreshed.push(j);
+                        });
+                        decoGoneJobNumbers = verdict.gone;
+                        if (verdict.unreliable.length > 0) {
+                            console.warn(`[sync] ${verdict.unreliable.length} Deco job(s) unverifiable this sync (kept):`, verdict.unreliable.slice(0, 20));
+                        }
+                    }
                 } catch (e: unknown) {
                     console.warn('[sync] stale tail Deco refresh failed:', e instanceof Error ? e.message : e);
                 }
+            }
+
+            // Prune confirmed-gone jobs: local cache, tombstone (blocks finance-cache
+            // resurrection on the Priority Board), and cloud row (blocks other devices
+            // re-filling it). Verification requires every lookup to have completed
+            // successfully, so a Deco outage can never trigger a prune.
+            if (decoGoneJobNumbers.length > 0) {
+                console.log(`[sync] pruning ${decoGoneJobNumbers.length} Deco job(s) confirmed deleted in Deco:`, decoGoneJobNumbers.slice(0, 20));
+                decoGoneJobNumbers.forEach(n => jobMap.delete(n));
+                await recordGoneDecoJobs(decoGoneJobNumbers).catch(console.error);
+                deleteCloudDecoJobs(decoGoneJobNumbers).catch(e => console.warn('[sync] cloud prune of gone Deco jobs failed (will retry next sync):', e?.message || e));
             }
 
             const mergedDecoJobs = Array.from(jobMap.values());
@@ -959,6 +998,12 @@ const App: React.FC = () => {
                     .filter(o => isShopifyOrderClosedForCloud(o.fulfillmentStatus))
                     .map(o => o.id);
                 saveCloudOrders(apiSettings, cloudOrders, staleIds).catch(console.error);
+            }
+
+            // Any job the API is returning again must not stay tombstoned
+            // (covers orders restored/recreated in Deco).
+            if (apiFreshJobs.length > 0) {
+                clearGoneDecoJobs(apiFreshJobs.map(j => j.jobNumber)).catch(console.error);
             }
 
             // Push only API-fresh deco jobs to cloud — never stale local cache
@@ -1356,9 +1401,10 @@ const App: React.FC = () => {
                           } else if (table === 'stash_deco_jobs') {
                             const cloudDecoJobs = await fetchCloudDecoJobsOnly();
                             if (cloudDecoJobs?.length) {
+                              const goneMap = await getGoneDecoJobs();
                               setRawDecoJobs(prev => {
                                 const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                                mergeCloudDecoFillOnly(jobMap, cloudDecoJobs);
+                                mergeCloudDecoFillOnly(jobMap, filterOutGoneDecoJobs(cloudDecoJobs, goneMap));
                                 const merged = Array.from(jobMap.values());
                                 setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                                 return merged;
@@ -1425,9 +1471,10 @@ const App: React.FC = () => {
                             });
                           }
                           if (cloudData.decoJobs?.length) {
+                            const goneMap = await getGoneDecoJobs();
                             setRawDecoJobs(prev => {
                               const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
-                              mergeCloudDecoFillOnly(jobMap, cloudData.decoJobs);
+                              mergeCloudDecoFillOnly(jobMap, filterOutGoneDecoJobs(cloudData.decoJobs, goneMap));
                               const merged = Array.from(jobMap.values());
                               setLocalItem('stash_raw_deco_jobs', merged).catch(console.error);
                               return merged;
@@ -2030,7 +2077,7 @@ const App: React.FC = () => {
       jobs: { jobNumber: string; id?: string }[],
       onProgress?: (current: number, total: number) => void,
   ) => {
-      const result = { checked: 0, shipped: 0, cancelled: 0, failed: 0 };
+      const result = { checked: 0, shipped: 0, cancelled: 0, removed: 0, failed: 0 };
       if (!apiSettings.useLiveData) return result;
       const uniqueJobs = Array.from(
         new Map(
@@ -2096,12 +2143,30 @@ const App: React.FC = () => {
         }
       }
 
-      const refreshed = Array.from(refreshedByNumber.values());
-      if (refreshed.length === 0) {
-        result.failed = unique.length;
-        return result;
+      // Jobs Deco returned nothing for are either DELETED in Deco or a flaky
+      // lookup. Verify to tell them apart: confirmed-gone jobs get removed from
+      // the board (local + tombstone + cloud) instead of being reported as
+      // "couldn't reach Deco" and left to haunt the board forever.
+      const finalMissing = unique.filter(n => !refreshedByNumber.has(n));
+      let goneJobNumbers: string[] = [];
+      let unverifiable: string[] = [];
+      if (finalMissing.length > 0) {
+          const verdict = await verifyDecoJobsGone(
+              apiSettings,
+              finalMissing.map(n => {
+                  const ids = retryLookupIdsByNumber.get(n) || [n];
+                  const altId = ids.find(id => id !== n);
+                  return { jobNumber: n, id: altId };
+              }),
+          );
+          verdict.found.forEach(j => refreshedByNumber.set(j.jobNumber, j));
+          goneJobNumbers = verdict.gone;
+          unverifiable = verdict.unreliable;
       }
-      result.failed = unique.filter(n => !refreshedByNumber.has(n)).length;
+
+      const refreshed = Array.from(refreshedByNumber.values());
+      result.failed = unverifiable.length;
+      result.removed = goneJobNumbers.length;
 
       for (const j of refreshed) {
           const st = (j.status || '').toLowerCase();
@@ -2110,20 +2175,30 @@ const App: React.FC = () => {
           else if (isDecoJobCancelled(j)) result.cancelled += 1;
       }
 
+      if (refreshed.length === 0 && goneJobNumbers.length === 0) {
+          return result;
+      }
+
       setRawDecoJobs(prev => {
           const jobMap = new Map(prev.map(j => [j.jobNumber, j]));
           for (const j of refreshed) jobMap.set(j.jobNumber, j);
+          for (const n of goneJobNumbers) jobMap.delete(n);
           const next = Array.from(jobMap.values());
           setLocalItem('stash_raw_deco_jobs', next).catch(console.error);
           return next;
       });
 
-      // CRITICAL: await the cloud save. Without this, the next loadData()
-      // can race ahead and read stale cloud data, undoing the clear.
+      if (goneJobNumbers.length > 0) {
+          await recordGoneDecoJobs(goneJobNumbers).catch(console.error);
+      }
+
+      // CRITICAL: await the cloud save AND delete. Without this, the next
+      // loadData() can race ahead and read stale cloud data, undoing the clear.
       try {
-          await saveCloudDecoJobs(apiSettings, refreshed);
+          if (refreshed.length > 0) await saveCloudDecoJobs(apiSettings, refreshed);
+          if (goneJobNumbers.length > 0) await deleteCloudDecoJobs(goneJobNumbers);
       } catch (e: any) {
-          console.warn('[clearCompletedDecoJobs] cloud save failed:', e?.message || e);
+          console.warn('[clearCompletedDecoJobs] cloud save/delete failed:', e?.message || e);
           // Local state still updated; just warn the caller they may
           // see ghosts again on next sync until cloud catches up.
           result.failed = Math.max(result.failed, 1);
@@ -2530,7 +2605,9 @@ const App: React.FC = () => {
       const active = baseSet.filter(o => {
           const s = (o.shopify.fulfillmentStatus || '').toLowerCase();
           if (s === 'fulfilled') return false;
-          if (s === 'refunded' && !showRefunded) return false;
+          // 'restocked' = completed return (all items back on the shelf) —
+          // treat like refunded so returns don't sit in the unfulfilled list.
+          if ((s === 'refunded' || s === 'restocked') && !showRefunded) return false;
           return true;
       });
       const fulfilled7d = baseSet.filter(o => o.shopify.fulfillmentStatus === 'fulfilled' && o.fulfillmentDate && (Date.now() - new Date(o.fulfillmentDate).getTime() < 7 * 24 * 60 * 60 * 1000));
@@ -2582,7 +2659,8 @@ const App: React.FC = () => {
               filtered = filtered.filter(o => {
                   const s = (o.shopify.fulfillmentStatus || '').toLowerCase();
                   if (s === 'fulfilled') return false;
-                  if (s === 'refunded' && !showRefunded) return false;
+                  // Completed returns ('restocked') fold into the Refunds toggle.
+                  if ((s === 'refunded' || s === 'restocked') && !showRefunded) return false;
                   return true;
               });
               if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);

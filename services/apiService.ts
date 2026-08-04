@@ -1,11 +1,11 @@
 import { DecoJob, ShopifyOrder, DecoItem } from '../types';
-import { normalizeDecoCancelStatusString } from './decoJobFilters';
+import { mapDecoStatus } from '../utils/decoStatusMap';
 import { ApiSettings } from '../components/SettingsModal';
 import { MOCK_DECO_JOBS, MOCK_SHOPIFY_ORDERS } from '../constants';
 import { isEligibleForMapping, mapLineItemsFromOrderNode } from './shopifyLineItems';
 
 export { isEligibleForMapping };
-import { mapShopifyFulfillmentStatusForStash } from './shopifyOrderStatus';
+import { mapShopifyFulfillmentStatusForStash, applyPartialRefundInactivityRule } from './shopifyOrderStatus';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms)); 
 
@@ -24,22 +24,8 @@ export const standardizeSize = (size: string): string => {
     return map[s] || size.toUpperCase();
 };
 
-const mapDecoStatus = (status: string | number): string => {
-    if (!status) return 'Unknown';
-    if (typeof status === 'string' && isNaN(parseInt(status, 10)) && status.trim() !== '') {
-        const t = status.trim();
-        const canonCancel = normalizeDecoCancelStatusString(t);
-        if (canonCancel) return canonCancel;
-        return t;
-    }
-    const statusNum = typeof status === 'string' ? parseInt(status, 10) : status;
-    const statusMap: Record<number, string> = {
-        1: 'Awaiting Processing', 2: 'Completed', 3: 'Shipped', 4: 'Cancelled', 7: 'On Hold',
-        8: 'Not Ordered', 9: 'Awaiting Stock', 10: 'Awaiting Artwork',
-        11: 'Awaiting Review', 12: 'In Production', 13: 'Ready for Shipping'
-    };
-    return statusMap[statusNum] || 'Unknown';
-};
+// Canonical mapping lives in utils/decoStatusMap.ts, shared with the
+// finance cron so numeric statuses can never be interpreted two ways.
 
 /* ---------- Decoration / stitch extraction ---------- */
 const DECO_TYPE_MAP: Record<string, string> = {
@@ -456,8 +442,9 @@ const robustShopifyGraphQL = async (settings: ApiSettings, dateFilter: string, i
     if (onProgress) onProgress(`Shopify: ${allRawOrders.length} orders (100%) — Complete`);
 
     return allRawOrders.map((o: any) => {
-        const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
-        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: fStatus === 'partial' });
+        const baseStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+        const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: baseStatus === 'partial' });
+        const fStatus = applyPartialRefundInactivityRule(baseStatus, o.displayFinancialStatus, mappedItems);
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
@@ -513,16 +500,22 @@ export const fetchAllUnfulfilledOrders = async (settings: ApiSettings, onProgres
             pageCount++;
         }
         return allRawOrders.map((o: any) => {
-            const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
-            const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: fStatus === 'partial' });
+            const baseStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+            const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled: baseStatus === 'partial' });
+            const fStatus = applyPartialRefundInactivityRule(baseStatus, o.displayFinancialStatus, mappedItems);
             const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
             const sa = o.shippingAddress;
             const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
             return { id: o.id, orderNumber: o.name.replace('#', ''), customerName: custName, email: o.email || '', date: o.createdAt, updatedAt: o.updatedAt, closedAt: o.closedAt, totalPrice: o.totalPriceSet?.shopMoney?.amount || '0.00', paymentStatus: o.displayFinancialStatus?.toLowerCase() || 'pending', fulfillmentStatus: fStatus, timelineComments: [o.note || ''].filter(Boolean), items: mappedItems, tags: o.tags || [], shippingAddress, shippingMethod: o.shippingLines?.edges?.[0]?.node?.title || undefined, shippingCost: o.totalShippingPriceSet?.shopMoney?.amount || undefined, subtotalPrice: o.subtotalPriceSet?.shopMoney?.amount || undefined, taxPrice: o.totalTaxSet?.shopMoney?.amount || undefined };
         });
     } catch (e: any) {
+        // MUST rethrow: App.tsx treats a successful return as ground truth for
+        // "which orders are still unfulfilled" and reconciles/hides everything
+        // else. Swallowing errors here (old behaviour: return []) made a failed
+        // fetch look like "zero unfulfilled orders", disabled the caller's retry
+        // + warning toast, and triggered a mass stale-order reconcile.
         console.warn('Failed to fetch unfulfilled orders:', e.message);
-        return [];
+        throw e;
     }
 };
 
@@ -559,14 +552,22 @@ export const fetchDecoJobs = async (settings: ApiSettings, onProgress?: (msg: st
     const BATCH_SIZE = 100; // Deco API caps responses at 100 when using include flags
     const MAX_JOBS = isDeepSync ? 1500 : 800;
     
+    let apiTotalInWindow = 0;
     while (hasMore && offset < MAX_JOBS) { 
         if (onProgress) onProgress(`Deco: Batch ${Math.floor(offset/BATCH_SIZE) + 1}...`);
         const params = { 'limit': BATCH_SIZE.toString(), 'offset': offset.toString(), 'field': '1', 'condition': '4', 'date1': dateStr, 'include_workflow_data': '1', 'include_user_assignments': '1', 'include_custom_fields': '1', 'include_sales_data': '1', 'include_product_data': '1', 'include_decoration_data': '1', 'include_artwork_data': '1', 'skip_login_token': '1' };
         const data = await robustDecoFetch(settings, 'api/json/manage_orders/find', params);
         const list = data.orders || []; 
         allDeco = [...allDeco, ...list];
+        apiTotalInWindow = data.total || apiTotalInWindow;
         if (list.length < BATCH_SIZE || allDeco.length >= (data.total || 0)) hasMore = false;
         else { offset += list.length; await delay(100); }
+    }
+    if (apiTotalInWindow > allDeco.length) {
+        // The MAX_JOBS cap truncated the window. Jobs past the cap keep their
+        // cached status; the tail refresh in App.loadData re-fetches open ones
+        // by ID over subsequent syncs, but flag it so it's visible in devtools.
+        console.warn(`[DECO] Pull truncated: ${allDeco.length}/${apiTotalInWindow} jobs in ${lookback}-day window (cap ${MAX_JOBS}). Remaining open jobs refresh via the per-ID tail sweep.`);
     }
     const parsed = allDeco.map((job: any) => {
         const items = parseDecoItems(job);
@@ -796,6 +797,67 @@ export const fetchBulkDecoJobs = async (
     return all;
 };
 
+export interface DecoGoneVerdict {
+    /** Job numbers CONFIRMED absent from Deco — every lookup completed OK and returned no order. Safe to prune. */
+    gone: string[];
+    /** Jobs the verification pass actually found (bonus refresh — callers should upsert these). */
+    found: DecoJob[];
+    /** Jobs where at least one lookup errored/timed out — could NOT be confirmed gone. Do not prune. */
+    unreliable: string[];
+}
+
+/**
+ * Reliably distinguish "this job was deleted in Deco" from "the lookup
+ * failed". `fetchBulkDecoJobs` / `fetchSingleDecoJob` swallow per-strategy
+ * errors, so their `null` result is NOT safe to treat as deletion. The
+ * server-side `verify` action re-runs direct lookups and reports, per job,
+ * whether every probe completed successfully — only then do we call it gone.
+ */
+export const verifyDecoJobsGone = async (
+    settings: ApiSettings,
+    jobs: { jobNumber: string; id?: string }[],
+): Promise<DecoGoneVerdict> => {
+    const verdict: DecoGoneVerdict = { gone: [], found: [], unreliable: [] };
+    if (!settings.useLiveData || jobs.length === 0) return verdict;
+
+    const unique = Array.from(
+        new Map(
+            jobs
+                .filter(j => j?.jobNumber && String(j.jobNumber).trim())
+                .map(j => [String(j.jobNumber).trim(), { jobNumber: String(j.jobNumber).trim(), id: j.id ? String(j.id).trim() : undefined }])
+        ).values()
+    );
+
+    const CHUNK = 30; // keeps each serverless call well inside its 60s budget
+    for (let i = 0; i < unique.length; i += CHUNK) {
+        const chunk = unique.slice(i, i + CHUNK);
+        try {
+            const res = await fetchServerRoute('/api/deco', { action: 'verify', jobs: chunk });
+            const json = await res.json();
+            const results: any[] = Array.isArray(json.results) ? json.results : [];
+            const answered = new Set<string>();
+            for (const r of results) {
+                const num = String(r?.jobNumber ?? '').trim();
+                if (!num) continue;
+                answered.add(num);
+                if (r.order) {
+                    const items = parseDecoItems(r.order);
+                    verdict.found.push(buildDecoJob(r.order, items));
+                } else if (r.found === false && r.reliable === true) {
+                    verdict.gone.push(num);
+                } else {
+                    verdict.unreliable.push(num);
+                }
+            }
+            chunk.forEach(j => { if (!answered.has(j.jobNumber)) verdict.unreliable.push(j.jobNumber); });
+        } catch (e: any) {
+            console.warn(`[verifyDecoJobsGone] chunk failed (${e?.message || e}) — treating as unverifiable`);
+            chunk.forEach(j => verdict.unreliable.push(j.jobNumber));
+        }
+    }
+    return verdict;
+};
+
 export const fetchSingleShopifyOrder = async (
     settings: ApiSettings,
     orderId: string,
@@ -811,9 +873,10 @@ export const fetchSingleShopifyOrder = async (
         const o = json.data?.order;
         if (!o) return null;
 
-        const fStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
-        const includeFulfilled = opts.includeFulfilled ?? fStatus === 'partial';
+        const baseStatus = mapShopifyFulfillmentStatusForStash(o.displayFulfillmentStatus, o.displayFinancialStatus);
+        const includeFulfilled = opts.includeFulfilled ?? baseStatus === 'partial';
         const mappedItems = mapLineItemsFromOrderNode(o, { includeFulfilled });
+        const fStatus = applyPartialRefundInactivityRule(baseStatus, o.displayFinancialStatus, mappedItems);
         const custName = o.billingAddress ? `${o.billingAddress.firstName || ''} ${o.billingAddress.lastName || ''}`.trim() : 'Guest';
         const sa = o.shippingAddress;
         const shippingAddress = sa ? { name: `${sa.firstName || ''} ${sa.lastName || ''}`.trim(), address1: sa.address1 || '', address2: sa.address2 || '', city: sa.city || '', province: sa.provinceCode || '', zip: sa.zip || '', country: sa.country || '', phone: sa.phone || '' } : undefined;
