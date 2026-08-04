@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { mapDecoStatus } from '../../utils/decoStatusMap.js';
 
 /**
  * Nightly Vercel Cron job: rebuild the finance cache end-to-end against
@@ -72,18 +73,14 @@ interface LeanFinanceJob {
   salesPerson?: string;
 }
 
-// ─── Deco status -> canonical string (subset of mapDecoStatus) ─────────
-const DECO_STATUS_MAP: Record<string, string> = {
-  '1': 'Order', '2': 'Quote', '3': 'Shipped', '4': 'Cancelled',
-  '5': 'Hold', '6': 'Awaiting Processing', '7': 'Awaiting Stock',
-  '8': 'In Production', '9': 'Ready for Shipping', '10': 'Partially Shipped',
-  '11': 'Completed', '12': 'Awaiting Artwork', '13': 'Awaiting PO',
-};
+// ─── Deco status -> canonical string ────────────────────────────────────
+// Shared with the client (services/apiService.ts) via utils/decoStatusMap so
+// the finance cache can never disagree with the live dashboard about what a
+// numeric status code means. (This file previously carried its own map with
+// e.g. 2='Quote' where the client says 2='Completed' — finance-cache-only
+// rows landed in the wrong Priority Board sections.)
 function mapStatus(raw: any): string {
-  if (raw == null) return 'Unknown';
-  if (typeof raw === 'string' && isNaN(Number(raw))) return raw;
-  const key = String(raw);
-  return DECO_STATUS_MAP[key] || `Status ${key}`;
+  return mapDecoStatus(raw);
 }
 
 // ─── Map one raw Deco order -> lean finance job ────────────────────────
@@ -296,11 +293,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const offsets: number[] = [];
     for (let i = 1; i <= pagesNeeded; i++) offsets.push(i * BATCH);
 
+    let failedPages = 0;
     for (let i = 0; i < offsets.length; i += WAVE) {
       const wave = offsets.slice(i, i + WAVE);
       const results = await Promise.all(
         wave.map(off => fetchDecoPage(domain, username, password, off, BATCH, sinceDate).catch(err => {
           console.warn(`[cron/refresh-finance] page @ offset=${off} failed:`, err?.message || err);
+          failedPages++;
           return { orders: [], total: 0 };
         })),
       );
@@ -313,12 +312,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Merge: recent pull wins on overlap, older cached jobs pass through
     // untouched, brand-new jobs get appended. Same behaviour as the
     // client-side incrementalSync.
+    //
+    // Pruning: a cached job dated INSIDE the lookback window that the fresh
+    // pull did NOT return has been deleted in Deco — Deco's find simply stops
+    // returning deleted orders. Keeping such rows forever meant deleted jobs
+    // haunted the Priority Board (this cache merges into it) with no way to
+    // clear them. Only prune when the window pull was COMPLETE (no failed
+    // pages, full count fetched) so a flaky night can never drop real jobs,
+    // and keep a 2-day margin inside the cutoff to absorb timezone/boundary
+    // drift between this cron and Deco's date filtering.
+    const pullComplete = failedPages === 0 && recentRaw.length >= total;
+    const pruneCutoffMs = sinceDateObj.getTime() + 2 * 24 * 60 * 60 * 1000;
+    const isSafelyInsideWindow = (j: LeanFinanceJob): boolean => {
+      if (!j.dateOrdered) return false;
+      const t = new Date(j.dateOrdered).getTime();
+      return Number.isFinite(t) && t >= pruneCutoffMs;
+    };
+
     const recentByNumber = new Map(recent.map(j => [j.jobNumber, j]));
     const seenNumbers = new Set<string>();
-    const merged: LeanFinanceJob[] = existing.map(j => {
+    const merged: LeanFinanceJob[] = [];
+    let pruned = 0;
+    for (const j of existing) {
       seenNumbers.add(j.jobNumber);
-      return recentByNumber.get(j.jobNumber) || j;
-    });
+      const fresh = recentByNumber.get(j.jobNumber);
+      if (fresh) {
+        merged.push(fresh);
+        continue;
+      }
+      if (pullComplete && isSafelyInsideWindow(j)) {
+        pruned++;
+        continue;
+      }
+      merged.push(j);
+    }
     let added = 0;
     for (const j of recent) {
       if (!seenNumbers.has(j.jobNumber)) {
@@ -370,7 +397,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       recentPulled: recent.length,
       newlyAdded: added,
       updatedInPlace: updated,
-      keptFromExisting: existing.length - updated,
+      keptFromExisting: existing.length - updated - pruned,
+      prunedDeletedInDeco: pruned,
+      pullComplete,
+      failedPages,
       totalInCache: merged.length,
       durationMs,
     };
