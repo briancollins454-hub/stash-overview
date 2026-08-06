@@ -1,17 +1,22 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { UnifiedOrder } from '../types';
-import { Printer, Package, ChevronDown, ChevronRight, Filter, CheckSquare, Square } from 'lucide-react';
+import { Printer, Package, ChevronDown, ChevronRight, Filter, CheckSquare, Square, Tag, Loader2 } from 'lucide-react';
 import { isShopifyLineItemActiveForOps } from '../services/shopifyLineItems';
 import { isHiddenFromDefaultDashboard } from '../services/shopifyOrderStatus';
+import { findPrintedTag, type OrderMutationTarget } from '../services/shopifyOrderMutations';
 
 interface Props {
   orders: UnifiedOrder[];
   onNavigateToOrder?: (orderNumber: string) => void;
+  // Tags the given orders "Printed - DD/MM" in Shopify after a print run so
+  // nobody prints duplicate sheets. Implemented in App (owns settings + cache).
+  onTagPrinted?: (orders: OrderMutationTarget[]) => Promise<{ tag: string; tagged: number; failed: number }>;
 }
 
 type GroupMode = 'method' | 'club' | 'date';
 
 interface PrintLine {
+  orderId: string;
   orderNumber: string;
   customer: string;
   itemName: string;
@@ -23,6 +28,8 @@ interface PrintLine {
   dueDate: string;
   jobId?: string;
   priority?: boolean;
+  /** Existing "Printed - DD/MM" tag on the order, when present. */
+  printedTag?: string | null;
 }
 
 function guessMethod(item: { name: string; sku: string; properties?: { name: string; value: string | number }[] }): string {
@@ -39,10 +46,16 @@ function guessMethod(item: { name: string; sku: string; properties?: { name: str
   return 'Stock / No Decoration';
 }
 
-const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
+const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder, onTagPrinted }) => {
   const [groupMode, setGroupMode] = useState<GroupMode>('method');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['__all__']));
   const [selectedMethods, setSelectedMethods] = useState<Set<string>>(new Set());
+  // Duplicate-sheet protection: hide lines whose order already carries a
+  // "Printed…" tag, and tag orders after each print run.
+  const [hidePrinted, setHidePrinted] = useState(true);
+  const [tagAfterPrint, setTagAfterPrint] = useState(true);
+  const [tagging, setTagging] = useState(false);
+  const [tagStatus, setTagStatus] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const lines = useMemo<PrintLine[]>(() => {
@@ -52,6 +65,7 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
         o.shopify.items
           .filter(i => isShopifyLineItemActiveForOps(i))
           .map(i => ({
+            orderId: o.shopify.id,
             orderNumber: o.shopify.orderNumber,
             customer: o.shopify.customerName,
             itemName: i.name,
@@ -63,6 +77,7 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
             dueDate: o.productionDueDate || o.slaTargetDate || '',
             jobId: o.decoJobId,
             priority: (o.shopify.tags || []).some(t => t.toLowerCase().includes('rush') || t.toLowerCase().includes('urgent') || t.toLowerCase().includes('priority')),
+            printedTag: findPrintedTag(o.shopify.tags),
           }))
       )
       .filter(l => l.quantity > 0)
@@ -74,14 +89,17 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
   }, [orders]);
 
   const allMethods = useMemo(() => [...new Set(lines.map(l => l.method))].sort(), [lines]);
+  const printedLineCount = useMemo(() => lines.filter(l => l.printedTag).length, [lines]);
 
   // Initialize selectedMethods with all methods
   useEffect(() => { if (selectedMethods.size === 0 && allMethods.length > 0) setSelectedMethods(new Set(allMethods)); }, [allMethods]);
 
   const filteredLines = useMemo(() => {
-    if (selectedMethods.size === 0) return lines;
-    return lines.filter(l => selectedMethods.has(l.method));
-  }, [lines, selectedMethods]);
+    let out = lines;
+    if (selectedMethods.size > 0) out = out.filter(l => selectedMethods.has(l.method));
+    if (hidePrinted) out = out.filter(l => !l.printedTag);
+    return out;
+  }, [lines, selectedMethods, hidePrinted]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, PrintLine[]>();
@@ -134,6 +152,28 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
     win.document.write(`<p style="color:#999;font-size:9px;margin-top:20px;">Generated ${new Date().toLocaleString('en-GB')} — Stash Shop Sync</p></body></html>`);
     win.document.close();
     win.print();
+
+    // Tag every order on the sheet as printed so the next print run can
+    // skip them (duplicate-sheet protection). Fire-and-report — printing
+    // is never blocked by tagging.
+    if (tagAfterPrint && onTagPrinted) {
+      const distinctOrders = Array.from(
+        new Map(filteredLines.map(l => [l.orderId, { id: l.orderId, orderNumber: l.orderNumber }])).values()
+      ).filter(o => !!o.id);
+      if (distinctOrders.length > 0) {
+        setTagging(true);
+        setTagStatus(`Tagging ${distinctOrders.length} order${distinctOrders.length === 1 ? '' : 's'} as printed…`);
+        onTagPrinted(distinctOrders)
+          .then(r => setTagStatus(r.failed > 0
+            ? `Tagged ${r.tagged} order${r.tagged === 1 ? '' : 's'} "${r.tag}" — ${r.failed} failed (check connection and reprint-tag later)`
+            : `Tagged ${r.tagged} order${r.tagged === 1 ? '' : 's'} "${r.tag}"`))
+          .catch(e => setTagStatus(`Tagging failed: ${e?.message || e}`))
+          .finally(() => {
+            setTagging(false);
+            window.setTimeout(() => setTagStatus(null), 10000);
+          });
+      }
+    }
   };
 
   const toggleMethod = (method: string) => {
@@ -176,6 +216,35 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
         ))}
       </div>
 
+      {/* Printed-tag controls */}
+      <div className="px-4 py-2 border-b border-gray-50 flex items-center gap-2 flex-wrap">
+        <Tag className="w-3 h-3 text-purple-400" />
+        <button
+          onClick={() => setHidePrinted(v => !v)}
+          title="Hide lines whose order is already tagged as printed"
+          className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest transition-all ${hidePrinted ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'text-gray-400 border border-gray-200 hover:border-gray-300'}`}
+        >
+          {hidePrinted ? <CheckSquare className="w-2.5 h-2.5" /> : <Square className="w-2.5 h-2.5" />}
+          Hide printed{printedLineCount > 0 ? ` (${printedLineCount})` : ''}
+        </button>
+        {onTagPrinted && (
+          <button
+            onClick={() => setTagAfterPrint(v => !v)}
+            title={'After printing, tag every order on the sheet "Printed - DD/MM" in Shopify so duplicate sheets are obvious'}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest transition-all ${tagAfterPrint ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'text-gray-400 border border-gray-200 hover:border-gray-300'}`}
+          >
+            {tagAfterPrint ? <CheckSquare className="w-2.5 h-2.5" /> : <Square className="w-2.5 h-2.5" />}
+            Tag printed after print
+          </button>
+        )}
+        {(tagging || tagStatus) && (
+          <span className="flex items-center gap-1.5 text-[9px] font-bold text-purple-600 uppercase tracking-widest">
+            {tagging && <Loader2 className="w-3 h-3 animate-spin" />}
+            {tagStatus}
+          </span>
+        )}
+      </div>
+
       <div ref={printRef} className="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
         {Array.from(grouped.entries()).map(([group, items]) => {
           const totalQty = items.reduce((s, i) => s + i.quantity, 0);
@@ -206,11 +275,16 @@ const BatchPrintSheets: React.FC<Props> = ({ orders, onNavigateToOrder }) => {
                   </thead>
                   <tbody>
                     {items.map((item, idx) => (
-                      <tr key={`${item.orderNumber}-${item.sku}-${idx}`} className={`border-t border-gray-50 hover:bg-gray-50 transition-colors ${item.priority ? 'bg-amber-50' : ''}`}>
-                        <td className="px-4 py-1.5">
+                      <tr key={`${item.orderNumber}-${item.sku}-${idx}`} className={`border-t border-gray-50 hover:bg-gray-50 transition-colors ${item.priority ? 'bg-amber-50' : ''} ${item.printedTag ? 'opacity-60' : ''}`}>
+                        <td className="px-4 py-1.5 whitespace-nowrap">
                           <button onClick={() => onNavigateToOrder?.(item.orderNumber)} className="font-black text-gray-800 hover:text-indigo-600 transition-colors">
                             #{item.orderNumber} {item.priority && <span className="text-amber-500" title="Rush">⚡</span>}
                           </button>
+                          {item.printedTag && (
+                            <span className="ml-1.5 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[8px] font-black uppercase tracking-widest" title={item.printedTag}>
+                              <Tag className="w-2 h-2" /> {item.printedTag.replace(/^printed\s*-?\s*/i, '') || 'Printed'}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-1.5 font-bold text-gray-600 truncate max-w-[120px]">{item.customer}</td>
                         <td className="px-4 py-1.5 font-bold text-gray-700 truncate max-w-[200px]">{item.itemName}</td>
