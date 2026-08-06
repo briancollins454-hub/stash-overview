@@ -368,7 +368,7 @@ const buildDecoJob = (job: any, items: DecoItem[]): DecoJob => {
     };
 };
 
-const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
+export const fetchServerRoute = async (route: string, body: any, retries = 2): Promise<Response> => {
     try {
         const response = await fetch(route, {
             method: 'POST',
