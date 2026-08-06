@@ -21,6 +21,7 @@ import { fetchShipStationShipments, ShipStationTracking, getCarrierName, getTrac
 import { fetchCloudData, fetchCloudOrdersOnly, fetchCloudDecoJobsOnly, saveCloudOrders, saveCloudDecoJobs, deleteCloudDecoJobs, savePhysicalStockItem, deletePhysicalStockItem, saveReturnStockItem, deleteReturnStockItem, saveReferenceProducts, fetchStitchCache, saveStitchCache } from './services/syncService';
 import { mergeCloudDecoFillOnly } from './services/decoJobSources';
 import { getGoneDecoJobs, recordGoneDecoJobs, clearGoneDecoJobs, filterOutGoneDecoJobs } from './services/decoGoneJobs';
+import { addTagsToOrders, formatPrintedTag, type OrderMutationTarget } from './services/shopifyOrderMutations';
 import { enqueueMappingUpsert, enqueueJobLinkUpsert, enqueuePatternUpsert, flushPending, getPendingCount, getPendingOverlay } from './services/pendingSyncQueue';
 import { initSupabase } from './services/supabase';
 import { releaseAllCameraStreams } from './utils/cameraRelease';
@@ -114,6 +115,7 @@ const ProductionIssueLog = lazyRetry(() => import('./components/ProductionIssueL
 const DailyTaskList = lazyRetry(() => import('./components/DailyTaskList'));
 const WholesalerLookup = lazyRetry(() => import('./components/WholesalerLookup'));
 const RotaApp = lazyRetry(() => import('./components/RotaApp'));
+const BulkNoteModal = lazyRetry(() => import('./components/BulkNoteModal'));
 import NotificationBell from './components/NotificationBell';
 import CustomerStatusPage, { buildTrackingData } from './components/CustomerStatusPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -123,7 +125,7 @@ import {
     AlertTriangle, X, Calendar as CalendarIcon, Square, Package, ShoppingBag, 
     Boxes, CheckCircle2, Loader2, TrendingUp, Link2, ChevronDown, ArrowDownToLine, Percent,
     Zap, Store, LogOut, ShieldCheck, Download, Menu, Moon, Sun, Monitor,
-    Bell, BellRing, Kanban, MessageSquare, Truck, BookOpen, PoundSterling
+    Bell, BellRing, Kanban, MessageSquare, Truck, BookOpen, PoundSterling, StickyNote
 } from 'lucide-react';
 
 const getHolidayDateSet = (ranges: HolidayRange[] = []) => {
@@ -466,6 +468,7 @@ const App: React.FC = () => {
   const [scanLogs, setScanLog] = useState<ScanLog[]>([]);
   const [scanCount, setScanCount] = useState({ current: 0, total: 0 });
   const [showScanConsole, setShowScanConsole] = useState(false);
+  const [showBulkNotes, setShowBulkNotes] = useState(false);
   const [isEnrichingProduction, setIsEnrichingProduction] = useState(false);
   const [enrichMsg, setEnrichMsg] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -2207,6 +2210,54 @@ const App: React.FC = () => {
       return result;
   }, [apiSettings, rawDecoJobs]);
 
+  /**
+   * Merge Shopify write results (tags / notes) into the local order cache so
+   * the dashboard reflects them immediately, without waiting for a full sync.
+   */
+  const applyLocalOrderPatches = useCallback((patches: { id: string; addTags?: string[]; note?: string }[]) => {
+      if (patches.length === 0) return;
+      setRawShopifyOrders(prev => {
+          const map = new Map(prev.map(o => [o.id, o]));
+          patches.forEach(p => {
+              const existing = map.get(p.id);
+              if (!existing) return;
+              const next = { ...existing };
+              if (p.addTags && p.addTags.length > 0) {
+                  next.tags = Array.from(new Set([...(existing.tags || []), ...p.addTags]));
+              }
+              if (p.note !== undefined) {
+                  next.timelineComments = [p.note].filter(Boolean);
+              }
+              map.set(p.id, next);
+          });
+          const merged = Array.from(map.values());
+          setLocalItem('stash_raw_shopify_orders', merged).catch(console.error);
+          return merged;
+      });
+  }, []);
+
+  /**
+   * Batch Print Sheets: tag each printed order "Printed - DD/MM" in Shopify
+   * so nobody runs off duplicate sheets. Orders already carrying today's tag
+   * are skipped (re-print of the same day's sheet adds nothing).
+   */
+  const handleTagOrdersPrinted = useCallback(async (targets: OrderMutationTarget[]) => {
+      const tag = formatPrintedTag();
+      const byId = new Map(rawShopifyOrders.map(o => [o.id, o]));
+      const pending = targets.filter(t => !(byId.get(t.id)?.tags || []).includes(tag));
+      const alreadyTagged = targets.length - pending.length;
+      const results = await addTagsToOrders(apiSettings, pending, [tag]);
+      const okIds = results.filter(r => r.ok).map(r => r.id);
+      applyLocalOrderPatches(okIds.map(id => ({ id, addTags: [tag] })));
+      const failed = results.length - okIds.length;
+      if (failed > 0) {
+          setToastMsg({ text: `Tagged ${okIds.length} order${okIds.length === 1 ? '' : 's'} "${tag}" — ${failed} failed`, type: 'error' });
+      } else if (okIds.length > 0) {
+          setToastMsg({ text: `Tagged ${okIds.length} order${okIds.length === 1 ? '' : 's'} "${tag}"`, type: 'success' });
+      }
+      return { tag, tagged: okIds.length + alreadyTagged, failed };
+  }, [apiSettings, rawShopifyOrders, applyLocalOrderPatches]);
+
   const handleBulkStatusSync = async () => {
     if (isBulkRefreshing || loading) return;
     
@@ -2916,6 +2967,20 @@ const App: React.FC = () => {
           onTriggerFullSync={() => loadData(true)} 
         />
         <ScanConsoleModal isOpen={showScanConsole} onClose={() => setShowScanConsole(false)} isScanning={isScanning || isBulkRefreshing} progress={scanProgress} current={scanCount.current} total={scanCount.total} logs={scanLogs} onStop={() => stopScanRef.current = true} />
+        {showBulkNotes && (
+          <Suspense fallback={null}>
+            <BulkNoteModal
+              isOpen={showBulkNotes}
+              onClose={() => setShowBulkNotes(false)}
+              orders={rawShopifyOrders}
+              apiSettings={apiSettings}
+              onApplied={(patches) => {
+                applyLocalOrderPatches(patches.map(p => ({ id: p.id, note: p.note })));
+                setToastMsg({ text: `Note added to ${patches.length} order${patches.length === 1 ? '' : 's'}`, type: 'success' });
+              }}
+            />
+          </Suspense>
+        )}
         
         <nav className="bg-[#2d2d5f] text-white px-3 sm:px-4 md:px-6 h-14 md:h-16 flex items-center justify-between sticky top-0 z-50 shadow-md">
             <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1></div>
@@ -3121,6 +3186,9 @@ const App: React.FC = () => {
                         </div>
                         <button onClick={() => exportOrdersToCSV(tableOrders)} className="flex items-center gap-2 px-3 py-2 text-[10px] font-black text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg border border-gray-200 transition-all uppercase tracking-widest shadow-sm bg-white" title="Export filtered orders to CSV">
                             <Download className="w-3.5 h-3.5" /> Export
+                        </button>
+                        <button onClick={() => setShowBulkNotes(true)} className="flex items-center gap-2 px-3 py-2 text-[10px] font-black text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg border border-gray-200 transition-all uppercase tracking-widest shadow-sm bg-white" title="Add or append a note (e.g. Deco job reference) to many orders at once">
+                            <StickyNote className="w-3.5 h-3.5" /> Bulk Notes
                         </button>
                     </div>
                 </div>
@@ -3532,6 +3600,7 @@ const App: React.FC = () => {
                     <BatchPrintSheets
                       orders={unifiedOrders}
                       onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
+                      onTagPrinted={handleTagOrdersPrinted}
                     />
                   </ErrorBoundary>
                 </div>
