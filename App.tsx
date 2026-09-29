@@ -339,6 +339,19 @@ const isReadyToShip = (o: UnifiedOrder): boolean => {
     );
 };
 
+/**
+ * Truly complete: every line still active for ops is either an add-on that
+ * never needed mapping, or is ready to dispatch. Stock-ready orders with
+ * open MTO lines are not complete.
+ */
+const isOrderTrulyComplete = (o: UnifiedOrder): boolean => {
+    const activeLines = o.shopify.items.filter(isShopifyLineItemActiveForOps);
+    if (activeLines.length === 0) return false;
+    return activeLines.every(
+        (i) => !isEligibleForMapping(i.name, i.productType) || isItemReadyForDispatch(i),
+    );
+};
+
 const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
@@ -2666,7 +2679,7 @@ const App: React.FC = () => {
           notOnDeco: active.filter(o => !o.decoJobId).length,
           notOnDeco5Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 5).length,
           notOnDeco10Plus: active.filter(o => !o.decoJobId && o.daysInProduction >= 10).length,
-          orderComplete: active.filter(o => (o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady).length,
+          orderComplete: active.filter(isOrderTrulyComplete).length,
           stockReady: active.filter(o => o.isStockDispatchReady).length,
           stockItemsComplete: active.filter(o => o.isStockItemsComplete).length,
           partiallyReady: active.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100).length,
@@ -2716,7 +2729,7 @@ const App: React.FC = () => {
               });
               if (activeQuickFilter === 'missing_po') filtered = filtered.filter(o => !o.decoJobId);
               else if (activeQuickFilter === 'ready') filtered = filtered.filter(isReadyToShip);
-              else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(o => (o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage === 100) || o.isStockDispatchReady);
+              else if (activeQuickFilter === 'order_complete') filtered = filtered.filter(isOrderTrulyComplete);
               else if (activeQuickFilter === 'stock_ready') filtered = filtered.filter(o => o.isStockDispatchReady);
               else if (activeQuickFilter === 'stock_items_complete') filtered = filtered.filter(o => o.isStockItemsComplete);
               else if (activeQuickFilter === 'partially_ready') filtered = filtered.filter(o => o.decoJobId && o.eligibleCount && o.eligibleCount > 0 && o.completionPercentage >= partialThreshold && o.completionPercentage < 100);
