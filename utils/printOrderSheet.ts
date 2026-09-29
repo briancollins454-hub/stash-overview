@@ -23,6 +23,10 @@ function renderItemRow(
     : '';
   const skuHtml = i.sku ? '<br><span style="color:#888;font-size:11px;">SKU: ' + escapeHtml(i.sku) + '</span>' : '';
   const eanHtml = i.ean && i.ean !== '-' ? '<br><span style="color:#888;font-size:11px;">EAN: ' + escapeHtml(i.ean) + '</span>' : '';
+  const itemJobHtml = i.itemDecoJobId
+    ? '<br><span style="color:#555;font-size:11px;font-weight:600;">' +
+      'Deco Job: ' + escapeHtml(i.itemDecoJobId) + '</span>'
+    : '';
   // Already-shipped rows are intentionally desaturated (greyscale image,
   // dimmer typography) so the warehouse eye snaps to the unfulfilled rows
   // they actually need to pick.
@@ -71,7 +75,7 @@ function renderItemRow(
 
   return '<tr' + rowStyle + '>' +
     '<td style="width:85px;text-align:center;vertical-align:middle;padding:4px;">' + imgHtml + '</td>' +
-    '<td style="' + nameStyle + '">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + '</td>' +
+    '<td style="' + nameStyle + '">' + escapeHtml(i.name) + propsHtml + skuHtml + eanHtml + itemJobHtml + '</td>' +
     '<td style="' + qtyCellStyle + '">' + qtyHtml + '</td>' +
     '<td style="' + numCellStyle + '">\u00A3' + unitPrice.toFixed(2) + '</td>' +
     '<td style="' + numCellStyle + '">\u00A3' + lineTotal.toFixed(2) + '</td>' +
@@ -79,7 +83,7 @@ function renderItemRow(
     '</tr>';
 }
 
-function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: string; orderNumber: string } {
+export function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: string; orderNumber: string } {
   const items = order.shopify.items;
   const isRush = order.shopify.tags.some(t => ['rush', 'urgent', 'priority', 'express'].includes(t.toLowerCase()));
   const notes = getNotesForOrder(order.shopify.id);
@@ -123,6 +127,22 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
     '@media print { .rush, .items-table th, .section-title.pick-title, .section-title.shipped-title, .items-table.shipped-table th, .items-table.shipped-table tr { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }',
   ].join('\n');
 
+  // Line items can sit on different deco jobs. Prefer those ids (insertion
+  // order, unfulfilled then fulfilled) and only fall back to the order-level
+  // job when no line carries one.
+  const uniqueJobIds: string[] = [];
+  for (const item of [...unfulfilledItems, ...fulfilledItems]) {
+    const jobId = item.itemDecoJobId;
+    if (jobId && !uniqueJobIds.includes(jobId)) uniqueJobIds.push(jobId);
+  }
+  const headerDecoJobIds = uniqueJobIds.length > 0
+    ? uniqueJobIds
+    : order.decoJobId
+      ? [order.decoJobId]
+      : [];
+  const decoJobLabel = headerDecoJobIds.length > 1 ? 'Deco Jobs' : 'Deco Job';
+  const decoJobValueHtml = headerDecoJobIds.map((id) => escapeHtml(id)).join(', ');
+
   const orderDate = escapeHtml(new Date(order.shopify.date).toLocaleDateString('en-GB'));
   const shippingMethod = escapeHtml(order.shopify.shippingMethod || '-');
   const shippingCost = order.shopify.shippingCost ? '\u00A3' + escapeHtml(parseFloat(order.shopify.shippingCost).toFixed(2)) : '\u00A30.00';
@@ -150,10 +170,10 @@ function buildOrderSheetHtml(order: UnifiedOrder): { css: string; bodyHtml: stri
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Shipping Cost</td><td>' + shippingCost + '</td></tr>' +
         '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Order Total</td><td>\u00A3' + parseFloat(order.shopify.totalPrice).toFixed(2) + '</td></tr>' +
       '</table>' +
-      (order.decoJobId ? '<div style="margin-top:6px;padding:5px 8px;background:#f0f0f0;border:1.5px solid #333;">' +
+      ((uniqueJobIds.length > 0 || order.decoJobId) ? '<div style="margin-top:6px;padding:5px 8px;background:#f0f0f0;border:1.5px solid #333;">' +
         '<div style="font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;border-bottom:1.5px solid #333;padding-bottom:2px;">Production Details</div>' +
         '<table style="font-size:10px;border-collapse:collapse;">' +
-          '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Deco Job</td><td>' + escapeHtml(order.decoJobId) + '</td></tr>' +
+          '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">' + decoJobLabel + '</td><td>' + decoJobValueHtml + '</td></tr>' +
           (order.productionDueDate ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Est. Production</td><td>' + new Date(order.productionDueDate).toLocaleDateString('en-GB') + '</td></tr>' : '') +
           (order.deco ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Produced</td><td>' + (order.deco.itemsProduced || 0) + ' / ' + (order.deco.totalItems || 0) + '</td></tr>' : '') +
           (order.completionPercentage !== undefined ? '<tr><td style="padding:1px 8px 1px 0;font-weight:bold;">Completion</td><td>' + order.completionPercentage + '%</td></tr>' : '') +
