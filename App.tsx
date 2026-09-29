@@ -58,6 +58,7 @@ function lazyRetry<T extends React.ComponentType<any>>(importFn: () => Promise<{
 const ProcessAnalyst = lazyRetry(() => import('./components/ProcessAnalyst'));
 const EfficiencyDashboard = lazyRetry(() => import('./components/EfficiencyDashboard'));
 const MtoDashboard = lazyRetry(() => import('./components/MtoDashboard'));
+const StockDashboard = lazyRetry(() => import('./components/StockDashboard'));
 import ScanConsoleModal, { ScanLog } from './components/ScanConsoleModal';
 const DecoDashboard = lazyRetry(() => import('./components/DecoDashboard'));
 import MultiSelectFilter from './components/MultiSelectFilter';
@@ -356,7 +357,7 @@ const App: React.FC = () => {
   const { user, isAuthLoading, authError, loginWithGoogle: signIn, loginWithPassword, logout: signOut, customToken, customUserData, isCustomUser } = useAuth();
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const validTabs = ['dashboard', 'summary', 'stock', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'quotes', 'cloud-health', 'issues', 'wholesale', 'rota'];
+  const validTabs = ['dashboard', 'summary', 'stock', 'stock-hub', 'stock-take', 'inventory', 'efficiency', 'mto', 'deco', 'analyst', 'guide', 'widget', 'kanban', 'intelligence', 'alerts', 'production', 'shop-floor', 'reports', 'operations', 'tag-bundles', 'production-pack', 'revenue', 'autolink', 'fulfill', 'finance', 'sales', 'users', 'manual', 'command', 'briefing', 'daily-tasks', 'priority', 'digest', 'shipped-not-invoiced', 'credit-block', 'unpaid-orders', 'quotes', 'cloud-health', 'issues', 'wholesale', 'rota'];
   // Permissions: Google users = superuser (all tabs), custom users = their allowed_tabs
   const userAllowedTabs: string[] | null = isCustomUser && customUserData ? (customUserData.allowedTabs || null) : null;
   const isTabAllowed = useCallback((tabId: string) => {
@@ -3011,7 +3012,7 @@ const App: React.FC = () => {
                 {/* Grouped dropdowns */}
                 {[
                   { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'production-pack', label: 'Production pack' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
-                  { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
+                  { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock-hub', label: 'Stock' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                   { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                   { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'quotes', label: 'Quotes' }, { id: 'digest', label: 'Email Digest' }] },
                   { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
@@ -3108,7 +3109,7 @@ const App: React.FC = () => {
                     {/* Grouped sections */}
                     {[
                       { group: 'ORDERS', tabs: [{ id: 'priority', label: 'Priority Board' }, { id: 'kanban', label: 'Kanban' }, { id: 'operations', label: 'Ops Centre' }, { id: 'tag-bundles', label: 'Orders by tag' }, { id: 'production-pack', label: 'Production pack' }, { id: 'fulfill', label: 'Fulfillment' }, { id: 'autolink', label: 'Auto Linker' }] },
-                      { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
+                      { group: 'PRODUCTION', tabs: [{ id: 'production', label: 'Production' }, { id: 'shop-floor', label: 'Shop Floor' }, { id: 'deco', label: 'Deco Network' }, { id: 'mto', label: 'Made to Order' }, { id: 'stock-hub', label: 'Stock' }, { id: 'stock', label: 'Stock Manager' }, { id: 'stock-take', label: 'Stock Take' }, { id: 'inventory', label: 'Shopify Inventory' }, { id: 'wholesale', label: 'Wholesale Lookup' }, { id: 'issues', label: 'Issue Log' }] },
                       { group: 'ANALYTICS', tabs: [{ id: 'intelligence', label: 'Intel' }, { id: 'reports', label: 'Reports' }, { id: 'efficiency', label: 'Efficiency' }, { id: 'analyst', label: 'Process Analyst' }] },
                       { group: 'FINANCE', tabs: [{ id: 'revenue', label: 'Revenue' }, { id: 'sales', label: 'Sales Analytics' }, { id: 'shipped-not-invoiced', label: 'Shipped Not Invoiced' }, { id: 'credit-block', label: 'Credit Block List' }, { id: 'unpaid-orders', label: 'Unpaid Orders' }, { id: 'quotes', label: 'Quotes' }, { id: 'digest', label: 'Email Digest' }] },
                       { group: 'TEAM', tabs: [{ id: 'rota', label: 'Rota' }] },
@@ -3409,6 +3410,24 @@ const App: React.FC = () => {
             {activeTab === 'inventory' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Inventory Error"><ShopifyInventory /></ErrorBoundary></Suspense>}
             {activeTab === 'efficiency' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Dashboard Error"><EfficiencyDashboard orders={unifiedOrders} excludedTags={excludedTags} /></ErrorBoundary></Suspense>}
             {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); await persistJobLinks([{ itemId, jobId }]); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
+            {activeTab === 'stock-hub' && (
+              <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
+                <StockDashboard
+                  orders={unifiedOrders}
+                  excludedTags={excludedTags}
+                  shopifyDomain={apiSettings.shopifyDomain}
+                  onBulkScan={handleBulkScan}
+                  onManualLink={handleManualJobLink}
+                  onRefreshJob={async (id) => { await handleRefreshJob(id); }}
+                  onItemJobLink={async (orderNumber, itemId, jobId) => {
+                    setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId }));
+                    await persistJobLinks([{ itemId, jobId }]);
+                    handleRefreshJob(jobId);
+                  }}
+                  selectedFilterTags={selectedGroups}
+                />
+              </Suspense>
+            )}
             {activeTab === 'deco' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
               <DecoDashboard 
