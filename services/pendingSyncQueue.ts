@@ -31,7 +31,8 @@ import {
 } from './syncService';
 
 const STORAGE_KEY = 'stash_pending_sync';
-const MAX_ATTEMPTS = 8; // after this many failures, log loudly and drop
+export const MAX_ATTEMPTS = 8; // retained for health reporting; queued ops are never dropped
+const CLOCK_DRIFT_TOLERANCE_MS = 60_000;
 
 export type PendingMappingUpsert = {
     id: string; // internal queue id
@@ -41,6 +42,8 @@ export type PendingMappingUpsert = {
     deco_id: string;
     updated_at: string; // ISO
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 export type PendingMappingDelete = {
     id: string;
@@ -49,6 +52,8 @@ export type PendingMappingDelete = {
     item_id: string;
     updated_at: string;
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 export type PendingJobLinkUpsert = {
     id: string;
@@ -58,6 +63,8 @@ export type PendingJobLinkUpsert = {
     job_id: string;
     updated_at: string;
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 export type PendingJobLinkDelete = {
     id: string;
@@ -66,6 +73,8 @@ export type PendingJobLinkDelete = {
     order_id: string;
     updated_at: string;
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 export type PendingPatternUpsert = {
     id: string;
@@ -75,6 +84,8 @@ export type PendingPatternUpsert = {
     deco_pattern: string;
     updated_at: string;
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 export type PendingPatternDelete = {
     id: string;
@@ -83,6 +94,8 @@ export type PendingPatternDelete = {
     shopify_pattern: string;
     updated_at: string;
     attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
 };
 
 export type PendingOp =
@@ -228,6 +241,7 @@ export const flushPending = async (): Promise<FlushResult> => {
         for (const op of queue) {
             let success = false;
             let skip = false;
+            let errorMessage: string | undefined;
 
             try {
                 // Look up the current cloud `updated_at` for this row once, so
@@ -237,7 +251,8 @@ export const flushPending = async (): Promise<FlushResult> => {
                 else if (op.kind === 'joblink') cloudTs = await getCloudJobLinkUpdatedAt(op.order_id);
                 else if (op.kind === 'pattern') cloudTs = await getCloudPatternUpdatedAt(op.shopify_pattern);
 
-                const cloudIsNewer = !!cloudTs && new Date(cloudTs).getTime() > new Date(op.updated_at).getTime();
+                const cloudIsNewer = !!cloudTs
+                    && (new Date(cloudTs).getTime() - new Date(op.updated_at).getTime()) > CLOCK_DRIFT_TOLERANCE_MS;
 
                 if (op.op === 'upsert') {
                     if (cloudIsNewer) {
@@ -266,6 +281,7 @@ export const flushPending = async (): Promise<FlushResult> => {
                 }
             } catch (e) {
                 console.error('[pending-sync] flush op errored:', op, e);
+                errorMessage = e instanceof Error ? e.message : String(e);
                 success = false;
             }
 
@@ -279,12 +295,10 @@ export const flushPending = async (): Promise<FlushResult> => {
                 sent++;
                 continue;
             }
+            op.firstAttemptAt ??= new Date().toISOString();
             op.attempts++;
+            op.lastError = errorMessage;
             failed++;
-            if (op.attempts >= MAX_ATTEMPTS) {
-                console.warn(`[pending-sync] dropping op after ${MAX_ATTEMPTS} failed attempts:`, op);
-                continue;
-            }
             remaining.push(op);
         }
 
