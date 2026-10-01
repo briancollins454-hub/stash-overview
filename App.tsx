@@ -42,6 +42,7 @@ import IntegrationGuide from './components/IntegrationGuide';
 import StatsCard from './components/StatsCard';
 import WorkingDaysPlanner from './components/WorkingDaysPlanner';
 import SavedFilters from './components/SavedFilters';
+import SyncHealthBadge from './components/SyncHealthBadge';
 
 // Retry wrapper for lazy imports — auto-reloads on stale chunk failures after deploy
 function lazyRetry<T extends React.ComponentType<any>>(importFn: () => Promise<{ default: T }>) {
@@ -2397,13 +2398,24 @@ const App: React.FC = () => {
    * flush. Every job-link persistence path in the app routes through this so
    * that silent network failures are impossible.
    */
-  const persistJobLinks = async (links: { itemId: string; jobId: string }[]) => {
+  const persistJobLinks = async (
+      links: { itemId: string; jobId: string }[]
+  ): Promise<{ ok: boolean; failedCount: number }> => {
       const now = new Date().toISOString();
       for (const l of links) {
           try { await enqueueJobLinkUpsert(l.itemId, l.jobId, now); }
           catch (e) { console.error('[job link] enqueue failed:', e); }
       }
-      flushPending().catch(e => console.warn('[job link] flush failed:', e));
+      try {
+          const result = await flushPending();
+          return {
+              ok: result.failed === 0 && result.remaining === 0,
+              failedCount: result.failed + result.remaining,
+          };
+      } catch (e) {
+          console.warn('[job link] flush failed:', e);
+          return { ok: false, failedCount: links.length };
+      }
   };
 
   /**
@@ -2954,7 +2966,13 @@ const App: React.FC = () => {
             }}
             onItemJobLink={async (orderNumber, itemId, jobId) => { 
               setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-              await persistJobLinks([{ itemId, jobId }]);
+              const result = await persistJobLinks([{ itemId, jobId }]);
+              if (!result.ok) {
+                setToastMsg({
+                  text: 'Link saved locally but cloud sync failed. Will keep retrying — check the sync badge in the header.',
+                  type: 'error',
+                });
+              }
               handleRefreshJob(jobId); 
             }}
         />
@@ -2997,7 +3015,7 @@ const App: React.FC = () => {
         )}
         
         <nav className="bg-[#2d2d5f] text-white px-3 sm:px-4 md:px-6 h-14 md:h-16 flex items-center justify-between sticky top-0 z-50 shadow-md">
-            <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1></div>
+            <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1><SyncHealthBadge /></div>
             
             {/* Mobile hamburger */}
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>
@@ -3374,7 +3392,13 @@ const App: React.FC = () => {
                 onManualLink={handleManualJobLink} 
                 onItemJobLink={async (orderNumber, itemId, jobId) => { 
                   setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); 
-                  await persistJobLinks([{ itemId, jobId }]);
+                  const result = await persistJobLinks([{ itemId, jobId }]);
+                  if (!result.ok) {
+                    setToastMsg({
+                      text: 'Link saved locally but cloud sync failed. Will keep retrying — check the sync badge in the header.',
+                      type: 'error',
+                    });
+                  }
                   handleRefreshJob(jobId); 
                 }} 
                 onNavigateToJob={(id) => {setSearchTerm(id); setActiveTab('deco');}} 
@@ -3409,7 +3433,7 @@ const App: React.FC = () => {
             )}
             {activeTab === 'inventory' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Inventory Error"><ShopifyInventory /></ErrorBoundary></Suspense>}
             {activeTab === 'efficiency' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><ErrorBoundary fallbackTitle="Dashboard Error"><EfficiencyDashboard orders={unifiedOrders} excludedTags={excludedTags} /></ErrorBoundary></Suspense>}
-            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); await persistJobLinks([{ itemId, jobId }]); handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
+            {activeTab === 'mto' && <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}><MtoDashboard orders={unifiedOrders} excludedTags={excludedTags} shopifyDomain={apiSettings.shopifyDomain} onBulkScan={handleBulkScan} onManualLink={handleManualJobLink} onRefreshJob={async (id) => { await handleRefreshJob(id); }} onItemJobLink={async (orderNumber, itemId, jobId) => { setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId })); const result = await persistJobLinks([{ itemId, jobId }]); if (!result.ok) { setToastMsg({ text: 'Link saved locally but cloud sync failed. Will keep retrying — check the sync badge in the header.', type: 'error' }); } handleRefreshJob(jobId); }} selectedFilterTags={selectedGroups} /></Suspense>}
             {activeTab === 'stock-hub' && (
               <Suspense fallback={<div className="flex justify-center p-20"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>
                 <StockDashboard
@@ -3421,7 +3445,13 @@ const App: React.FC = () => {
                   onRefreshJob={async (id) => { await handleRefreshJob(id); }}
                   onItemJobLink={async (orderNumber, itemId, jobId) => {
                     setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId }));
-                    await persistJobLinks([{ itemId, jobId }]);
+                    const result = await persistJobLinks([{ itemId, jobId }]);
+                    if (!result.ok) {
+                      setToastMsg({
+                        text: 'Link saved locally but cloud sync failed. Will keep retrying — check the sync badge in the header.',
+                        type: 'error',
+                      });
+                    }
                     handleRefreshJob(jobId);
                   }}
                   selectedFilterTags={selectedGroups}
@@ -3850,7 +3880,13 @@ const App: React.FC = () => {
                     itemJobLinks={itemJobLinks}
                     onLink={async (orderNumber, itemId, jobId) => {
                       setItemJobLinks((prev: Record<string, string>) => ({ ...prev, [itemId]: jobId }));
-                      await persistJobLinks([{ itemId, jobId }]);
+                      const result = await persistJobLinks([{ itemId, jobId }]);
+                      if (!result.ok) {
+                        setToastMsg({
+                          text: 'Link saved locally but cloud sync failed. Will keep retrying — check the sync badge in the header.',
+                          type: 'error',
+                        });
+                      }
                       handleRefreshJob(jobId);
                     }}
                     onBulkLink={async (links) => {
@@ -3860,7 +3896,13 @@ const App: React.FC = () => {
                         setLocalItem('stash_item_job_links', next).catch(console.error);
                         return next;
                       });
-                      await persistJobLinks(links);
+                      const result = await persistJobLinks(links);
+                      if (!result.ok) {
+                        setToastMsg({
+                          text: `${links.length} links saved locally, cloud sync pending or failed on ${result.failedCount} of them. Check the sync badge.`,
+                          type: 'error',
+                        });
+                      }
                     }}
                     onNavigateToOrder={(num) => { setSearchTerm(num); setActiveTab('dashboard'); }}
                   />
