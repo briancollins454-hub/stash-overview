@@ -42,6 +42,7 @@ import IntegrationGuide from './components/IntegrationGuide';
 import StatsCard from './components/StatsCard';
 import WorkingDaysPlanner from './components/WorkingDaysPlanner';
 import SavedFilters from './components/SavedFilters';
+import SyncHealthBadge from './components/SyncHealthBadge';
 
 // Retry wrapper for lazy imports — auto-reloads on stale chunk failures after deploy
 function lazyRetry<T extends React.ComponentType<any>>(importFn: () => Promise<{ default: T }>) {
@@ -2997,7 +2998,7 @@ const App: React.FC = () => {
         )}
         
         <nav className="bg-[#2d2d5f] text-white px-3 sm:px-4 md:px-6 h-14 md:h-16 flex items-center justify-between sticky top-0 z-50 shadow-md">
-            <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1></div>
+            <div className="flex items-center gap-2 shrink-0"><div className="bg-white/10 p-1.5 rounded"><LayoutDashboard className="w-5 h-5 text-indigo-300" /></div><h1 className="text-base sm:text-lg md:text-xl font-bold tracking-widest uppercase">STASH <span className="font-light opacity-80 hidden sm:inline">SHOP OVERVIEW</span></h1><SyncHealthBadge /></div>
             
             {/* Mobile hamburger */}
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-indigo-200 hover:text-white"><Menu className="w-5 h-5" /></button>

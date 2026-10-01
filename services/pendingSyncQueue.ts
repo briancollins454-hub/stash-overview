@@ -173,6 +173,52 @@ export const enqueuePatternDelete = (shopify_pattern: string, updated_at = new D
 
 export const getPendingCount = async (): Promise<number> => (await readQueue()).length;
 
+export interface PendingQueueItemForUI {
+    id: string;
+    kind: PendingOp['kind'];
+    keyLabel: string;
+    attempts: number;
+    lastError?: string;
+    firstAttemptAt?: string;
+    ageMs: number;
+    identifiers: Record<string, string>;
+}
+
+export const readPendingQueueForUI = async (): Promise<PendingQueueItemForUI[]> => {
+    const now = Date.now();
+    return (await readQueue()).map(op => {
+        let keyLabel: string;
+        let identifiers: Record<string, string>;
+        if (op.kind === 'mapping') {
+            keyLabel = op.item_id;
+            identifiers = op.op === 'upsert'
+                ? { item_id: op.item_id, deco_id: op.deco_id }
+                : { item_id: op.item_id };
+        } else if (op.kind === 'joblink') {
+            keyLabel = op.order_id;
+            identifiers = op.op === 'upsert'
+                ? { order_id: op.order_id, job_id: op.job_id }
+                : { order_id: op.order_id };
+        } else {
+            keyLabel = op.shopify_pattern;
+            identifiers = op.op === 'upsert'
+                ? { shopify_pattern: op.shopify_pattern, deco_pattern: op.deco_pattern }
+                : { shopify_pattern: op.shopify_pattern };
+        }
+        const firstAttemptMs = op.firstAttemptAt ? new Date(op.firstAttemptAt).getTime() : now;
+        return {
+            id: op.id,
+            kind: op.kind,
+            keyLabel,
+            attempts: op.attempts,
+            lastError: op.lastError,
+            firstAttemptAt: op.firstAttemptAt,
+            ageMs: Math.max(0, now - firstAttemptMs),
+            identifiers,
+        };
+    });
+};
+
 export const clearPendingQueue = async (): Promise<void> => writeQueue([]);
 
 /**
